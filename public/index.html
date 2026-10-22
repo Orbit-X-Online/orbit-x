@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Orbit-X</title>
+  <style>
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1020;color:#e8ecf8;font-family:system-ui,sans-serif;text-align:center}
+    h1{font-size:2.2rem;margin:0 0 .4rem} p{opacity:.75;margin:.2rem 0}
+    #s{display:inline-block;margin-top:1rem;padding:.35rem .8rem;border-radius:99px;background:#1b2440;font-size:.85rem}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Orbit-X</h1>
+    <p>Health insights that explain what's changing and why.</p>
+    <p>Coming soon.</p>
+    <span id="s">checking…</span>
+  </main>
+  <script>
+    fetch('/api/health').then(r => r.json())
+      .then(d => { document.getElementById('s').textContent = d.ok ? 'backend online' : 'backend error'; })
+      .catch(() => { document.getElementById('s').textContent = 'backend offline'; });
+  </script>
+</body>
+</html>
