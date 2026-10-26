@@ -1,5 +1,6 @@
-/* Orbit-X demo data + plain-code insight engine.
-   The patient is FICTIONAL. Nothing here is real health data or medical advice. */
+/* Orbit-X plain-code insight engine.
+   buildDays/analyze power the FICTIONAL demo story. analyzeReal works on a real person's own logs.
+   Nothing here is medical advice. */
 (function (root) {
   'use strict';
   var HIGH_MARGIN = 16; // mmHg above the patient's own usual (baseline) counts as "higher"
@@ -81,6 +82,101 @@
     return out;
   }
 
+
+  /* ------------------------------------------------------------------
+     REAL users: patterns from a person's own logged readings and doses.
+     Plain code only. The AI never decides what the pattern is.
+     ------------------------------------------------------------------ */
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  function addDays(ymd, n) {
+    var p = ymd.split('-'); var t = Date.UTC(+p[0], +p[1] - 1, +p[2]) + n * 86400000;
+    return new Date(t).toISOString().slice(0, 10);
+  }
+  function fmtDate(ymd) { var p = ymd.split('-'); return MONTHS[+p[1] - 1] + ' ' + (+p[2]); }
+  function listDates(arr) { return arr.map(fmtDate).join(', '); }
+  function slotWord(slot) { return slot === 'morning' ? 'morning' : 'evening'; }
+
+  function analyzeReal(readings, doses, slots, today, createdDate) {
+    slots = slots || [];
+    var byDate = {};
+    (readings || []).forEach(function (r) { byDate[r.date] = r; }); // later reading of a day wins
+    var dates = Object.keys(byDate).sort();
+    var n = dates.length;
+    var out = { level: 'learning', n: n, baseline: null, streak: 0, missed: [], evidence: [], win: [], last: null };
+    var gone = {};
+    (doses || []).forEach(function (d) { gone[d.date + '|' + d.slot] = true; });
+
+    // doses not logged on the 7 days before today (today is still in progress)
+    var missed = [];
+    for (var k = 7; k >= 1; k--) {
+      var d = addDays(today, -k);
+      if (d <= (createdDate || '0000-00-00')) continue;
+      slots.forEach(function (sl) { if (!gone[d + '|' + sl]) missed.push({ date: d, slot: sl }); });
+    }
+    out.missed = missed;
+    var missDates = {}; missed.forEach(function (m) { missDates[m.date] = true; });
+    out.win = dates.slice(-7).map(function (dt) { return { date: dt, sys: byDate[dt].sys, dia: byDate[dt].dia, missed: !!missDates[dt] }; });
+    if (n) out.last = byDate[dates[n - 1]];
+    out.lastDate = n ? dates[n - 1] : null;
+
+    if (n < 5) {
+      out.sentence = n === 0
+        ? 'Tell me your blood pressure when you measure it, like 130 over 85. After a few days I will learn what is usual for you.'
+        : 'I am learning what is usual for you. ' + (5 - n) + ' more day' + (5 - n === 1 ? '' : 's') + ' of readings and I can start spotting changes.';
+      out.short = out.sentence; return out;
+    }
+    var base = median(dates.slice(0, 10).map(function (dt) { return byDate[dt].sys; }));
+    out.baseline = base;
+    var gap = Math.round((Date.parse(today + 'T00:00:00Z') - Date.parse(out.lastDate + 'T00:00:00Z')) / 86400000);
+    if (gap > 3) {
+      out.level = 'stale';
+      out.sentence = 'I have not seen a reading for ' + gap + ' days. Shall we log one?';
+      out.short = out.sentence; return out;
+    }
+    var streak = 0;
+    if (out.lastDate >= addDays(today, -3)) {
+      for (var i = n - 1; i >= 0; i--) { if (byDate[dates[i]].sys >= base + HIGH_MARGIN) streak++; else break; }
+    }
+    out.streak = streak;
+    var yest = addDays(today, -1);
+    var missedYest = missed.filter(function (m) { return m.date === yest; });
+
+    if (streak >= 3 && missed.length >= 2) {
+      out.level = 'pattern';
+      out.sentence = 'Your pressure has been higher than your usual for ' + streak + ' days. You also missed ' + missed.length + ' tablets this week.';
+      out.short = 'Your pressure has been higher than your usual for ' + streak + ' days. Want to see why?';
+      out.suggestion = 'Want me to remind you earlier in the evening, with dinner?';
+    } else if (streak >= 3) {
+      out.level = 'watch';
+      out.sentence = 'Your pressure has been higher than your usual for ' + streak + ' days. You may want to share this with your doctor.';
+      out.short = out.sentence;
+    } else if (missedYest.length) {
+      out.level = 'calm';
+      out.sentence = 'You did not log your ' + slotWord(missedYest[0].slot) + ' tablet yesterday. One miss happens. Let us get back on track today.';
+      out.short = out.sentence;
+    } else {
+      out.level = 'ok';
+      out.sentence = 'Your recent readings are close to your usual range. Keep going.';
+      out.short = out.sentence;
+    }
+
+    var hi = [];
+    for (var j = n - 1; j >= 0 && hi.length < Math.min(streak, 4); j--) hi.unshift(dates[j]);
+    hi.forEach(function (dt) { out.evidence.push({ title: fmtDate(dt), text: byDate[dt].sys + '/' + byDate[dt].dia + ' (your usual is about ' + base + ')' }); });
+    ['morning', 'evening'].forEach(function (sl) {
+      var ds = missed.filter(function (m) { return m.slot === sl; }).map(function (m) { return m.date; });
+      if (ds.length) out.evidence.push({ title: listDates(ds), text: slotWord(sl) + ' tablet not logged' });
+    });
+    return out;
+  }
+
+  // Which dose is "now"? Used when someone says "I took my tablet".
+  function slotForNow(slots, hour) {
+    if (!slots || !slots.length) return null;
+    if (slots.length === 1) return slots[0];
+    return hour < 15 ? 'morning' : 'evening';
+  }
+
   function isEmergencyReading(sys, dia) { return sys >= 180 || dia >= 120; }
 
   var EMERGENCY = ['chest pain', 'chest dey pain', 'chest dey hurt', 'pain in my chest', 'pain in chest',
@@ -113,7 +209,8 @@
     return { type: 'chat' };
   }
 
-  var api = { buildDays: buildDays, analyze: analyze, isEmergencyReading: isEmergencyReading,
-    detectEmergency: detectEmergency, parseCommand: parseCommand, HIGH_MARGIN: HIGH_MARGIN };
+
+  var api = { buildDays: buildDays, analyze: analyze, analyzeReal: analyzeReal, slotForNow: slotForNow, addDays: addDays, fmtDate: fmtDate,
+    isEmergencyReading: isEmergencyReading, detectEmergency: detectEmergency, parseCommand: parseCommand, HIGH_MARGIN: HIGH_MARGIN };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.OrbitData = api;
 })(typeof window !== 'undefined' ? window : this);
