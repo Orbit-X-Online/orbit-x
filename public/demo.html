@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orbit-X</title>
+<style>
+:root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#6C7FA8;--cy:#38BDF8;--teal:#5EEAD4;--red:#F87171;--pink:#F9A8A8}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+body{display:flex;justify-content:center}
+.app{width:100%;max-width:440px;min-height:100%;display:flex;flex-direction:column;padding:12px 16px 18px;position:relative;overflow:hidden}
+header{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--mut)}
+header b{color:var(--txt);font-size:16px;letter-spacing:.5px}
+.status{display:flex;align-items:center;gap:6px;color:#7DD3FC}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--teal)}
+.stage{position:relative;height:300px;margin-top:4px}
+#face{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:260px;height:260px}
+.chip{position:absolute;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:7px 10px;font-size:12px;color:#7DD3FC;transition:opacity .4s,transform .4s}
+.chip b{display:block;font-size:15px;color:var(--txt);font-weight:600}
+#c1{left:0;top:18px}#c2{right:0;bottom:22px}#c2 b{color:var(--pink)}
+.hide{opacity:0;transform:scale(.9);pointer-events:none}
+.caption{min-height:70px;text-align:center;font-size:17px;line-height:1.4;padding:4px 8px}
+.caption.proof{cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:5px}
+.hint{text-align:center;font-size:12px;color:var(--mut);min-height:16px}
+.row{display:flex;gap:8px;margin:10px 0}
+.row button,.q{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:10px 6px;font-size:13px;cursor:pointer}
+.inputbar{display:flex;gap:8px;align-items:center;margin-top:auto}
+.inputbar input{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:12px 16px;font-size:15px;outline:none}
+#mic{width:56px;height:56px;border-radius:50%;border:0;background:#2563EB;color:#fff;font-size:22px;cursor:pointer;position:relative;flex:none}
+#mic.on{background:#16A34A}
+#mic.on::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--cy);animation:pr 1.2s ease-out infinite}
+@keyframes pr{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(1.4)}}
+#send{background:none;border:0;color:#7DD3FC;font-size:14px;cursor:pointer;padding:6px}
+.demo{margin:12px 0 4px;padding:8px 10px;border:1px dashed var(--line);border-radius:12px;font-size:12px;color:var(--mut)}
+.demo input{width:100%;accent-color:#38BDF8}
+.demo .l{display:flex;justify-content:space-between;margin-bottom:4px}
+.demo button{margin-top:6px;background:none;border:1px solid var(--line);color:#7DD3FC;border-radius:8px;padding:5px 9px;font-size:12px;cursor:pointer}
+.overlay{position:absolute;inset:0;background:var(--bg);padding:16px;overflow:auto;display:none;z-index:5}
+.overlay.on{display:block}
+.overlay h2{font-size:16px;text-align:center;margin:6px 0 12px;font-weight:500}
+.quote{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:14px;margin-bottom:12px}
+.ev{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-top:8px}
+.ev small{display:block;color:#7DD3FC;font-size:12px}.ev span{font-size:13px}
+.btn{display:block;width:100%;border:0;border-radius:999px;background:#2563EB;color:#fff;font-size:15px;font-weight:500;padding:12px;margin-top:14px;cursor:pointer}
+.btn.ghost{background:none;border:1px solid var(--line);color:var(--txt)}
+#emer{background:#2a0a0a;z-index:8}
+#emer .big{font-size:20px;line-height:1.35;text-align:center;margin:30px 8px 18px}
+.pulse{width:14px;height:14px;border-radius:50%;background:var(--red);margin:28px auto 0;animation:pr 1s ease-out infinite}
+#ring{background:#070B16;z-index:9;text-align:center}
+#ring .who{font-size:24px;font-weight:600;margin-top:60px}
+#ring .sub{color:var(--pink);margin-top:6px}
+#ring .av{width:120px;height:120px;border-radius:50%;margin:34px auto;background:#0C1A33;border:1.5px solid var(--cy);position:relative;display:grid;place-items:center;font-size:44px}
+#ring .av::before,#ring .av::after{content:"";position:absolute;inset:0;border-radius:50%;border:1.5px solid var(--cy);animation:pr 1.8s ease-out infinite}
+#ring .av::after{animation-delay:.9s}
+.cb{display:flex;justify-content:space-around;margin-top:50px}
+.cb button{width:70px;height:70px;border-radius:50%;border:0;color:#fff;font-size:26px;cursor:pointer}
+.cb .no{background:#DC2626}.cb .yes{background:#16A34A}
+.tl{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:12px;font-size:13px;text-align:left}
+.tl div{padding:3px 0}
+.idle{color:var(--mut);text-align:center;margin-top:60px;font-size:14px;line-height:1.6}
+.banner{background:#0b2a1a;border:1px solid #166534;color:#86efac;border-radius:12px;padding:10px 12px;text-align:center;font-size:14px;margin-top:10px;display:none}
+.banner.on{display:block}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<div class="app" id="app"></div>
+<script src="data.js"></script>
+<script>
+(function(){
+'use strict';
+var D = window.OrbitData;
+var params = new URLSearchParams(location.search);
+var ROLE = params.get('role') || 'patient';            // patient | preye | mamaebi
+var app = document.getElementById('app');
+var NAME = { preye: 'Preye', mamaebi: 'Mama Ebi' };
+var DAYS = D.buildDays();
+var state = { day: 24, pending: null, bpLog: {}, medLog: {} };
+var KEY = 'orbitx_alert_v1';
+
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+
+/* ---------- alert store: the Cloudflare Worker holds the one live alert; every phone polls it ---------- */
+var ROOM = (params.get('room') || 'demo').toLowerCase();
+var cur = null, online = true, seenHandled = null;
+function api(action, body){
+  var url = '/api/alert/' + action + '?room=' + encodeURIComponent(ROOM) + '&role=' + encodeURIComponent(ROLE === 'patient' ? '' : ROLE);
+  return fetch(url, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function(r){ return r.json().catch(function(){ return {}; }); })
+    .then(function(j){ online = true; if ('alert' in j) cur = j.alert; return j; })
+    .catch(function(){ online = false; return { ok: false }; });
+}
+function poll(){ return api('state'); }
+function clock(t){ var d = new Date(t); var h = d.getHours(), m = d.getMinutes(); var ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return h + ':' + (m < 10 ? '0' : '') + m + ' ' + ap; }
+
+/* ---------- voice ---------- */
+var voiceOn = true;
+function faceTalk(on){ var f = $('mouth'); if (f) f.classList.toggle('talk', on); var s = $('stat'); if (s) s.textContent = on ? 'Speaking' : (listening ? 'Listening' : 'Ready'); }
+function say(text, cb){
+  setCaption(text);
+  if (!voiceOn || !('speechSynthesis' in window)) { faceTalk(true); setTimeout(function(){ faceTalk(false); cb && cb(); }, Math.min(3500, 600 + text.length * 35)); return; }
+  try {
+    speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(text); u.rate = 0.95; u.pitch = 1;
+    u.onstart = function(){ faceTalk(true); }; u.onend = u.onerror = function(){ faceTalk(false); cb && cb(); };
+    speechSynthesis.speak(u);
+  } catch(e){ faceTalk(false); }
+}
+var rec = null, listening = false;
+function listen(){
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { hint('Voice input is not available here. Type instead.'); $('txt').focus(); return; }
+  if (listening) { try { rec.stop(); } catch(e){} return; }
+  try {
+    rec = new SR(); rec.lang = 'en-NG'; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.onstart = function(){ listening = true; $('mic').classList.add('on'); faceTalk(false); hint('Listening...'); };
+    rec.onend = function(){ listening = false; $('mic').classList.remove('on'); hint(''); faceTalk(false); };
+    rec.onerror = function(){ listening = false; $('mic').classList.remove('on'); hint('I could not hear that. Tap a button or type instead.'); };
+    rec.onresult = function(e){ var t = e.results[0][0].transcript; $('txt').value = t; handle(t); };
+    rec.start();
+  } catch(e){ hint('Mic blocked. Type instead.'); }
+}
+
+/* ---------- UI helpers ---------- */
+var proofOpen = null;
+function setCaption(text, proof){
+  var c = $('cap'); if (!c) return; c.textContent = text;
+  c.classList.toggle('proof', !!proof); proofOpen = proof || null;
+}
+function hint(t){ var h = $('hint'); if (h) h.textContent = t; }
+
+/* ---------- PATIENT ---------- */
+function patientHTML(){
+  return '<header><b>Orbit-X</b><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></header>' +
+  '<div class="stage"><div class="chip" id="c1"><span>Blood pressure</span><b id="c1v"></b></div>' +
+  '<svg id="face" viewBox="0 0 260 260" role="img" aria-label="Orbit, the AI assistant face">' +
+   '<defs><radialGradient id="g" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#38BDF8" stop-opacity=".28"/><stop offset="1" stop-color="#38BDF8" stop-opacity="0"/></radialGradient>' +
+   '<linearGradient id="skin" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#12284D"/><stop offset="1" stop-color="#0A1630"/></linearGradient></defs>' +
+   '<circle cx="130" cy="130" r="128" fill="url(#g)"/>' +
+   '<ellipse cx="130" cy="130" rx="122" ry="34" transform="rotate(-20 130 130)" fill="none" stroke="#38BDF8" stroke-width=".8" stroke-dasharray="3 6" opacity=".6"><animateTransform attributeName="transform" type="rotate" from="-20 130 130" to="340 130 130" dur="40s" repeatCount="indefinite"/></ellipse>' +
+   '<path d="M130 38 C86 38 66 74 66 118 C66 168 92 214 130 222 C168 214 194 168 194 118 C194 74 174 38 130 38Z" fill="url(#skin)" stroke="#38BDF8" stroke-width="1.2"/>' +
+   '<path d="M72 96 Q130 70 188 96" fill="none" stroke="#38BDF8" stroke-width=".6" opacity=".35"/><path d="M76 160 Q130 186 184 160" fill="none" stroke="#38BDF8" stroke-width=".6" opacity=".3"/><path d="M130 44 L130 214" stroke="#38BDF8" stroke-width=".5" opacity=".18"/>' +
+   '<g id="eyes" fill="#7DD3FC"><rect x="96" y="108" width="26" height="6" rx="3"/><rect x="138" y="108" width="26" height="6" rx="3"/></g>' +
+   '<path d="M130 118 L124 150 L131 152" fill="none" stroke="#38BDF8" stroke-width=".9" opacity=".7"/>' +
+   '<g id="mouth" fill="#5EEAD4"><rect class="mb" x="104" y="176" width="6" height="8" rx="3"/><rect class="mb" x="114" y="172" width="6" height="16" rx="3"/><rect class="mb" x="124" y="168" width="6" height="24" rx="3"/><rect class="mb" x="134" y="168" width="6" height="24" rx="3"/><rect class="mb" x="144" y="172" width="6" height="16" rx="3"/><rect class="mb" x="154" y="176" width="6" height="8" rx="3"/></g>' +
+  '</svg><div class="chip" id="c2"><span>Missed doses</span><b id="c2v"></b></div></div>' +
+  '<div class="caption" id="cap"></div><div class="hint" id="hint"></div>' +
+  '<div class="banner" id="ban"></div>' +
+  '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">Medicine</button><button data-q="how was my week">History</button></div>' +
+  '<div class="inputbar"><input id="txt" placeholder="Type to Orbit" autocomplete="off" enterkeyhint="send"><button id="send">Send</button><button id="mic" aria-label="Talk to Orbit">&#127908;</button></div>' +
+  '<div class="demo"><div class="l"><span>Demo day</span><b id="dv"></b></div><input type="range" id="day" min="1" max="30" step="1"><button id="reset">Reset demo</button> <button id="mute">Voice: on</button></div>' +
+  '<div class="overlay" id="evo"></div>' +
+  '<div class="overlay" id="emer"><div class="pulse"></div><div class="big" id="emtxt"></div><div class="tl" id="emtl"></div><div class="banner on" id="emban" style="display:none"></div><button class="btn ghost" id="emclose">Close</button></div>';
+}
+var style = document.createElement('style');
+style.textContent = '#mouth .mb{transform-box:fill-box;transform-origin:center;transform:scaleY(.35)}#mouth.talk .mb{animation:eq .55s ease-in-out infinite alternate}#mouth.talk .mb:nth-child(2){animation-delay:.12s}#mouth.talk .mb:nth-child(3){animation-delay:.24s}#mouth.talk .mb:nth-child(4){animation-delay:.06s}#mouth.talk .mb:nth-child(5){animation-delay:.18s}@keyframes eq{from{transform:scaleY(.3)}to{transform:scaleY(1)}}#eyes{animation:bl 5s infinite}@keyframes bl{0%,94%,100%{transform:scaleY(1)}97%{transform:scaleY(.1)}}#eyes{transform-box:fill-box;transform-origin:center}';
+document.head.appendChild(style);
+
+function refreshCards(){
+  var a = D.analyze(DAYS, state.day), last = a.last;
+  var s = DAYS[state.day - 1];
+  $('c1v').textContent = (state.bpLog[state.day] ? state.bpLog[state.day].sys + '/' + state.bpLog[state.day].dia : s.sys + '/' + s.dia) + (a.level === 'pattern' ? ' up' : '');
+  $('c2v').textContent = a.missedCount + (a.missedCount === 1 ? ' evening' : ' evenings');
+  $('c2').classList.toggle('hide', !a.missedCount);
+  $('dv').textContent = 'Day ' + state.day;
+  $('day').value = state.day;
+}
+function greet(){
+  var a = D.analyze(DAYS, state.day);
+  var line = 'Good morning, Mr. Briggs. ' + a.short;
+  say(line); setCaption(line, a.level === 'pattern' ? 'pattern' : null);
+  if (a.level === 'pattern') hint('Tap the sentence to see the proof');
+  else hint('');
+  refreshCards();
+}
+
+function showEvidence(){
+  var a = D.analyze(DAYS, state.day); var win = DAYS.filter(function(d){ return d.day <= state.day; }).slice(-7);
+  var W = 264, H = 120, minv = Math.min.apply(null, win.map(function(d){return d.sys;})) - 4, maxv = Math.max.apply(null, win.map(function(d){return d.sys;})) + 4;
+  var pts = win.map(function(d, i){ return { x: 8 + i * (W - 16) / Math.max(1, win.length - 1), y: H - 10 - (d.sys - minv) / (maxv - minv) * (H - 28), d: d }; });
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + (H + 34) + '" width="100%" role="img" aria-label="Systolic pressure for the last 7 days, with missed evening doses marked">' +
+    '<line x1="0" y1="' + (H - 6) + '" x2="' + W + '" y2="' + (H - 6) + '" stroke="#25407A"/>' +
+    '<polyline fill="none" stroke="#5EEAD4" stroke-width="2.5" stroke-linejoin="round" points="' + pts.map(function(p){return p.x + ',' + p.y;}).join(' ') + '"/>' +
+    pts.map(function(p){
+      return '<circle cx="' + p.x + '" cy="' + p.y + '" r="4" fill="#5EEAD4"/>' +
+        (!p.d.evening ? '<circle cx="' + p.x + '" cy="' + (H + 4) + '" r="5" fill="#F87171"/>' : '') +
+        '<text x="' + p.x + '" y="' + (H + 26) + '" font-size="11" fill="#6C7FA8" text-anchor="middle">' + p.d.day + '</text>';
+    }).join('') + '</svg>';
+  var rows = a.evidence.map(function(e){ return '<div class="ev"><small>' + esc(e.title) + '</small><span>' + esc(e.text) + '</span></div>'; }).join('');
+  $('evo').innerHTML = '<h2>Why Orbit said this</h2><div class="quote">&ldquo;' + esc(a.sentence) + '&rdquo;</div><div style="font-size:12px;color:#7DD3FC;margin-bottom:4px">Systolic pressure, last 7 days. Red dot = missed evening dose</div>' + svg + rows +
+    (a.suggestion ? '<div class="ev" style="border-color:#2563EB"><small>Reminder offer</small><span>' + esc(a.suggestion) + '</span></div><button class="btn" id="acc">Yes, remind me earlier</button>' : '') +
+    '<button class="btn ghost" id="evb">Back to Orbit</button>';
+  $('evo').classList.add('on');
+  $('evb').onclick = function(){ $('evo').classList.remove('on'); };
+  var acc = $('acc'); if (acc) acc.onclick = function(){ $('evo').classList.remove('on'); say('Done. I will remind you earlier in the evening, with dinner. This is only a reminder, not medical advice. Please talk to your doctor about your pressure.'); };
+}
+
+function startEmergency(sys, dia, why){
+  var msg = 'Mr. Briggs, this sounds dangerous. Call 112 or get to a hospital now. I am alerting Preye.';
+  $('emtxt').textContent = msg; $('emer').classList.add('on'); renderEmTl();
+  api('start', { sys: sys, dia: dia, why: why }).then(renderEmTl);
+  say(msg);
+}
+function renderEmTl(){
+  if (!$('emtl')) return;
+  var a = cur, ban = $('emban');
+  if (!online && !a) { $('emtl').innerHTML = '<div>Reconnecting... Call 112 now.</div>'; return; }
+  if (!a) { $('emtl').innerHTML = '<div>Alerting your caregivers...</div>'; return; }
+  $('emtl').innerHTML = a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('');
+  var t = null;
+  if (a.status === 'handled') t = NAME[a.handledBy] + ' is on it.';
+  else if (a.status === 'answered') t = NAME[a.answeredBy] + ' answered and is checking on you.';
+  else if (a.status === 'unanswered') t = 'No one answered yet. Call 112 now.';
+  ban.style.display = t ? 'block' : 'none'; if (t) ban.textContent = t;
+}
+
+function handle(text){
+  text = String(text || '').trim(); if (!text) return; $('txt').value = '';
+  // Fixed safety rule runs FIRST. The AI never decides emergencies.
+  if (D.detectEmergency(text)) { startEmergency(null, null, text); return; }
+  var cmd = D.parseCommand(text), a = D.analyze(DAYS, state.day);
+  if (state.pending && cmd.type === 'yes') {
+    var p = state.pending; state.pending = null;
+    state.bpLog[state.day] = { sys: p.sys, dia: p.dia }; refreshCards();
+    if (D.isEmergencyReading(p.sys, p.dia)) { startEmergency(p.sys, p.dia, 'High reading'); return; }
+    say('Saved: ' + p.sys + ' over ' + p.dia + '. ' + (p.sys >= a.baseline + D.HIGH_MARGIN ? 'That is higher than your usual. I will keep watching it with you.' : 'That is close to your usual.')); return;
+  }
+  if (state.pending && cmd.type === 'no') { state.pending = null; say('Okay, I did not save it. Please say it again.'); return; }
+  if (cmd.type === 'log_bp') { state.pending = { sys: cmd.sys, dia: cmd.dia }; say('I heard ' + cmd.sys + ' over ' + cmd.dia + '. Is that right?'); return; }
+  if (text.toLowerCase().indexOf('log bp') > -1) { say('Please say or type your reading, like 150 over 95.'); return; }
+  if (cmd.type === 'log_med') { state.medLog[state.day] = true; say('Good. I have marked your tablet as taken.'); return; }
+  if (cmd.type === 'missed_med') { say('Thank you for telling me. Shall I remind you again in 30 minutes?'); return; }
+  if (cmd.type === 'explain') { say(a.sentence); setCaption(a.sentence, a.level === 'pattern' ? 'pattern' : null); if (a.evidence.length) setTimeout(showEvidence, 500); return; }
+  if (cmd.type === 'greet') { greet(); return; }
+  say('I can log your blood pressure, note your medicine, or explain your week. What would you like?');
+}
+
+function initPatient(){
+  app.innerHTML = patientHTML();
+  $('day').oninput = function(){ state.day = +this.value; state.pending = null; refreshCards(); greet(); };
+  $('cap').onclick = function(){ if (proofOpen) showEvidence(); };
+  $('send').onclick = function(){ handle($('txt').value); };
+  $('txt').onkeydown = function(e){ if (e.key === 'Enter') handle($('txt').value); };
+  $('mic').onclick = listen;
+  document.querySelectorAll('.row button').forEach(function(b){ b.onclick = function(){ handle(b.getAttribute('data-q')); }; });
+  $('reset').onclick = function(){ api('reset', {}); state = { day: 24, pending: null, bpLog: {}, medLog: {} }; $('emer').classList.remove('on'); $('evo').classList.remove('on'); refreshCards(); setCaption('Demo reset. Tap Orbit to begin.'); };
+  $('mute').onclick = function(){ voiceOn = !voiceOn; this.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off'); if (!voiceOn && window.speechSynthesis) speechSynthesis.cancel(); };
+  $('emclose').onclick = function(){ $('emer').classList.remove('on'); };
+  refreshCards(); setCaption('Tap the mic or type to talk to Orbit.'); hint('');
+  // first sentence appears without voice (browsers block speech until the first tap)
+  var a0 = D.analyze(DAYS, state.day); setCaption('Good morning, Mr. Briggs. ' + a0.short, a0.level === 'pattern' ? 'pattern' : null);
+  setInterval(function(){
+    poll().then(function(){
+      if (!$('emer').classList.contains('on') && cur && (cur.status === 'ringing' || cur.status === 'answered')) { $('emer').classList.add('on'); $('emtxt').textContent = 'An alert is active. Call 112 if you are in danger.'; }
+      renderEmTl();
+      if (cur && cur.status === 'handled' && seenHandled !== cur.id) { seenHandled = cur.id; say(NAME[cur.handledBy] + ' is on it. Stay calm and stay where you are.'); }
+    });
+  }, 1000);
+}
+
+/* ---------- CAREGIVER ---------- */
+var ringTone = null, armed = false;
+function beep(){
+  try {
+    var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; ringTone = ringTone || new AC();
+    var o = ringTone.createOscillator(), g = ringTone.createGain(); o.type = 'sine'; o.frequency.value = 880;
+    o.connect(g); g.connect(ringTone.destination); g.gain.setValueAtTime(.0001, ringTone.currentTime);
+    g.gain.exponentialRampToValueAtTime(.25, ringTone.currentTime + .05); g.gain.exponentialRampToValueAtTime(.0001, ringTone.currentTime + .5);
+    o.start(); o.stop(ringTone.currentTime + .55);
+  } catch(e){}
+}
+function renderCaregiver(){
+  var a = cur, me = ROLE, el = $('cg');
+  if (!armed) { el.innerHTML = '<div class="idle"><b>' + NAME[me] + '\'s phone</b><br>Tap below once so this phone can ring.<br>Keep this page open and the screen on.</div><button class="btn" id="arm">Arm this phone</button>'; $('arm').onclick = function(){ armed = true; beep(); renderCaregiver(); }; return; }
+  if (!online && !a) { el.innerHTML = '<div class="idle"><b>Reconnecting...</b><br>Check your internet. Keep this page open.</div>'; return; }
+  if (!a) { el.innerHTML = '<div class="idle"><b>' + NAME[me] + '\'s phone</b><br>Armed. Waiting for an Orbit alert...</div>'; return; }
+  var name = 'Papa (Mr. Briggs)';
+  if (a.status === 'handled') { el.innerHTML = '<div class="idle"><b>Handled</b><br>' + esc(NAME[a.handledBy]) + ' is on it.</div>'; return; }
+  if (a.status === 'unanswered') { el.innerHTML = '<div class="idle"><b>Alert not answered</b><br>Call ' + name + ' now.</div>'; return; }
+  if (a.status === 'ringing' && a.target !== me) { el.innerHTML = '<div class="idle"><b>Alert for ' + NAME[a.target] + '</b><br>You will be called if there is no answer.</div>'; return; }
+  if (a.status === 'ringing') {
+    beep(); try { navigator.vibrate && navigator.vibrate([300, 150, 300]); } catch(e){}
+    el.innerHTML = '<div id="ring" class="overlay on" style="position:absolute"><div style="color:#7DD3FC;margin-top:28px">Orbit-X alert</div><div class="who">' + name + '</div><div class="sub">' + (a.sys ? 'Blood pressure dangerously high' : 'Reported emergency symptoms') + '</div><div class="av">&#129504;</div><div style="color:#6C7FA8;font-size:13px">' + (me === 'preye' ? 'No answer in ' + a.secondsLeft + 's? Mama Ebi is called next' : 'Preye did not answer') + '</div><div class="cb"><button class="no" id="decl" aria-label="Decline">&#10005;</button><button class="yes" id="ans" aria-label="Answer">&#10003;</button></div></div>';
+    $('ans').onclick = function(){ api('answer', {}).then(function(j){ if (j.ok) speakBrief(cur); renderCaregiver(); }); };
+    $('decl').onclick = function(){ api('decline', {}).then(renderCaregiver); };
+    return;
+  }
+  if (a.status === 'answered' && a.answeredBy === me) {
+    el.innerHTML = '<div style="text-align:center;margin-top:30px;font-weight:500">Orbit brief</div><div class="quote" style="margin-top:14px;text-align:center">' + (a.sys ? esc(a.sys + '/' + a.dia) + ' now, up from 153/96.' : 'Symptoms: ' + esc(a.why)) + '<br>He has missed 3 evening tablets this week.' + (me === 'preye' ? '<br>Mama Ebi has been alerted.' : '') + '</div><div class="tl">' + a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('') + '</div><button class="btn" id="hd">Mark as handled</button>';
+    $('hd').onclick = function(){ api('handled', {}).then(renderCaregiver); };
+    return;
+  }
+  el.innerHTML = '<div class="idle">Another caregiver is handling this alert.</div>';
+}
+function speakBrief(a){
+  if (!a) return;
+  var t = (a.sys ? 'Your father\'s blood pressure is ' + a.sys + ' over ' + a.dia + '. ' : 'Your father reports emergency symptoms. ') + 'He missed three evening tablets this week. Please call him now.';
+  try { if (voiceOn && window.speechSynthesis) { speechSynthesis.cancel(); speechSynthesis.speak(new SpeechSynthesisUtterance(t)); } } catch(e){}
+}
+function initCaregiver(){
+  app.innerHTML = '<header><b>Orbit-X</b><span>' + NAME[ROLE] + '</span></header><div id="cg" style="position:relative;flex:1"></div>';
+  renderCaregiver(); setInterval(function(){ poll().then(renderCaregiver); }, 1000);
+}
+
+if (ROLE === 'preye' || ROLE === 'mamaebi') initCaregiver(); else initPatient();
+window.__orbit = { handle: handle, state: state };
+})();
+</script>
+</body>
+</html>
