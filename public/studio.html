@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070B16">
+<title>Orbit-X Rule Studio</title>
+<style>
+:root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#6C7FA8;--cy:#38BDF8;--teal:#5EEAD4;--red:#F87171;--amb:#FBBF24}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center}
+.w{width:100%;max-width:560px;padding:16px 16px 50px}
+h1{font-size:20px;margin:4px 0;font-weight:600}h2{font-size:15px;margin:22px 0 8px;font-weight:600;color:#7DD3FC}
+.small{font-size:13px;color:var(--mut);line-height:1.45}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:8px 0}
+.card b{font-size:15px}
+.sev{display:inline-block;font-size:11px;border-radius:999px;padding:2px 8px;margin-left:6px;border:1px solid}
+.sev.emergency{color:var(--red);border-color:var(--red)}.sev.notice{color:var(--amb);border-color:var(--amb)}
+textarea,select{width:100%;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:12px;font-size:15px;font-family:inherit;outline:none}
+textarea{min-height:84px;resize:vertical}
+button{background:#2563EB;border:0;color:#fff;border-radius:999px;padding:11px 18px;font-size:14px;cursor:pointer;margin:8px 8px 0 0}
+button.g{background:none;border:1px solid var(--line);color:#7DD3FC}
+button.r{background:none;border:1px solid #7f2a2a;color:#fca5a5;padding:6px 12px;font-size:12px}
+.chips button{background:var(--card);border:1px solid var(--line);color:var(--txt);font-size:12px;padding:6px 10px;margin:6px 6px 0 0}
+.err{color:var(--red);font-size:13px;min-height:16px;margin-top:6px}
+.ro{border-left:3px solid var(--cy);padding:4px 0 4px 10px;font-size:14px;line-height:1.45;margin:8px 0}
+.row{display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid #16224a}
+.top{display:flex;justify-content:space-between;align-items:center}
+</style>
+</head>
+<body><div class="w" id="app"></div>
+<script>
+(function(){
+var SKEY = 'orbitx.session.v1', sess = null, st = null, draft = null;
+try { sess = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch(e){}
+var app = document.getElementById('app');
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+if (!sess || sess.role !== 'clinician') {
+  app.innerHTML = '<h1>Orbit-X Rule Studio</h1><div class="small" style="margin:10px 0 16px">For doctors and nurses. You need an invite link from your patient. Ask them to open Family in their Orbit-X app and choose "Add your doctor or nurse".</div><a style="color:#38BDF8" href="/">Back to Orbit-X</a>';
+  return;
+}
+function api(method, action, body){
+  return fetch('/api/h/' + sess.pid + '/' + action, { method: method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sess.token }, body: method === 'GET' ? undefined : JSON.stringify(body || {}), cache: 'no-store' })
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ j._status = r.status; return j; }); })
+    .catch(function(){ return { ok: false, _status: 0 }; });
+}
+function when(t){ var d = new Date(t); return d.toLocaleDateString([], {day:'numeric',month:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+var EX = ['Alert me if systolic is above 160 twice in 3 days', 'Monitor for headaches and blurred vision', 'Ring the family if diastolic is above 120', 'Tell me if she reports dizziness and nausea'];
+function view(){
+  var rd = st.readings.slice(-6).reverse(), sy = st.symptoms.slice(-6).reverse();
+  app.innerHTML = '<div class="top"><div><div class="small">ORBIT-X RULE STUDIO</div><h1>' + esc(st.profile.name) + '</h1></div><button class="g" id="so">Sign out</button></div>' +
+    '<div class="small">You are ' + esc(st.me && st.me.name) + '. Write when the patient\'s family or you should be alerted. Orbit-X turns your words into a fixed rule and shows it back in plain English before it runs. The AI never decides an emergency.</div>' +
+    '<h2>New rule</h2><textarea id="tx" maxlength="400" placeholder="Write it like you would tell a nurse..."></textarea><div class="chips">' + EX.map(function(x, i){ return '<button data-ex="' + i + '">' + esc(x) + '</button>'; }).join('') + '</div>' +
+    '<div style="margin-top:10px" class="small">When it matches:</div><select id="sv"><option value="notice">Send a heads-up (does not ring)</option><option value="emergency">Ring the family like a call</option></select>' +
+    '<div class="err" id="er"></div><button id="pv">Preview rule</button>' +
+    '<div id="pr"></div>' +
+    '<h2>Active rules (' + st.rules.length + ')</h2>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="card"><b>' + esc(r.name) + '</b><span class="sev ' + r.severity + '">' + (r.severity === 'emergency' ? 'rings' : 'heads-up') + '</span><div class="ro">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + ' · ' + when(r.createdAt) + '</div><button class="r" data-del="' + esc(r.id) + '">Delete</button></div>'; }).join('') : '<div class="small">No rules yet.</div>') +
+    '<h2>Heads-ups from your rules</h2>' + (st.notices.length ? st.notices.slice().reverse().map(function(n){ return '<div class="card"><b>' + esc(n.ruleName || 'Rule') + '</b><div class="small">' + esc(Array.isArray(n.evidence) ? n.evidence.join('; ') : (n.text || '')) + ' · ' + when(n.t) + '</div></div>'; }).join('') : '<div class="small">Nothing yet.</div>') +
+    '<h2>Latest blood pressure</h2>' + (rd.length ? rd.map(function(r){ return '<div class="row"><span>' + r.sys + '/' + r.dia + '</span><span class="small">' + esc(r.date) + '</span></div>'; }).join('') : '<div class="small">No readings yet.</div>') +
+    '<h2>Symptoms the patient reported</h2>' + (sy.length ? sy.map(function(r){ return '<div class="row"><span>' + esc(r.text) + '</span><span class="small">' + when(r.t) + '</span></div>'; }).join('') : '<div class="small">None yet.</div>') +
+    '<div class="small" style="margin-top:24px">Orbit-X does not diagnose or give medical advice. Rules only decide who gets told, and when.</div>';
+  var tx = document.getElementById('tx'); if (draft) tx.value = draft.text || '';
+  app.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick = function(){ tx.value = EX[+b.getAttribute('data-ex')]; }; });
+  document.getElementById('so').onclick = function(){ try { localStorage.removeItem(SKEY); } catch(e){} location.href = '/'; };
+  app.querySelectorAll('[data-del]').forEach(function(b){ b.onclick = function(){ if (confirm('Delete this rule?')) api('POST', 'ruledel', { id: b.getAttribute('data-del') }).then(function(j){ if (j.ok) { st = j; view(); } }); }; });
+  document.getElementById('pv').onclick = function(){
+    var t = tx.value.trim(), er = document.getElementById('er'); er.textContent = '';
+    if (t.length < 6) { er.textContent = 'Please write a little more.'; return; }
+    var pvb = document.getElementById('pv'); pvb.disabled = true;
+    api('POST', 'draft', { text: t }).then(function(j){
+      pvb.disabled = false;
+      if (!j.ok || !j.draft) { er.textContent = j._status === 422 ? 'I could not turn that into a rule. Try a sentence like: "alert me if systolic is above 160 twice in 3 days" or "monitor for headaches and blurred vision".' : 'Could not preview. Please try again.'; return; }
+      var sev = document.getElementById('sv').value; draft = { text: t, rule: j.draft.rule, sev: sev };
+      var rule = Object.assign({}, j.draft.rule, { severity: sev });
+      document.getElementById('pr').innerHTML = '<div class="card"><div class="small">Read this back. This is exactly what will run:</div><div class="ro" id="rb"></div><div class="small">Made by ' + (j.draft.source === 'spark' ? 'Muse Spark, then checked by code' : 'plain code') + '. Not run until you approve.</div><button id="ap">Approve and activate</button><button class="g" id="cx">Cancel</button></div>';
+      // the read-back is regenerated by the server on save; here we show the draft text with the chosen action
+      var rb = j.draft.readback.replace(/ACTION:.*$/, sev === 'emergency' ? 'ACTION: rings the caregivers like a call and tells the person to call 112.' : 'ACTION: sends a heads-up to the caregivers and the clinician. It does not ring.');
+      document.getElementById('rb').textContent = rb;
+      document.getElementById('cx').onclick = function(){ draft = null; document.getElementById('pr').innerHTML = ''; };
+      document.getElementById('ap').onclick = function(){
+        api('POST', 'rulesave', { rule: rule }).then(function(k){ if (k.ok) { st = k; draft = null; view(); } else { er.textContent = k.error === 'too_many_rules' ? 'The limit is 10 rules. Delete one first.' : 'Could not save that rule.'; } });
+      };
+    });
+  };
+}
+function load(){
+  api('GET', 'state').then(function(j){
+    if (j._status === 401 || j._status === 404) { try { localStorage.removeItem(SKEY); } catch(e){} location.href = '/'; return; }
+    if (j.ok) { st = j; if (!document.getElementById('tx') || !document.activeElement || document.activeElement.id !== 'tx') { if (!draft) view(); } }
+  });
+}
+load(); setInterval(function(){ if (!draft && !(document.activeElement && document.activeElement.id === 'tx')) load(); }, 15000);
+})();
+</script>
+</body>
+</html>
