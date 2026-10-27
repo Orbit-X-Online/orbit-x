@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#070B16">
+<title>Orbit-X proof receipt</title>
+<style>
+:root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#6C7FA8;--cy:#38BDF8;--teal:#5EEAD4;--red:#F87171}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center}
+.w{width:100%;max-width:520px;padding:18px 16px 40px}
+h1{font-size:20px;font-weight:600;margin:6px 0 2px}
+.small{font-size:13px;color:var(--mut);line-height:1.45}
+.badge{margin:16px 0;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--card);font-size:16px}
+.badge.ok{border-color:#14B8A6;color:var(--teal)}
+.badge.bad{border-color:var(--red);color:var(--red)}
+.e{border-left:2px solid var(--line);margin:0 0 0 6px;padding:2px 0 14px 14px;position:relative}
+.e::before{content:"";position:absolute;left:-6px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--cy)}
+.e.x{border-color:var(--red)}.e.x::before{background:var(--red)}
+.e time{display:block;font-size:12px;color:var(--mut)}
+.e code{display:block;font-size:10px;color:#4B5E86;word-break:break-all;margin-top:3px}
+button{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:10px 16px;font-size:14px;cursor:pointer;margin-right:8px}
+a{color:var(--cy)}
+</style>
+</head>
+<body><div class="w" id="app"><div class="small">Loading receipt...</div></div>
+<script>
+(function(){
+var q = new URLSearchParams(location.search), P = q.get('p') || '', S = q.get('s') || '';
+var app = document.getElementById('app');
+function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+async function sha(s){ var d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return Array.from(new Uint8Array(d)).map(function(x){ return x.toString(16).padStart(2,'0'); }).join(''); }
+// Recompute the whole chain from the first line. Any edited word or time changes every hash after it.
+async function verify(r, entries){
+  var prev = await sha('orbit-x|' + r.pid + '|' + r.alertId), bad = -1;
+  for (var i = 0; i < entries.length; i++) {
+    var h = await sha(prev + '|' + entries[i].t + '|' + entries[i].text);
+    if (h !== entries[i].h) { bad = i; break; }
+    prev = h;
+  }
+  if (bad < 0 && r.head && prev !== r.head) bad = entries.length - 1;
+  return bad;
+}
+function clock(t){ var d = new Date(t); return d.toLocaleDateString([], {day:'numeric',month:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function render(r, entries, bad, tampered){
+  var ok = bad < 0;
+  app.innerHTML = '<div class="small">ORBIT-X</div><h1>Proof receipt for ' + esc(r.patient) + '</h1>' +
+    '<div class="small">What happened during one alert, in order. Each line is locked to the line before it with a SHA-256 fingerprint.</div>' +
+    '<div class="badge ' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓ Chain intact. Checked just now in your browser. Nothing was changed.' : '✗ Chain broken at step ' + (bad + 1) + '. This record was altered.') + '</div>' +
+    entries.map(function(e, i){ return '<div class="e' + (bad === i ? ' x' : '') + '"><time>' + clock(e.t) + '</time>' + esc(e.text) + '<code>' + e.h.slice(0, 24) + '...</code></div>'; }).join('') +
+    '<div class="small" style="margin:10px 0 14px">Final fingerprint: <span style="word-break:break-all">' + esc(r.head || '') + '</span></div>' +
+    '<button id="tt">' + (tampered ? 'Restore original' : 'Try to tamper with it') + '</button>' +
+    '<div class="small" style="margin-top:14px">This page does not trust the server\'s word. Your browser recomputes every fingerprint itself. Orbit-X records what its alert chain did. It is not medical advice.</div>';
+  document.getElementById('tt').onclick = function(){
+    if (tampered) return load();
+    var copy = entries.map(function(e){ return { t: e.t, text: e.text, h: e.h }; });
+    var k = Math.min(1, copy.length - 1); copy[k].text = copy[k].text + ' (edited)';
+    verify(r, copy).then(function(b){ render(r, copy, b, true); });
+  };
+}
+function load(){
+  if (!/^[a-z0-9]{8}$/.test(P) || !/^[a-z0-9]{10}$/.test(S)) { app.innerHTML = '<h1>Receipt link not valid</h1>'; return; }
+  fetch('/api/receipt/' + P + '/' + S, { cache: 'no-store' }).then(function(x){ return x.json(); }).then(function(r){
+    if (!r.ok) { app.innerHTML = '<h1>Receipt not found</h1><div class="small">The link may be wrong or the account was deleted.</div>'; return; }
+    verify(r, r.entries).then(function(b){ render(r, r.entries, b, false); });
+  }).catch(function(){ app.innerHTML = '<h1>Could not load</h1><div class="small">Check your connection and reload.</div>'; });
+}
+load();
+})();
+</script>
+</body>
+</html>
