@@ -212,15 +212,16 @@ function codeScreen(kind){
 function doJoin(code, fail){
   api('POST', '/api/join', { code: code }).then(function(j){
     if (!j.ok) { fail(j._status === 0 ? 'No internet connection. Please try again.' : 'That invite code is not valid, or it was already used. Ask for a new one.'); return; }
-    sess = { role: 'caregiver', pid: j.pid, token: j.token, id: j.id, name: j.name, patientName: j.patientName }; saveSession(sess);
+    sess = { role: j.role === 'clinician' ? 'clinician' : 'caregiver', pid: j.pid, token: j.token, id: j.id, name: j.name, patientName: j.patientName }; saveSession(sess);
     try { history.replaceState(null, '', location.pathname); } catch(e){}
+    if (sess.role === 'clinician') { location.href = '/studio.html'; return; }
     caregiverApp();
   });
 }
 function joinLink(code){
   app.innerHTML = '<div class="top"><b>Orbit-X</b></div><div class="stage" style="height:240px">' + faceSvg() + '</div>' +
-  '<div class="center" style="font-size:20px;line-height:1.35;margin:4px 8px">You have been invited to be a caregiver.</div>' +
-  '<div class="center small" style="margin:8px 10px 16px;font-size:14px">If the person you care for has an emergency, this phone will ring like a call. Keep this page open and the screen on.</div>' +
+  '<div class="center" style="font-size:20px;line-height:1.35;margin:4px 8px">You have been invited to help.</div>' +
+  '<div class="center small" style="margin:8px 10px 16px;font-size:14px">If you were invited as a caregiver, this phone will ring like a call when the person needs help. Keep this page open and the screen on. If you were invited as a doctor, you will get the Rule Studio instead.</div>' +
   '<div class="err center" id="er"></div><button class="btn" id="ok">Join</button><div class="center"><button class="link" id="no">Not now</button></div>';
   $('ok').onclick = function(){ $('ok').disabled = true; doJoin(code, function(m){ $('ok').disabled = false; $('er').textContent = m; }); };
   $('no').onclick = function(){ try { history.replaceState(null, '', location.pathname); } catch(e){} boot(true); };
@@ -312,6 +313,8 @@ function renderEmergency(){
   else msg = (st.profile.name + ', this sounds dangerous. Call 112 or get to a hospital now. I am alerting ' + a.targetName + '.');
   $('emtxt').textContent = msg;
   $('emtl').innerHTML = a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('');
+  $('emtl').innerHTML += '<div style="margin-top:8px"><button class="link" id="emrc">Share proof receipt</button></div>';
+  $('emrc').onclick = function(){ hApi('share', {}).then(function(j){ if (j && j.shareId) { var u = location.origin + '/receipt.html?p=' + sess.pid + '&s=' + j.shareId; try { navigator.clipboard.writeText(u).then(function(){ $('emrc').textContent = 'Receipt link copied'; }, function(){ prompt('Copy this link', u); }); } catch(e){ prompt('Copy this link', u); } } }); };
   var ban = $('emban'); ban.style.display = 'none';
   $('emok').style.display = (a.status === 'ringing' || a.status === 'answered' || a.status === 'unanswered') ? '' : 'none';
   if (a.status !== lastSpoken.status || a.id !== lastSpoken.id) { lastSpoken = { id: a.id, status: a.status }; if (a.status !== 'cancelled') say(msg); }
@@ -325,6 +328,7 @@ function startHelp(why, sys, dia){
   });
 }
 
+var SYMP = /\b(head ?ache|migraine|dizz|nause|vomit|blurr?y|vision|swell|swollen|numb|weak(ness)?|faint|fatigue|palpitat|cough|fever|short of breath|pain|ache)\w*/i;
 function handle(text){
   text = String(text || '').trim(); if (!text) return; $('txt').value = '';
   // The safety rule runs FIRST and is fixed code. The AI never decides emergencies.
@@ -337,6 +341,12 @@ function handle(text){
   if (cmd.type === 'log_med') return saveDose();
   if (cmd.type === 'missed_med') { say('Thank you for telling me. Please take it when you can, as your doctor told you. I will not log it until you do.'); return; }
   if (cmd.type === 'explain') return explain();
+  if (SYMP.test(text) && cmd.type !== 'log_bp' && cmd.type !== 'log_med') {
+    hApi('symptom', { text: text.slice(0, 200) }).then(function(j){
+      if (take(j)) { renderEmergency(); say('I wrote that down so your care team can see it. I cannot tell you what it means. If you feel worse, press help.'); }
+      else say('I could not save that. Please try again.');
+    }); return;
+  }
   if (cmd.type === 'greet') { var a = analysis(); say('Hello ' + st.profile.name + '. ' + a.short); return; }
   if (/\b(family|caregiver|add someone)\b/i.test(text)) { showFamily(); return; }
   chat(text);
@@ -398,23 +408,28 @@ function showEvidence(){
 function showFamily(){
   var o = $('fmo');
   var list = st.caregivers.length ? st.caregivers.map(function(c){
-    return '<div class="cg"><b>' + c.order + '. ' + esc(c.name) + '</b><div class="st ' + (c.joined ? 'ok' : '') + '">' + (c.joined ? 'Linked. Will be called' + (c.order === 1 ? ' first' : ' if the one before does not answer') : 'Waiting to join') + '</div><div class="acts"><button data-inv="' + esc(c.id) + '">' + (c.joined ? 'New invite' : 'Show invite') + '</button><button data-rm="' + esc(c.id) + '">Remove</button></div></div>';
+    return '<div class="cg"><b>' + (c.role === 'clinician' ? 'Dr ' : c.order + '. ') + esc(c.name) + '</b><div class="st ' + (c.joined ? 'ok' : '') + '">' + (c.role === 'clinician' ? (c.joined ? 'Doctor. Linked. Writes your alert rules. Does not get rung' : 'Doctor. Waiting to join') : (c.joined ? 'Linked. Will be called' + (c.order === 1 ? ' first' : ' if the one before does not answer') : 'Waiting to join')) + '</div><div class="acts"><button data-inv="' + esc(c.id) + '">' + (c.joined ? 'New invite' : 'Show invite') + '</button><button data-rm="' + esc(c.id) + '">Remove</button></div></div>';
   }).join('') : '<div class="small" style="margin-top:10px">No one yet. Add someone who should be alerted if you need help, like a child or a neighbour.</div>';
   o.innerHTML = '<h2>Family and caregivers</h2><div class="small">When you press help or Orbit sees a dangerous reading, the first person rings like a phone call. If they do not answer in 20 seconds, the next one rings.</div>' + list +
     (st.caregivers.length < 4 ? '<label class="l" for="cn">Add a caregiver</label><input class="field" id="cn" maxlength="40" placeholder="Their name"><div class="err" id="er"></div><button class="btn" id="ad">Add and get invite</button>' : '') +
+    (st.caregivers.filter(function(c){ return c.role === 'clinician'; }).length < 3 ? '<label class="l" for="dn">Add your doctor or nurse</label><div class="small">They write alert rules in plain words, like "tell me if she reports headaches with blurred vision". You see every rule, in plain English, before it runs.</div><input class="field" id="dn" maxlength="40" placeholder="Their name"><button class="btn ghost" id="ad2">Add doctor and get invite</button>' : '') +
     '<button class="btn ghost" id="fb">Close</button>';
   o.classList.add('on'); $('fb').onclick = function(){ o.classList.remove('on'); };
   var ad = $('ad'); if (ad) ad.onclick = function(){
     var n = $('cn').value.trim(); if (!n) { $('er').textContent = 'Please type their name.'; return; }
     ad.disabled = true; hApi('invite', { name: n }).then(function(j){ if (take(j)) showInvite(j.code, n); else { ad.disabled = false; $('er').textContent = 'Could not add. Please try again.'; } });
   };
+  var ad2 = $('ad2'); if (ad2) ad2.onclick = function(){
+    var n = $('dn').value.trim(); if (!n) { $('er').textContent = 'Please type their name.'; return; }
+    ad2.disabled = true; hApi('invite', { name: n, role: 'clinician' }).then(function(j){ if (take(j)) showInvite(j.code, n, true); else { ad2.disabled = false; $('er').textContent = 'Could not add. Please try again.'; } });
+  };
   o.querySelectorAll('[data-inv]').forEach(function(b){ b.onclick = function(){ var id = b.getAttribute('data-inv'); var c = st.caregivers.filter(function(x){ return x.id === id; })[0]; hApi('reinvite', { id: id }).then(function(j){ if (take(j)) showInvite(j.code, c.name); }); }; });
   o.querySelectorAll('[data-rm]').forEach(function(b){ b.onclick = function(){ if (confirm('Remove this person?')) hApi('remove', { id: b.getAttribute('data-rm') }).then(function(j){ if (take(j)) showFamily(); }); }; });
 }
-function showInvite(code, name){
+function showInvite(code, name, doctor){
   var link = location.origin + '/?join=' + code;
   var pretty = code.replace(/(.{4})(?=.)/g, '$1-');
-  var msg = 'Hi ' + name + ', I added you as my caregiver on Orbit-X. If I ever need help, your phone will ring. Tap to join: ' + link;
+  var msg = doctor ? 'Hello ' + name + ', I added you as my clinician on Orbit-X. You can write plain-language alert rules for me. Tap to join: ' + link : 'Hi ' + name + ', I added you as my caregiver on Orbit-X. If I ever need help, your phone will ring. Tap to join: ' + link;
   var o = $('fmo');
   o.innerHTML = '<h2>Invite ' + esc(name) + '</h2><div class="small center">Send this to ' + esc(name) + '. It works once. They open it on their own phone and tap Join.</div><div class="code">' + esc(pretty) + '</div>' +
     '<a class="btn green" id="wa" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(msg) + '">Send on WhatsApp</a><button class="btn" id="cp">Copy invite link</button><button class="btn ghost" id="ib">Done</button>';
@@ -429,9 +444,13 @@ function showSettings(){
     '<label class="l">Medicine times</label><label class="check"><input type="checkbox" id="sm"' + (sl.indexOf('morning') > -1 ? ' checked' : '') + '> Morning</label><label class="check"><input type="checkbox" id="se"' + (sl.indexOf('evening') > -1 ? ' checked' : '') + '> Evening</label>' +
     '<button class="btn" id="sv">Save</button>' +
     '<label class="l">Recovery key</label><div class="small">If you lose this phone, this key restores your account on a new one. Keep it private.</div><button class="btn ghost" id="rk">Show my recovery key</button><div class="code" id="rkv" style="display:none;font-size:13px"></div>' +
+    '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
+    '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>' +
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   $('sv').onclick = function(){ var s = []; if ($('se').checked) s.push('evening'); if ($('sm').checked) s.unshift('morning'); hApi('profile', { name: $('sn').value, slots: s }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
+  $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
+  o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
   $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
   $('so').onclick = function(){ if (confirm('Sign out? You will need your recovery key to come back.')) { clearSession(); sess = null; st = null; welcome(); } };
   $('dl').onclick = function(){ if (confirm('Delete your account and all your data? This cannot be undone.')) hApi('delete').then(function(j){ if (j && j.ok) { clearSession(); sess = null; st = null; welcome('Your account and data were deleted.'); } }); };
@@ -499,6 +518,7 @@ function boot(skipJoin){
   if (join && !skipJoin) { joinLink(join); return; }
   if (sess && sess.role === 'patient') patientApp();
   else if (sess && sess.role === 'caregiver') caregiverApp();
+  else if (sess && sess.role === 'clinician') location.href = '/studio.html';
   else welcome();
 }
 window.__orbit = { handle: handle };
