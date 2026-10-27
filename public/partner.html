@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#070B16">
+<title>Orbit API test app</title>
+<style>
+:root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#6C7FA8;--cy:#38BDF8}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,sans-serif;display:flex;justify-content:center}
+.w{width:100%;max-width:520px;padding:18px 16px 40px}h1{font-size:20px;margin:4px 0}.small{font-size:13px;color:var(--mut);line-height:1.45}
+input{width:100%;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:12px;font-size:14px;margin:8px 0}
+button{background:#2563EB;border:0;color:#fff;border-radius:999px;padding:11px 16px;font-size:14px;margin:6px 6px 0 0;cursor:pointer}
+button.g{background:none;border:1px solid var(--line);color:#7DD3FC}
+pre{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-all;min-height:80px}
+a{color:var(--cy)}
+</style>
+</head>
+<body><div class="w">
+<div class="small">ORBIT API · TEST APP</div><h1>Pretend to be another app</h1>
+<div class="small">This page acts like a smart watch, a clinic system or a fall sensor made by someone else. It only has the patient's API key. Create one in Orbit-X: Settings, then "Create a key". Paste it here.</div>
+<input id="k" placeholder="ox_..." autocomplete="off" autocapitalize="none" spellcheck="false">
+<button id="b1">Send high reading 190/120</button><button id="b2">Send normal reading 125/80</button><button id="b3">Send a fall</button><button id="b4">Send symptom: dizzy and nausea</button><button class="g" id="b5">Check alert status</button>
+<pre id="o">Waiting.</pre>
+<div class="small" id="rc"></div>
+<div class="small" style="margin-top:14px">Every call goes to <code>/api/v1/signals</code> or <code>/api/v1/alert</code> with the header <code>X-Orbit-Key</code>. The same alert chain, rules and proof receipt run as if the patient had done it.</div>
+</div>
+<script>
+function call(method, path, body){
+  var k = document.getElementById('k').value.trim();
+  document.getElementById('o').textContent = 'Sending...';
+  fetch(path, { method: method, headers: { 'Content-Type': 'application/json', 'X-Orbit-Key': k }, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' })
+    .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
+    .then(function(x){ var j = x[1]; document.getElementById('o').textContent = 'HTTP ' + x[0] + '\n' + JSON.stringify({ ok: j.ok, status: j.alert && j.alert.status, why: j.alert && j.alert.why, error: j.error }, null, 1);
+      document.getElementById('rc').innerHTML = j.receipt ? 'Proof receipt: <a target="_blank" href="' + j.receipt + '">open</a>' : ''; })
+    .catch(function(){ document.getElementById('o').textContent = 'No internet.'; });
+}
+var d = new Date().toISOString().slice(0, 10);
+document.getElementById('b1').onclick = function(){ call('POST', '/api/v1/signals', { type: 'reading', sys: 190, dia: 120, date: d }); };
+document.getElementById('b2').onclick = function(){ call('POST', '/api/v1/signals', { type: 'reading', sys: 125, dia: 80, date: d }); };
+document.getElementById('b3').onclick = function(){ call('POST', '/api/v1/signals', { type: 'fall' }); };
+document.getElementById('b4').onclick = function(){ call('POST', '/api/v1/signals', { type: 'symptom', text: 'dizzy and nausea' }); };
+document.getElementById('b5').onclick = function(){ call('GET', '/api/v1/alert'); };
+</script></body></html>
