@@ -27,12 +27,12 @@ header b{color:var(--txt);font-size:16px;letter-spacing:.5px}
 .row{display:flex;gap:8px;margin:10px 0}
 .row button,.q{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:10px 6px;font-size:13px;cursor:pointer}
 .inputbar{display:flex;gap:8px;align-items:center;margin-top:auto}
-.inputbar input{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:12px 16px;font-size:15px;outline:none}
+.inputbar input{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:12px 16px;font-size:15px;outline:none}
 #mic{width:56px;height:56px;border-radius:50%;border:0;background:#2563EB;color:#fff;font-size:22px;cursor:pointer;position:relative;flex:none}
 #mic.on{background:#16A34A}
 #mic.on::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--cy);animation:pr 1.2s ease-out infinite}
 @keyframes pr{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(1.4)}}
-#send{background:none;border:0;color:#7DD3FC;font-size:14px;cursor:pointer;padding:6px}
+#send{flex:none;background:none;border:0;color:#7DD3FC;font-size:14px;cursor:pointer;padding:6px}
 .demo{margin:12px 0 4px;padding:8px 10px;border:1px dashed var(--line);border-radius:12px;font-size:12px;color:var(--mut)}
 .demo input{width:100%;accent-color:#38BDF8}
 .demo .l{display:flex;justify-content:space-between;margin-bottom:4px}
@@ -253,6 +253,7 @@ function patientApp(){
   '<div class="overlay" id="evo"></div><div class="overlay" id="fmo"></div><div class="overlay" id="seo"></div>' +
   '<div class="overlay" id="emer"><div class="pulse"></div><div class="big" id="emtxt"></div><div class="tl" id="emtl"></div><div class="banner on" id="emban" style="display:none"></div><a class="btn red" href="tel:112">Call 112</a><button class="btn ghost" id="emok">I am okay. Cancel the alert</button><button class="btn ghost" id="emclose">Close</button></div>';
   $('send').onclick = function(){ handle($('txt').value); };
+  if (fallOn()) fallStart();
   $('txt').onkeydown = function(e){ if (e.key === 'Enter') handle($('txt').value); };
   $('mic').onclick = function(){ listen(handle); };
   document.querySelectorAll('.row button[data-q]').forEach(function(b){ b.onclick = function(){ handle(b.getAttribute('data-q')); }; });
@@ -302,7 +303,8 @@ function renderEmergency(){
   var a = st && st.alert, o = $('emer'); if (!o) return;
   if (!a) return;
   var live = a.status === 'ringing' || a.status === 'answered' || a.status === 'unanswered';
-  if (live && !o.classList.contains('on') && lastShownAlert !== a.id + a.status) { o.classList.add('on'); }
+  var fresh = st.now && a.startedAt && (st.now - a.startedAt) < 10 * 60000;
+  if (live && fresh && !o.classList.contains('on') && lastShownAlert !== a.id + a.status) { o.classList.add('on'); }
   lastShownAlert = a.id + a.status;
   var msg;
   if (a.status === 'unanswered' && !a.chainNames.length) msg = 'No family member is linked yet. Call 112 now. Then tap Family to add someone.';
@@ -317,6 +319,7 @@ function renderEmergency(){
   $('emrc').onclick = function(){ hApi('share', {}).then(function(j){ if (j && j.shareId) { var u = location.origin + '/receipt.html?p=' + sess.pid + '&s=' + j.shareId; try { navigator.clipboard.writeText(u).then(function(){ $('emrc').textContent = 'Receipt link copied'; }, function(){ prompt('Copy this link', u); }); } catch(e){ prompt('Copy this link', u); } } }); };
   var ban = $('emban'); ban.style.display = 'none';
   $('emok').style.display = (a.status === 'ringing' || a.status === 'answered' || a.status === 'unanswered') ? '' : 'none';
+  if (!fresh && !o.classList.contains('on')) return;
   if (a.status !== lastSpoken.status || a.id !== lastSpoken.id) { lastSpoken = { id: a.id, status: a.status }; if (a.status !== 'cancelled') say(msg); }
 }
 var lastShownAlert = '', lastSpoken = {};
@@ -437,6 +440,48 @@ function showInvite(code, name, doctor){
   $('ib').onclick = showFamily;
 }
 
+/* ---------- fall guard ---------- */
+/* Plain code watches the phone's motion sensor: free fall, then a hard hit, then lying still.
+   Then the phone asks "Are you okay?" for 15 seconds. No answer = the alert chain runs. Page must stay open. */
+var FKEY = 'orbitx.fall.v1', fs = { phase: 'idle', fs: 0, at: 0, lo: 99, hi: 0, sum: 0, n: 0, cool: 0 }, fallTimer = null;
+function fallOn(){ try { return localStorage.getItem(FKEY) === '1'; } catch(e){ return false; } }
+function onMotion(e){
+  var a = e.accelerationIncludingGravity; if (!a || a.x == null) return;
+  var m = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z), n = Date.now();
+  if (n < fs.cool) return;
+  if (fs.phase === 'idle') { if (m < 3) { if (!fs.fs) fs.fs = n; if (n - fs.fs >= 120) { fs.phase = 'free'; fs.at = n; } } else fs.fs = 0; }
+  else if (fs.phase === 'free') { if (n - fs.at > 1500) { fs.phase = 'idle'; fs.fs = 0; } else if (m > 28) { fs.phase = 'hit'; fs.at = n; fs.lo = 99; fs.hi = 0; fs.sum = 0; fs.n = 0; } }
+  else if (fs.phase === 'hit') {
+    if (n - fs.at < 800) return;
+    fs.lo = Math.min(fs.lo, m); fs.hi = Math.max(fs.hi, m); fs.sum += m; fs.n++;
+    if (n - fs.at >= 2800) { var avg = fs.sum / Math.max(1, fs.n); fs.phase = 'idle'; fs.fs = 0; if (fs.hi - fs.lo < 5 && Math.abs(avg - 9.8) < 2.5) askFall(); }
+  }
+}
+function fallStart(){
+  window.addEventListener('devicemotion', onMotion);
+}
+function fallStop(){ window.removeEventListener('devicemotion', onMotion); }
+function askFall(){
+  if (fallTimer || !sess || sess.role !== 'patient') return;
+  fs.cool = Date.now() + 60000;
+  var o = document.getElementById('fallo');
+  if (!o) { o = document.createElement('div'); o.id = 'fallo'; o.className = 'overlay'; o.style.zIndex = 20; app.appendChild(o); }
+  var left = 15; o.classList.add('on');
+  function draw(){ var nm = $('fnum'); if (nm) { nm.textContent = left; return; } o.innerHTML = '<div class="big" style="margin-top:60px;text-align:center;font-size:26px">Did you fall?</div><div class="center" id="fnum" style="font-size:64px;margin:20px 0">' + left + '</div><div class="center small" style="margin-bottom:18px">If you do not answer, I will alert your family.</div><button class="btn" id="fok">I am okay</button><button class="btn ghost" id="fhp" style="color:#fca5a5">I need help</button>'; $('fok').onclick = stopAsk; $('fhp').onclick = function(){ stopAsk(); startHelp('Fall detected. The person asked for help.'); }; }
+  function stopAsk(){ clearInterval(fallTimer); fallTimer = null; o.classList.remove('on'); o.innerHTML = ''; }
+  draw(); say('Did you fall? Tap I am okay, or I will alert your family.');
+  try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch(e){}
+  fallTimer = setInterval(function(){ left--; if (left <= 0) { stopAsk(); startHelp('Fall detected. No reply from ' + st.profile.name + '.'); } else draw(); }, 1000);
+}
+function fallEnable(cb){
+  var DM = window.DeviceMotionEvent;
+  if (!DM) { cb(false, 'This phone or browser has no motion sensor.'); return; }
+  var go = function(){ try { localStorage.setItem(FKEY, '1'); } catch(e){} fallStart(); cb(true); };
+  if (typeof DM.requestPermission === 'function') DM.requestPermission().then(function(r){ if (r === 'granted') go(); else cb(false, 'Motion permission was not allowed.'); }, function(){ cb(false, 'Motion permission was not allowed.'); });
+  else go();
+}
+function fallDisable(){ try { localStorage.removeItem(FKEY); } catch(e){} fallStop(); }
+
 /* settings */
 function showSettings(){
   var o = $('seo'), sl = st.profile.slots;
@@ -444,11 +489,14 @@ function showSettings(){
     '<label class="l">Medicine times</label><label class="check"><input type="checkbox" id="sm"' + (sl.indexOf('morning') > -1 ? ' checked' : '') + '> Morning</label><label class="check"><input type="checkbox" id="se"' + (sl.indexOf('evening') > -1 ? ' checked' : '') + '> Evening</label>' +
     '<button class="btn" id="sv">Save</button>' +
     '<label class="l">Recovery key</label><div class="small">If you lose this phone, this key restores your account on a new one. Keep it private.</div><button class="btn ghost" id="rk">Show my recovery key</button><div class="code" id="rkv" style="display:none;font-size:13px"></div>' +
+    '<label class="l">Fall guard</label><div class="small">If your phone falls and then lies still, Orbit asks "Did you fall?" If you do not answer in 15 seconds, your family is alerted. Works while Orbit-X is open on this phone with the screen on.</div><label class="check"><input type="checkbox" id="fg"' + (fallOn() ? ' checked' : '') + '> Turn on fall guard</label><div class="err" id="fge"></div><button class="btn ghost" id="fgt">Test it now</button>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
     '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>' +
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   $('sv').onclick = function(){ var s = []; if ($('se').checked) s.push('evening'); if ($('sm').checked) s.unshift('morning'); hApi('profile', { name: $('sn').value, slots: s }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
+  $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
+  $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
   $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
   o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
   $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
