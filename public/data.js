@@ -94,7 +94,7 @@
   }
   function fmtDate(ymd) { var p = ymd.split('-'); return MONTHS[+p[1] - 1] + ' ' + (+p[2]); }
   function listDates(arr) { return arr.map(fmtDate).join(', '); }
-  function slotWord(slot) { return slot === 'morning' ? 'morning' : 'evening'; }
+  function slotWord(slot) { return ['morning', 'afternoon', 'evening', 'night'].indexOf(slot) > -1 ? slot : 'evening'; }
 
   function analyzeReal(readings, doses, slots, today, createdDate) {
     slots = slots || [];
@@ -163,7 +163,7 @@
     var hi = [];
     for (var j = n - 1; j >= 0 && hi.length < Math.min(streak, 4); j--) hi.unshift(dates[j]);
     hi.forEach(function (dt) { out.evidence.push({ title: fmtDate(dt), text: byDate[dt].sys + '/' + byDate[dt].dia + ' (your usual is about ' + base + ')' }); });
-    ['morning', 'evening'].forEach(function (sl) {
+    ['morning', 'afternoon', 'evening', 'night'].forEach(function (sl) {
       var ds = missed.filter(function (m) { return m.slot === sl; }).map(function (m) { return m.date; });
       if (ds.length) out.evidence.push({ title: listDates(ds), text: slotWord(sl) + ' tablet not logged' });
     });
@@ -174,7 +174,9 @@
   function slotForNow(slots, hour) {
     if (!slots || !slots.length) return null;
     if (slots.length === 1) return slots[0];
-    return hour < 15 ? 'morning' : 'evening';
+    var centre = { morning: 8, afternoon: 14, evening: 19, night: 22 }, best = slots[0], bd = 99;
+    slots.forEach(function (sl) { var c = centre[sl] == null ? 19 : centre[sl], d = Math.abs(hour - c); d = Math.min(d, 24 - d); if (d < bd) { bd = d; best = sl; } });
+    return best;
   }
 
   function isEmergencyReading(sys, dia) { return sys >= 180 || dia >= 120; }
