@@ -1,0 +1,22 @@
+FICTIONAL TEACHING HOSPITAL (SYNTHETIC) - DISCHARGE SUMMARY
+Patient: Amara Okafor    DOB: 1968-04-21
+Admission date: 2026-09-14
+Discharge date: 2026-09-11
+Document date: 2026-09-15
+
+Diagnoses:
+- Type 2 diabetes mellitus
+- Hypertension
+
+Allergies: Penicillin (rash)
+
+Results during stay:
+HbA1c 7.4 % (2026-09-10)
+Blood pressure at discharge: 148/92 mmHg
+
+Discharge medications:
+- Metformin 500 mg twice daily
+- Lisinopril 10 mg once daily
+- Atorvastatin 20 mg at night
+
+Synthetic document for demonstration. Not a real patient.
