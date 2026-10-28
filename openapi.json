@@ -1,0 +1,1447 @@
+{
+ "openapi": "3.0.3",
+ "info": {
+  "title": "Orbit Connect API",
+  "version": "1.0.0",
+  "description": "Healthcare interoperability API of Orbit-X. Only endpoints that exist in this deployment are listed. All connectors and receiving systems in the sandbox are simulated and use synthetic data. Orbit-X does not provide medical advice.\n\n**Auth:** send `X-Orbit-Key: ox_<id>_<secret>` or `Authorization: Bearer <access_token>` from `/api/v1/oauth/token`.\n**Limits:** 60 requests/minute/key (best-effort per server instance), 256 KB per request, 100 resources per Bundle.\n**Errors:** JSON with `ok:false` and an `error` code; validation failures use an OperationOutcome-style `issue` list."
+ },
+ "servers": [
+  {
+   "url": "/"
+  }
+ ],
+ "components": {
+  "securitySchemes": {
+   "ApiKey": {
+    "type": "apiKey",
+    "in": "header",
+    "name": "X-Orbit-Key"
+   },
+   "Bearer": {
+    "type": "http",
+    "scheme": "bearer"
+   }
+  },
+  "schemas": {
+   "Error": {
+    "type": "object",
+    "properties": {
+     "ok": {
+      "type": "boolean",
+      "example": false
+     },
+     "error": {
+      "type": "string",
+      "example": "insufficient_scope"
+     },
+     "required": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ },
+ "paths": {
+  "/api/v1/oauth/token": {
+   "post": {
+    "tags": [
+     "Authentication"
+    ],
+    "summary": "Exchange an API key for a short-lived access token (OAuth 2.0 client credentials)",
+    "description": "`client_id` is the 8-character Orbit id inside the key (`ox_<id>_<secret>`). `client_secret` is the full API key. Tokens last 900 seconds and can only narrow, never widen, the key's scopes. Revoking the key kills its tokens.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "example": {
+        "grant_type": "client_credentials",
+        "client_id": "ab12cd34",
+        "client_secret": "ox_ab12cd34_<secret>",
+        "scope": "records:read"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Token",
+      "content": {
+       "application/json": {
+        "example": {
+         "access_token": "oxt_ab12cd34_<random>",
+         "token_type": "Bearer",
+         "expires_in": 900,
+         "scope": "records:read"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "unsupported_grant_type or invalid_scope"
+     },
+     "401": {
+      "description": "invalid_client"
+     }
+    }
+   }
+  },
+  "/api/v1/records/validate": {
+   "post": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Validate FHIR resources without importing",
+    "description": "Checks a single FHIR R4 resource or a Bundle against Orbit's supported subset (Patient, Organization, Practitioner, Encounter, Observation, Condition, AllergyIntolerance, MedicationRequest, DiagnosticReport, DocumentReference, Provenance, Consent, AuditEvent). This is a focused structural validator, not full FHIR conformance. Required scope: `records:write`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "dryRun": true,
+         "status": "valid",
+         "results": [
+          {
+           "index": 0,
+           "resourceType": "Observation",
+           "outcome": "valid",
+           "errors": [],
+           "warnings": []
+          }
+         ]
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation failed. Body lists each error with its path.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       },
+       "example": {
+        "resourceType": "Observation",
+        "id": "a1c-0910",
+        "status": "final",
+        "code": {
+         "coding": [
+          {
+           "system": "http://loinc.org",
+           "code": "4548-4",
+           "display": "Hemoglobin A1c"
+          }
+         ]
+        },
+        "subject": {
+         "reference": "Patient/amara-1"
+        },
+        "effectiveDateTime": "2026-09-10",
+        "valueQuantity": {
+         "value": 7.1,
+         "unit": "%",
+         "system": "http://unitsofmeasure.org",
+         "code": "%"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/records": {
+   "post": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Import FHIR records",
+    "description": "Validates, converts to Orbit's canonical facts (LOINC/UCUM normalised), stamps source system and import time, skips exact duplicates (recording the second source as corroboration), and reports newly created conflicts. A `Bundle` of type `transaction` is all-or-nothing. A `Patient` whose name does not match the record owner causes the whole import to be refused. Status 201 = accepted, 207 = partial, 422 = rejected, 409 = patient mismatch. Required scope: `records:write`.",
+    "responses": {
+     "201": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "importId": "im_k3m9x2ab",
+         "status": "accepted",
+         "simulated": true,
+         "counts": {
+          "received": 1,
+          "newFacts": 1,
+          "duplicates": 0,
+          "invalid": 0
+         },
+         "newConflicts": [],
+         "provenance": {
+          "system": "Synthetic EMR",
+          "importedAt": "2026-10-28T09:00:00.000Z",
+          "simulated": true
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "patient_mismatch",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "Payload over 256 KB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "transaction_rejected or validation failed",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       },
+       "example": {
+        "resourceType": "Bundle",
+        "type": "collection",
+        "entry": [
+         {
+          "resource": {
+           "resourceType": "Observation",
+           "id": "a1c-0910",
+           "status": "final",
+           "code": {
+            "coding": [
+             {
+              "system": "http://loinc.org",
+              "code": "4548-4",
+              "display": "Hemoglobin A1c"
+             }
+            ]
+           },
+           "subject": {
+            "reference": "Patient/amara-1"
+           },
+           "effectiveDateTime": "2026-09-10",
+           "valueQuantity": {
+            "value": 7.1,
+            "unit": "%",
+            "system": "http://unitsofmeasure.org",
+            "code": "%"
+           }
+          }
+         }
+        ]
+       }
+      }
+     }
+    }
+   },
+   "get": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "List imported and extracted facts with their sources",
+    "description": "Returns up to 200 facts. Optional `kind` filter: observation, medication, allergy, condition, encounter. Required scope: `records:read`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "count": 1,
+         "records": [
+          {
+           "id": "f_sys_k3m9x2ab_1",
+           "kind": "observation",
+           "name": "HbA1c",
+           "value": 7.1,
+           "unit": "%",
+           "date": "2026-09-10",
+           "source": {
+            "type": "connector",
+            "system": "Synthetic EMR",
+            "simulated": true,
+            "importedAt": "2026-10-28T09:00:00.000Z"
+           },
+           "corroboratedBy": []
+          }
+         ]
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "kind",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ]
+   }
+  },
+  "/api/v1/connectors": {
+   "get": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Connector status",
+    "description": "Health derived from real import results: idle, healthy, degraded or failing. `simulated` is true for synthetic test systems. Required scope: `records:read`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "connectors": [
+          {
+           "name": "Synthetic EMR",
+           "simulated": true,
+           "status": "healthy",
+           "imports": 2,
+           "accepted": 4,
+           "duplicates": 8,
+           "rejected": 0
+          }
+         ]
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ]
+   }
+  },
+  "/api/v1/events": {
+   "post": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Report an emergency event",
+    "description": "Records that an event was accepted. It does not create a handoff and does not contact anyone. Required scope: `events:write`.",
+    "responses": {
+     "202": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "eventId": "ev_k3m9x2abcd",
+         "status": "accepted",
+         "simulated": false
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad_type (allowed: emergency, fall, sos)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       },
+       "example": {
+        "type": "emergency",
+        "reason": "Patient collapsed at home"
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/handoffs": {
+   "post": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Create an emergency information handoff",
+    "description": "Requires the patient's consent (Sharing & Permissions) and an accepted event. Assembles allergies, medicines, diagnoses and recent results the patient allowed, each with source, date, age and freshness, and flags where sources disagree. Also builds a FHIR collection Bundle with Provenance and validates it. The new handoff is **sent** to a simulated sandbox inbox: it is not received or acknowledged. Delivery is simulated. Required scope: `handoff:create`.",
+    "responses": {
+     "201": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "handoffId": "ho_x7k2m9q4ab",
+         "status": "sent",
+         "simulatedDelivery": true,
+         "states": [
+          {
+           "state": "accepted"
+          },
+          {
+           "state": "generated"
+          },
+          {
+           "state": "sent",
+           "simulated": true
+          }
+         ],
+         "contentHash": "<sha256>",
+         "fhirValid": true,
+         "receipt": "/receipt.html?p=ab12cd34&s=<id>"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "consent_required, or key lacks scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "event_not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "handoff_exists",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       },
+       "example": {
+        "eventId": "ev_k3m9x2abcd",
+        "requester": {
+         "name": "Dr Sandbox",
+         "organization": "Simulated Emergency Dept"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/handoffs/{id}": {
+   "get": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Handoff status (no medical content)",
+    "description": "Returns state history and content hash only. Required scope: `handoff:create or handoff:receive`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "handoff": {
+          "id": "ho_x7k2m9q4ab",
+          "status": "sent",
+          "states": []
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "example": "ho_x7k2m9q4ab"
+      }
+     }
+    ]
+   }
+  },
+  "/api/v1/handoffs/{id}/receive": {
+   "post": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Receiving system fetches the summary",
+    "description": "Marks the handoff **received** and returns the summary and FHIR bundle. Idempotent. Required scope: `handoff:receive`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "handoff": {
+          "id": "ho_x7k2m9q4ab",
+          "status": "received",
+          "summary": {
+           "items": [],
+           "flags": [],
+           "notice": "..."
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "example": "ho_x7k2m9q4ab"
+      }
+     }
+    ]
+   }
+  },
+  "/api/v1/handoffs/{id}/acknowledge": {
+   "post": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Receiving system acknowledges",
+    "description": "Only possible after **received**; otherwise 409 `invalid_transition`. Required scope: `handoff:receive`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "handoff": {
+          "status": "acknowledged"
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "409": {
+      "description": "invalid_transition",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       },
+       "example": {
+        "by": "Dr Sandbox"
+       }
+      }
+     }
+    },
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "example": "ho_x7k2m9q4ab"
+      }
+     }
+    ]
+   }
+  },
+  "/api/v1/receipts/{id}/verify": {
+   "get": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Verify a handoff receipt on the server",
+    "description": "Recomputes the hash chain and the content hash from stored data and checks the HMAC signature when `RECEIPT_SECRET` is configured (otherwise reports `unsigned`). Integrity only; says nothing about medical accuracy. Required scope: `handoff:create, handoff:receive or audit:read`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "verification": {
+          "chainIntact": true,
+          "contentMatchesHash": true,
+          "signature": "unsigned",
+          "integrityOk": true,
+          "status": "acknowledged"
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "not_found",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "example": "ho_x7k2m9q4ab"
+      }
+     }
+    ]
+   }
+  },
+  "/api/v1/audit": {
+   "get": {
+    "tags": [
+     "Orbit Connect"
+    ],
+    "summary": "Read the audit log",
+    "description": "Who did what, including denied attempts. Required scope: `audit:read`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "events": [
+          {
+           "t": 1793134322530,
+           "actor": "api:Synthetic EMR",
+           "action": "records.import",
+           "outcome": "ok",
+           "detail": "+4 new, 2 duplicate, 0 invalid"
+          }
+         ]
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ]
+   }
+  },
+  "/api/v1/signals": {
+   "post": {
+    "tags": [
+     "Legacy"
+    ],
+    "summary": "Legacy: send an alert signal (kept for compatibility)",
+    "description": "Types: reading (sys, dia), symptom (text), fall, sos. Starts the family alert chain if the signal is an emergency. Required scope: `events:write`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "alert": {
+          "status": "ringing"
+         },
+         "receipt": "/receipt.html?p=ab12cd34&s=<id>"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object"
+       },
+       "example": {
+        "type": "reading",
+        "sys": 190,
+        "dia": 120
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/alert": {
+   "get": {
+    "tags": [
+     "Legacy"
+    ],
+    "summary": "Legacy: current alert status",
+    "description": " Required scope: `events:read`.",
+    "responses": {
+     "200": {
+      "description": "Success",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "alert": null
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "Missing, invalid or revoked key/token",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "403": {
+      "description": "Key lacks the required scope",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "429": {
+      "description": "Rate limit: 60 requests per minute per key. Retry-After header says when.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "ApiKey": []
+     },
+     {
+      "Bearer": []
+     }
+    ]
+   }
+  },
+  "/api/receipt/{pid}/{shareId}": {
+   "get": {
+    "tags": [
+     "Public"
+    ],
+    "summary": "Public integrity receipt",
+    "description": "Capability URL created by the patient. Returns only step kinds, times, fingerprints and the server verification result. Never medical details.",
+    "parameters": [
+     {
+      "name": "pid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     },
+     {
+      "name": "shareId",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Receipt",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "type": "handoff",
+         "status": "acknowledged",
+         "serverVerified": true,
+         "signature": "unsigned",
+         "entries": [
+          {
+           "t": 1793134322530,
+           "k": "accepted",
+           "label": "Event accepted",
+           "d": "<hash>",
+           "h": "<hash>"
+          }
+         ]
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no_receipt"
+     }
+    }
+   }
+  },
+  "/api/ai/status": {
+   "get": {
+    "tags": [
+     "Public"
+    ],
+    "summary": "Which AI is connected",
+    "description": "Reports mode (live, mock, off), provider and configured model. `?probe=1` also lists model ids the server's key can use.",
+    "responses": {
+     "200": {
+      "description": "Status",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "mode": "live",
+         "provider": "Baseten (Meta Muse Spark Open)",
+         "configuredModel": "auto",
+         "keyPresent": true
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/h/{pid}/apikey": {
+   "post": {
+    "tags": [
+     "Key management (patient session)"
+    ],
+    "summary": "Create an API key",
+    "description": "Authenticated with the patient's session token (`Authorization: Bearer <token>`), not with an API key. The key is returned once; only its hash is stored. Max 5 keys.",
+    "security": [
+     {
+      "Bearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "pid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "example": {
+        "label": "Clinic system",
+        "scopes": [
+         "records:write",
+         "records:read"
+        ],
+        "simulated": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Key",
+      "content": {
+       "application/json": {
+        "example": {
+         "ok": true,
+         "key": "ox_ab12cd34_<secret>",
+         "keyId": "k1793134322530",
+         "scopes": [
+          "records:write",
+          "records:read"
+         ]
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "no_valid_scopes"
+     },
+     "409": {
+      "description": "too_many_keys"
+     }
+    }
+   }
+  },
+  "/api/h/{pid}/apikeydel": {
+   "post": {
+    "tags": [
+     "Key management (patient session)"
+    ],
+    "summary": "Revoke an API key",
+    "description": "Immediate. Access tokens issued from the key stop working too.",
+    "security": [
+     {
+      "Bearer": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "pid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "example": {
+        "id": "k1793134322530"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Revoked"
+     }
+    }
+   }
+  }
+ }
+}
