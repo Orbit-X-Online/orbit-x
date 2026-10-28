@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#070B16">
+<meta name="robots" content="noindex">
+<title>Shared appointment brief</title>
+<link rel="stylesheet" href="/ox.css">
+</head>
+<body><div class="wrap" style="max-width:720px"><div id="app" style="padding-top:16px"><div class="small">Loading...</div></div></div>
+<script>
+(function(){
+var q = new URLSearchParams(location.search), p = q.get('p') || '', s = q.get('s') || '', app = document.getElementById('app');
+function esc(x){ return String(x).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+if (!/^[a-z0-9]{8}$/.test(p)) { app.innerHTML = '<h1>Appointment brief</h1><p>No brief selected. This page opens from a share link made in the app: go to Appointment Brief, tap Generate, then Create share link, and open that link.</p><p><a href="/workspace.html" style="font-weight:600">Open my workspace</a></p>'; return; }
+fetch('/api/brief/' + p + '?s=' + encodeURIComponent(s), { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){
+  if (!j.ok) { app.innerHTML = '<h1>This link has expired or was turned off</h1><p class="small">Ask the patient for a new link.</p>'; return; }
+  app.innerHTML = '<div class="small">SHARED BY THE PATIENT · PREPARED BY ORBIT-X</div><h1 style="margin:6px 0">Appointment brief</h1><div class="banner">The patient chose to share this. It was assembled from their own documents and may contain errors. It is not verified by a clinician and is not medical advice. Link expires ' + new Date(j.exp).toLocaleString() + '.</div><pre style="max-height:none;font-size:13.5px">' + esc(j.text) + '</pre>';
+}).catch(function(){ app.innerHTML = '<h1>Could not load</h1>'; });
+})();
+</script>
+</body>
+</html>
