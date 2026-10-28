@@ -50,12 +50,87 @@ function show(res, body){
 /* ---------- overview ---------- */
 VIEWS.overview = function(){
   var base = location.origin;
-  return '<h1>One trusted layer, two ways in</h1><p>Orbit Connect lets authorised systems send healthcare records in, read source-linked records out, and request a permission-controlled emergency handoff. The records are the same ones the patient sees in the Health Workspace.</p>' +
+  return '<h1>One trusted layer, two ways in</h1>' + easyCard() + '<p>Orbit Connect lets authorised systems send healthcare records in, read source-linked records out, and request a permission-controlled emergency handoff. The records are the same ones the patient sees in the Health Workspace.</p>' +
   '<div class="grid"><div class="stat"><b>' + (S.keys || []).length + '</b><span class="small">API keys</span></div><div class="stat"><b>' + S.imports.filter(function(i){ return !i.dryRun; }).length + '</b><span class="small">imports</span></div><div class="stat"><b>' + S.facts.filter(function(f){ return f.source && f.source.type === 'connector'; }).length + '</b><span class="small">facts imported through connectors</span></div><div class="stat"><b>' + S.handoffs.length + '</b><span class="small">handoffs</span></div></div>' +
   '<div class="banner">Every connector and receiving system in this workspace is <b>simulated</b>. No real hospital, EMR or responder is connected, and Orbit does not contact any.</div>' +
   '<h2>What is implemented</h2><div class="card"><table><tbody>' + [['FHIR R4 ingestion','POST /api/v1/records','Validates a focused subset of R4 (13 resource types), keeps provenance, detects duplicates and conflicts. Not a full conformance validator.'],['Dry-run validation','POST /api/v1/records/validate','Same checks, imports nothing.'],['Source-linked read','GET /api/v1/records','Every fact with its source and import time.'],['Connector status','GET /api/v1/connectors','Health of each connector from real import results.'],['Emergency event','POST /api/v1/events','Accepted only. Creates no handoff by itself.'],['Handoff','POST /api/v1/handoffs','Needs the patient\'s consent. Five separate states.'],['Integrity','GET /api/v1/receipts/{id}/verify','Server recomputes the hash chain and content hash.'],['Tokens','POST /api/v1/oauth/token','OAuth 2.0 client credentials, 15-minute bearer tokens.']].map(function(r){ return '<tr><td><b>' + r[0] + '</b></td><td><code>' + r[1] + '</code></td><td class="small">' + r[2] + '</td></tr>'; }).join('') + '</tbody></table></div>' +
   '<h2>Quick start</h2><pre>curl -X POST ' + esc(base) + '/api/v1/records/validate \\\n  -H "X-Orbit-Key: ox_' + esc(sess.pid) + '_YOURSECRET" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"resourceType":"Observation","status":"final","code":{"text":"HbA1c"},"subject":{"reference":"Patient/1"},"valueQuantity":{"value":7.1,"unit":"%"}}\'</pre>' +
   '<p class="small">Full reference with request and response examples: <a href="/docs.html">API docs</a> · machine-readable: <a href="/openapi.json">openapi.json</a>. Auth, scopes, rate limits (60 requests per minute per key) and payload limits (256 KB) are documented there.</p>';
+};
+
+/* ---------- easy demo: one tap runs the whole story with real API calls ---------- */
+function easyCard(){
+  return '<div class="card" style="border-color:#2563EB"><h2 style="margin-top:0">Easy mode: run the whole demo in one tap</h2><p>Orbit will do every step for you, using real calls to this server: make keys, a pretend hospital sends a record, an emergency app asks for a handoff, a receiver gets it, and the receipt is checked. Nothing real is contacted.</p><button class="btn" id="easygo">Run the demo for me</button><div id="easylog" class="small" style="margin-top:10px"></div></div>';
+}
+BIND.overview = function(){
+  var go = document.getElementById('easygo'); if (!go) return;
+  go.onclick = function(){
+    var log = document.getElementById('easylog'), lines = []; go.disabled = true;
+    function say(t, bad){ lines.push('<div class="' + (bad ? 'err' : '') + '">' + (bad ? '✗ ' : '✓ ') + esc(t) + '</div>'); log.innerHTML = lines.join('') + (bad ? '' : '<span class="spin"></span>'); }
+    function stop(t){ say(t, true); log.innerHTML = lines.join(''); go.disabled = false; }
+    var k = keys(), i = 0, evId2 = null, hoId2 = null;
+    function mk(){
+      if (i >= PRESETS.length) { setKeys(k); say('Created the 3 sandbox keys'); return consent(); }
+      if (i === 0 && k.emr && k.evt && k.rcv) { say('Keys are ready'); return consent(); }
+      var p = PRESETS[i];
+      OX.api('POST', '/api/h/' + sess.pid + '/apikey', { label: p[0], scopes: p[1], simulated: p[2] }).then(function(j){
+        if (!j.ok) { stop(j.error === 'too_many_keys' ? 'You already have 5 keys. Open API Credentials and revoke some, then try again.' : 'Could not create keys (' + j.error + ')'); return; }
+        k[p[3]] = j.key; i++; mk();
+      });
+    }
+    function consent(){
+      OX.w('consent', { emergencyHandoff: true }).then(function(j){
+        if (!j || j.ok === false) { stop('Could not turn on emergency handoff for this patient.'); return; }
+        say('Emergency handoff allowed for this synthetic patient (you can switch it off in Sharing & Permissions)'); importEmr();
+      });
+    }
+    function importEmr(){
+      fetch('/samples/emr-bundle.json').then(function(r){ if (!r.ok) throw 0; return r.json(); }).then(function(b){
+        b.entry.forEach(function(e){ if (e.resource.resourceType === 'Patient') e.resource.name = [{ text: S.patient }]; });
+        return call('emr', 'POST', '/api/v1/records', b);
+      }).then(function(r){
+        if (!r || !(r.status >= 200 && r.status < 300)) { stop('The sample record was not accepted' + (r && r.json && r.json.error ? ' (' + r.json.error + ')' : '') + '. Check that public/samples/emr-bundle.json is on your site.'); return; }
+        say('A pretend hospital sent a record, and Orbit checked it'); event();
+      }).catch(function(){ stop('Could not load the sample record. Check that public/samples/emr-bundle.json is on your site.'); });
+    }
+    function event(){
+      call('evt', 'POST', '/api/v1/events', { type: 'emergency', reason: 'Easy demo: patient collapsed at home' }).then(function(r){
+        if (!r.json.eventId) { stop('The emergency event was refused (' + (r.json.error || r.status) + ')'); return; }
+        evId2 = r.json.eventId; say('An emergency app reported an event (accepted)'); handoff();
+      });
+    }
+    function handoff(){
+      call('evt', 'POST', '/api/v1/handoffs', { eventId: evId2, requester: { name: 'Dr Sandbox', organization: 'Simulated Emergency Dept' } }).then(function(r){
+        if (!r.json.handoffId) { stop('The handoff was refused (' + (r.json.error || r.status) + ')'); return; }
+        hoId2 = r.json.handoffId; say('A permission-controlled summary was made and sent to a simulated inbox'); recv();
+      });
+    }
+    function recv(){
+      call('rcv', 'POST', '/api/v1/handoffs/' + hoId2 + '/receive', {}).then(function(r){
+        if (!r.json.handoff) { stop('The receiving system could not receive it (' + (r.json.error || r.status) + ')'); return; }
+        say('The receiving system received it'); ack();
+      });
+    }
+    function ack(){
+      call('rcv', 'POST', '/api/v1/handoffs/' + hoId2 + '/acknowledge', { by: 'Dr Sandbox' }).then(function(r){
+        if (!r.json.handoff) { stop('Acknowledge failed (' + (r.json.error || r.status) + ')'); return; }
+        say('The receiver acknowledged it'); verify();
+      });
+    }
+    function verify(){
+      call('rcv', 'GET', '/api/v1/receipts/' + hoId2 + '/verify').then(function(r){
+        var v = r.json.verification;
+        if (!v || !v.integrityOk) { stop('The receipt did not verify. Please tell the team.'); return; }
+        say('The receipt was checked and is intact');
+        load(true).then(function(){
+          var h = (S.handoffs || []).filter(function(x){ return x.id === hoId2; })[0];
+          log.innerHTML = lines.join('') + '<div class="banner green" style="margin-top:8px"><b>Done.</b> All five states happened, one after the other. Delivery was simulated.</div>' + (h ? '<p><a class="btn" href="' + esc(h.receipt) + '" target="_blank" rel="noopener">Open the public receipt</a> <a class="btn g" href="/workspace.html#timeline">See the imported record on the timeline</a></p>' : '');
+          go.disabled = false;
+        });
+      });
+    }
+    setKeys(k); mk();
+  };
 };
 
 /* ---------- credentials ---------- */
