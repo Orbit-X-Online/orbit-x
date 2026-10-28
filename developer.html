@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070B16">
+<title>Orbit Connect Developer Workspace</title>
+<link rel="stylesheet" href="/ox.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="hdr">
+    <div><b>Orbit Connect</b> <span class="sub" id="who"></span><div class="sub">Healthcare interoperability API on the same records as the Health Workspace</div></div>
+    <div class="links"><span id="aib"></span><a href="/workspace.html">Health Workspace</a><a href="/docs.html">API docs</a></div>
+  </div>
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <div id="view"><div class="empty"><span class="spin"></span>Loading</div></div>
+</div>
+<script src="/ox.js"></script>
+<script>
+(function(){
+var sess = OX.need('patient'); if (!sess) return;
+var esc = OX.esc, S = null, tab = 'overview', last = null, SK = 'orbitx.sandbox.v1', stepState = null;
+var TABS = [['overview','API Overview'],['creds','API Credentials'],['sandbox','Import & Handoff Sandbox'],['connectors','Connectors & Imports'],['receipts','Proof Receipts'],['logs','Integration Logs']];
+var SCOPE_HELP = { 'records:write':'send FHIR records in', 'records:read':'read imported records', 'events:write':'report emergency events', 'events:read':'read alert status (legacy)', 'handoff:create':'create emergency handoffs', 'handoff:receive':'receive and acknowledge handoffs', 'audit:read':'read the audit log' };
+var PRESETS = [['Synthetic EMR (simulated)', ['records:write','records:read'], true, 'emr'], ['Partner emergency app', ['events:write','handoff:create'], false, 'evt'], ['Receiving system (simulated)', ['handoff:receive'], true, 'rcv']];
+function keys(){ try { return JSON.parse(sessionStorage.getItem(SK) || '{}'); } catch(e){ return {}; } }
+function setKeys(k){ try { sessionStorage.setItem(SK, JSON.stringify(k)); } catch(e){} }
+function load(silent){ return OX.w('wstate', null, 'GET').then(function(j){ if (j._status === 401) { location.href = '/'; return; } S = j; return OX.api('GET', '/api/h/' + sess.pid + '/state').then(function(st){ S.keys = st.apiKeys || []; document.getElementById('who').textContent = '· ' + j.patient; document.getElementById('aib').innerHTML = OX.aiBadge(j.ai); if (silent !== true) render(); }); }); }
+function drawTabs(){ document.getElementById('tabs').innerHTML = TABS.map(function(t){ return '<button class="tab" role="tab" aria-selected="' + (t[0] === tab) + '" data-t="' + t[0] + '">' + t[1] + '</button>'; }).join(''); document.querySelectorAll('.tab').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-t'); render(); }; }); }
+function render(){ drawTabs(); var v = document.getElementById('view'); v.innerHTML = VIEWS[tab](); BIND[tab] && BIND[tab](); }
+var VIEWS = {}, BIND = {};
+
+/* real API call from the browser, with a visible request/response */
+function call(keyName, method, path, body){
+  var k = keys()[keyName]; if (!k) { return Promise.resolve({ status: 0, json: { error: 'no_sandbox_key', message: 'Create the sandbox keys first (API Credentials tab).' }, ms: 0 }); }
+  var t0 = Date.now();
+  return fetch(path, { method: method, headers: { 'Content-Type': 'application/json', 'X-Orbit-Key': k }, body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)) })
+    .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ var out = { status: r.status, json: j, ms: Date.now() - t0, method: method, path: path, key: keyName }; last = out; show(out, body); return out; }); })
+    .catch(function(){ return { status: 0, json: { error: 'offline' }, ms: 0 }; });
+}
+function show(res, body){
+  var el = document.getElementById('rr'); if (!el) return;
+  var names = { emr: 'Synthetic EMR key', evt: 'Partner app key', rcv: 'Receiving system key' };
+  var curl = 'curl -X ' + res.method + ' ' + location.origin + res.path + ' \\\n  -H "X-Orbit-Key: ox_' + sess.pid + '_••••" ' + (body ? '\\\n  -H "Content-Type: application/json" -d \'' + (typeof body === 'string' ? body : JSON.stringify(body)).slice(0, 160) + (JSON.stringify(body).length > 160 ? '…' : '') + '\'' : '');
+  el.innerHTML = '<div class="card"><div class="row" style="justify-content:space-between"><b>' + esc(res.method) + ' ' + esc(res.path) + '</b><span class="chip ' + (res.status >= 200 && res.status < 300 ? 'ok' : 'bad') + '">HTTP ' + res.status + ' · ' + res.ms + ' ms</span></div><div class="small">sent as ' + esc(names[res.key] || res.key) + '</div><pre>' + esc(curl) + '</pre><pre>' + esc(JSON.stringify(res.json, null, 2)) + '</pre></div>';
+  el.scrollIntoView({ block: 'nearest' });
+}
+
+/* ---------- overview ---------- */
+VIEWS.overview = function(){
+  var base = location.origin;
+  return '<h1>One trusted layer, two ways in</h1><p>Orbit Connect lets authorised systems send healthcare records in, read source-linked records out, and request a permission-controlled emergency handoff. The records are the same ones the patient sees in the Health Workspace.</p>' +
+  '<div class="grid"><div class="stat"><b>' + (S.keys || []).length + '</b><span class="small">API keys</span></div><div class="stat"><b>' + S.imports.filter(function(i){ return !i.dryRun; }).length + '</b><span class="small">imports</span></div><div class="stat"><b>' + S.facts.filter(function(f){ return f.source && f.source.type === 'connector'; }).length + '</b><span class="small">facts imported through connectors</span></div><div class="stat"><b>' + S.handoffs.length + '</b><span class="small">handoffs</span></div></div>' +
+  '<div class="banner">Every connector and receiving system in this workspace is <b>simulated</b>. No real hospital, EMR or responder is connected, and Orbit does not contact any.</div>' +
+  '<h2>What is implemented</h2><div class="card"><table><tbody>' + [['FHIR R4 ingestion','POST /api/v1/records','Validates a focused subset of R4 (13 resource types), keeps provenance, detects duplicates and conflicts. Not a full conformance validator.'],['Dry-run validation','POST /api/v1/records/validate','Same checks, imports nothing.'],['Source-linked read','GET /api/v1/records','Every fact with its source and import time.'],['Connector status','GET /api/v1/connectors','Health of each connector from real import results.'],['Emergency event','POST /api/v1/events','Accepted only. Creates no handoff by itself.'],['Handoff','POST /api/v1/handoffs','Needs the patient\'s consent. Five separate states.'],['Integrity','GET /api/v1/receipts/{id}/verify','Server recomputes the hash chain and content hash.'],['Tokens','POST /api/v1/oauth/token','OAuth 2.0 client credentials, 15-minute bearer tokens.']].map(function(r){ return '<tr><td><b>' + r[0] + '</b></td><td><code>' + r[1] + '</code></td><td class="small">' + r[2] + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+  '<h2>Quick start</h2><pre>curl -X POST ' + esc(base) + '/api/v1/records/validate \\\n  -H "X-Orbit-Key: ox_' + esc(sess.pid) + '_YOURSECRET" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"resourceType":"Observation","status":"final","code":{"text":"HbA1c"},"subject":{"reference":"Patient/1"},"valueQuantity":{"value":7.1,"unit":"%"}}\'</pre>' +
+  '<p class="small">Full reference with request and response examples: <a href="/docs.html">API docs</a> · machine-readable: <a href="/openapi.json">openapi.json</a>. Auth, scopes, rate limits (60 requests per minute per key) and payload limits (256 KB) are documented there.</p>';
+};
+
+/* ---------- credentials ---------- */
+VIEWS.creds = function(){
+  var ks = S.keys || [], have = keys();
+  var h = '<h1>API Credentials</h1><p class="small">Keys are created by the patient who owns the record, and grant only the scopes you choose. A key never gives access to another person\'s record.</p>' +
+    '<div class="card"><b>Sandbox shortcut</b><p class="small">Creates three real, least-privilege keys for the simulated EMR, a partner emergency app, and a receiving system. They are kept only in this browser tab so you can run the demo with real API calls.</p><button class="btn" id="mk3">' + (have.emr ? 'Recreate sandbox keys' : 'Create sandbox keys') + '</button><span id="mkmsg" class="small"></span></div>' +
+    '<h2>Your keys</h2>' + (ks.length ? ks.map(function(k){ return '<div class="card"><div class="row" style="justify-content:space-between"><b>' + esc(k.label) + '</b><span>' + (k.simulated ? '<span class="chip sim">simulated</span>' : '') + '<button class="btn r s" data-rev="' + esc(k.id) + '">Revoke</button></span></div><div>' + k.scopes.map(function(s){ return '<span class="chip doc" title="' + esc(SCOPE_HELP[s] || '') + '">' + esc(s) + '</span>'; }).join('') + '</div><div class="small">Created ' + OX.ago(k.createdAt) + ' · last used ' + (k.lastUsedAt ? OX.ago(k.lastUsedAt) : 'never') + '</div></div>'; }).join('') : '<div class="card flat small">No keys yet.</div>') +
+    '<h2>Create a key</h2><div class="card"><label class="l" for="kl">Name</label><input id="kl" maxlength="30" placeholder="e.g. Clinic system">' + Object.keys(SCOPE_HELP).map(function(s){ return '<label class="tgl"><input type="checkbox" data-sc="' + s + '"><span><code>' + s + '</code> <span class="small">' + SCOPE_HELP[s] + '</span></span></label>'; }).join('') + '<label class="tgl"><input type="checkbox" id="ksim"><span>Mark as a simulated system (labels everything it sends)</span></label><div class="err" id="ker"></div><button class="btn" id="kmk">Create key</button><div id="knew"></div></div>' +
+    '<h2>Exchange a key for an OAuth 2.0 token</h2><div class="card"><p class="small">Client credentials grant. Short-lived tokens avoid sending a permanent key on every request.</p><label class="l" for="ts">Paste an API key as client_secret</label><input id="ts" placeholder="ox_..." autocomplete="off"><label class="l" for="tsc">Scopes (optional, space separated, must be a subset)</label><input id="tsc" placeholder="records:read"><button class="btn g" id="tgo">Get token</button><pre id="tout" style="display:none"></pre></div>';
+  return h;
+};
+BIND.creds = function(){
+  document.getElementById('mk3').onclick = function(){
+    var b = this, m = document.getElementById('mkmsg'), k = keys(), i = 0; b.disabled = true;
+    function next(){
+      if (i >= PRESETS.length) { setKeys(k); load(); return; }
+      var p = PRESETS[i]; m.innerHTML = '<span class="spin"></span>' + esc(p[0]);
+      OX.api('POST', '/api/h/' + sess.pid + '/apikey', { label: p[0], scopes: p[1], simulated: p[2] }).then(function(j){
+        if (!j.ok) { m.innerHTML = '<span class="err">' + (j.error === 'too_many_keys' ? 'You have 5 keys already. Revoke some first.' : 'Could not create (' + esc(j.error) + ')') + '</span>'; b.disabled = false; return; }
+        k[p[3]] = j.key; i++; next();
+      });
+    }
+    next();
+  };
+  document.querySelectorAll('[data-rev]').forEach(function(b){ b.onclick = function(){ if (confirm('Revoke this key? Anything using it stops working immediately.')) OX.api('POST', '/api/h/' + sess.pid + '/apikeydel', { id: b.getAttribute('data-rev') }).then(load); }; });
+  document.getElementById('kmk').onclick = function(){
+    var sc = []; document.querySelectorAll('[data-sc]').forEach(function(c){ if (c.checked) sc.push(c.getAttribute('data-sc')); });
+    var er = document.getElementById('ker'); er.textContent = ''; if (!sc.length) { er.textContent = 'Choose at least one scope.'; return; }
+    OX.api('POST', '/api/h/' + sess.pid + '/apikey', { label: document.getElementById('kl').value || 'My app', scopes: sc, simulated: document.getElementById('ksim').checked }).then(function(j){
+      if (!j.ok) { er.textContent = j.error === 'too_many_keys' ? 'You have 5 keys already. Revoke one first.' : 'Could not create the key.'; return; }
+      document.getElementById('knew').innerHTML = '<div class="banner green">Copy this key now. It is shown once and only a hash is stored.</div><pre>' + esc(j.key) + '</pre><button class="btn g s" id="kcp">Copy</button>'; document.getElementById('kcp').onclick = function(){ OX.copy(j.key, this); }; load2();
+    });
+  };
+  document.getElementById('tgo').onclick = function(){
+    var out = document.getElementById('tout'); out.style.display = 'block'; out.textContent = '...';
+    var body = { grant_type: 'client_credentials', client_id: sess.pid, client_secret: document.getElementById('ts').value.trim() }; var sc = document.getElementById('tsc').value.trim(); if (sc) body.scope = sc;
+    fetch('/api/v1/oauth/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function(r){ return r.json().then(function(j){ out.textContent = 'HTTP ' + r.status + '\n' + JSON.stringify(j, null, 2); }); });
+  };
+};
+function load2(){ OX.api('GET', '/api/h/' + sess.pid + '/state').then(function(st){ S.keys = st.apiKeys || []; }); }
+
+/* ---------- sandbox ---------- */
+function stepper(states){
+  var order = ['accepted','generated','sent','received','acknowledged'], done = {}; (states || []).forEach(function(s){ done[s.state] = s; });
+  return '<div class="steps">' + order.map(function(s){ var d = done[s]; return '<div class="st ' + (d ? 'on' : 'next') + '">' + s + (s === 'sent' ? '<br><span class="small">simulated delivery</span>' : '') + (d ? '<br><span class="small">' + new Date(d.t).toLocaleTimeString() + '</span>' : '') + '</div>'; }).join('') + '</div>';
+}
+VIEWS.sandbox = function(){
+  var have = keys();
+  var h = '<h1>Import &amp; Handoff Sandbox</h1><div class="banner">Everything here is a <b>real API call</b> to this server using the sandbox keys. The EMR and the receiving system are <b>simulated</b>: no real hospital is contacted.</div>';
+  if (!have.emr) return h + '<div class="card"><p>First create the sandbox keys.</p><button class="btn" id="goc">Go to API Credentials</button></div>';
+  h += '<h2>1 · A simulated EMR sends a FHIR record</h2><div class="card"><p class="small">Edit the JSON if you like. The sample belongs to the synthetic patient Amara Okafor; the Patient name must match the record owner or Orbit refuses it.</p><textarea id="fb" style="min-height:200px"></textarea><div class="row"><button class="btn g" id="fval">Validate only (dry run)</button><button class="btn" id="fsend">Send to Orbit as the EMR</button><button class="btn g" id="fbad">Send an invalid record</button><button class="btn g" id="fname">Use my name in the Patient</button></div></div>';
+  h += '<h2>2 · An emergency application reports an event</h2><div class="card"><p class="small">The event is only <b>accepted</b>. Nothing is shared until a handoff is created, and a handoff needs your consent.</p><div class="row"><input id="evr" maxlength="160" placeholder="Reason (optional), e.g. Patient collapsed at home" style="flex:1;min-width:200px"><button class="btn" id="evsend">Send emergency event</button></div><div id="evout"></div></div>';
+  h += '<h2>3 · Handoff and its separate states</h2><div class="card"><div class="row"><button class="btn" id="hocreate">Create handoff</button><button class="btn g" id="horecv">Receiving system: receive</button><button class="btn g" id="hoack">Receiving system: acknowledge</button></div><div id="hostate">' + stepper(stepState && stepState.states) + '</div><div id="hotext" class="small"></div></div>';
+  h += '<h2>4 · Verify the receipt</h2><div class="card"><div class="row"><button class="btn g" id="hover">Verify on the server</button><span id="hoverl"></span></div><p class="small">Integrity only: it shows the record was not changed after Orbit wrote it. It cannot prove the medical information is accurate.</p></div><div id="rr"></div>';
+  return h;
+};
+var evId = null, hoId = null;
+BIND.sandbox = function(){
+  var goc = document.getElementById('goc'); if (goc) { goc.onclick = function(){ tab = 'creds'; render(); }; return; }
+  var fb = document.getElementById('fb');
+  fetch('/samples/emr-bundle.json').then(function(r){ return r.text(); }).then(function(t){ fb.value = t.trim(); });
+  function refresh(){ load(true); }
+  document.getElementById('fval').onclick = function(){ call('emr', 'POST', '/api/v1/records/validate', fb.value); };
+  document.getElementById('fsend').onclick = function(){ call('emr', 'POST', '/api/v1/records', fb.value).then(refresh); };
+  document.getElementById('fbad').onclick = function(){ call('emr', 'POST', '/api/v1/records', { resourceType: 'Observation', status: 'finished', subject: {} }); };
+  document.getElementById('fname').onclick = function(){ try { var b = JSON.parse(fb.value); b.entry.forEach(function(e){ if (e.resource.resourceType === 'Patient') e.resource.name = [{ text: S.patient }]; }); fb.value = JSON.stringify(b, null, 2); } catch(e){ alert('The JSON is not valid.'); } };
+  document.getElementById('evsend').onclick = function(){ call('evt', 'POST', '/api/v1/events', { type: 'emergency', reason: document.getElementById('evr').value }).then(function(r){ if (r.json.eventId) { evId = r.json.eventId; stepState = { states: [{ state: 'accepted', t: Date.now() }] }; document.getElementById('hostate').innerHTML = stepper(stepState.states); document.getElementById('evout').innerHTML = '<div class="small ok">Event ' + esc(evId) + ' accepted. No handoff exists yet.</div>'; } }); };
+  document.getElementById('hocreate').onclick = function(){
+    if (!evId) { document.getElementById('hotext').innerHTML = '<span class="err">Send an emergency event first.</span>'; return; }
+    call('evt', 'POST', '/api/v1/handoffs', { eventId: evId, requester: { name: 'Dr Sandbox', organization: 'Simulated Emergency Dept' } }).then(function(r){
+      if (r.json.handoffId) { hoId = r.json.handoffId; stepState = { states: r.json.states }; document.getElementById('hostate').innerHTML = stepper(stepState.states); document.getElementById('hotext').innerHTML = 'Status is <b>sent</b> to the simulated inbox. It has not been received or acknowledged.'; refresh(); }
+      else if (r.json.error === 'consent_required') document.getElementById('hotext').innerHTML = '<span class="err">Refused: you have not allowed emergency handoff.</span> Turn it on in <a href="/workspace.html#sharing">Sharing &amp; Permissions</a>, then try again. This refusal is the system working as designed.';
+      else if (r.json.error === 'handoff_exists') { hoId = r.json.handoffId; document.getElementById('hotext').textContent = 'A handoff already exists for this event.'; }
+    });
+  };
+  function stateOf(r){ if (r.json.handoff) { stepState = { states: r.json.handoff.states }; document.getElementById('hostate').innerHTML = stepper(stepState.states); refresh(); } else if (r.json.error === 'invalid_transition') document.getElementById('hotext').innerHTML = '<span class="err">' + esc(r.json.message) + '</span>'; }
+  document.getElementById('horecv').onclick = function(){ if (!hoId) { document.getElementById('hotext').innerHTML = '<span class="err">Create a handoff first.</span>'; return; } call('rcv', 'POST', '/api/v1/handoffs/' + hoId + '/receive', {}).then(stateOf); };
+  document.getElementById('hoack').onclick = function(){ if (!hoId) { document.getElementById('hotext').innerHTML = '<span class="err">Create a handoff first.</span>'; return; } call('rcv', 'POST', '/api/v1/handoffs/' + hoId + '/acknowledge', { by: 'Dr Sandbox' }).then(stateOf); };
+  document.getElementById('hover').onclick = function(){ if (!hoId) { document.getElementById('hoverl').innerHTML = '<span class="err">Create a handoff first.</span>'; return; } call('rcv', 'GET', '/api/v1/receipts/' + hoId + '/verify').then(function(r){ var v = r.json.verification; if (v) document.getElementById('hoverl').innerHTML = '<span class="chip ' + (v.integrityOk ? 'ok' : 'bad') + '">' + (v.integrityOk ? 'integrity verified' : 'INTEGRITY FAILED') + '</span><span class="chip info">signature: ' + esc(v.signature) + '</span>'; }); };
+};
+
+/* ---------- connectors & imports ---------- */
+VIEWS.connectors = function(){
+  return '<h1>Connectors &amp; Imports</h1><div id="cn"><span class="spin"></span></div><h2>Data imports</h2>' + (S.imports.length ? '<div class="card" style="padding:4px 8px;overflow:auto"><table><thead><tr><th>When</th><th>System</th><th>Result</th><th>Detail</th></tr></thead><tbody>' + S.imports.map(function(i){ return '<tr><td class="small">' + OX.ago(i.t) + '</td><td>' + esc(i.system) + (i.simulated ? ' <span class="chip sim">simulated</span>' : '') + (i.dryRun ? ' <span class="chip info">dry run</span>' : '') + '</td><td><span class="chip ' + (i.status === 'accepted' || i.status === 'valid' ? 'ok' : i.status === 'partial' ? 'warn' : 'bad') + '">' + esc(i.status) + '</span></td><td class="small">' + (i.dryRun ? i.received + ' checked' : i.accepted + ' new · ' + i.duplicates + ' duplicate · ' + i.rejected + ' invalid') + (i.newConflicts && i.newConflicts.length ? '<br>' + i.newConflicts.length + ' new conflict(s): ' + esc(i.newConflicts.map(function(c){ return c.title; }).join('; ').slice(0, 160)) : '') + (i.errors && i.errors.length ? '<br><span class="err">' + esc(i.errors[0]) + '</span>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="card flat small">No imports yet. Use the sandbox to send one.</div>') + '<div class="small">Imported facts appear in the patient\'s <a href="/workspace.html#timeline">timeline</a> with their source.</div>';
+};
+BIND.connectors = function(){
+  var k = keys().emr, box = document.getElementById('cn');
+  if (!k) { box.innerHTML = '<div class="card flat small">Create the sandbox keys to see live connector status.</div>'; return; }
+  fetch('/api/v1/connectors', { headers: { 'X-Orbit-Key': k } }).then(function(r){ return r.json(); }).then(function(j){
+    box.innerHTML = j.connectors && j.connectors.length ? j.connectors.map(function(c){ return '<div class="card"><b>' + esc(c.name) + '</b> ' + (c.simulated ? '<span class="chip sim">simulated</span>' : '') + '<span class="chip ' + (c.status === 'healthy' ? 'ok' : c.status === 'idle' ? 'info' : c.status === 'degraded' ? 'warn' : 'bad') + '">' + esc(c.status) + '</span><div class="small">' + c.imports + ' imports · ' + c.accepted + ' new facts · ' + c.duplicates + ' duplicates · ' + c.rejected + ' invalid' + (c.lastImportAt ? ' · last ' + OX.ago(c.lastImportAt) : '') + '</div>' + (c.lastError ? '<div class="small err">Last error: ' + esc(c.lastError) + '</div>' : '') + '</div>'; }).join('') : '<div class="card flat small">No connector has been used yet.</div>';
+  });
+};
+
+/* ---------- receipts ---------- */
+VIEWS.receipts = function(){
+  return '<h1>Proof Receipts</h1><div class="banner green"><b>Integrity, not truth.</b> A valid receipt shows the record was not changed after Orbit wrote it. It does not prove the medical information was accurate or that an event really happened. Public receipt pages show timing and fingerprints only, never medical details.</div>' +
+    (S.handoffs.length ? S.handoffs.map(function(x){ return '<div class="card"><b>' + esc(x.id) + '</b> <span class="chip sim">simulated delivery</span>' + stepper(x.states) + '<div class="small">content hash ' + esc((x.contentHash || '').slice(0, 24)) + '… · FHIR bundle ' + (x.fhirValid ? '<span class="ok">valid against the supported subset</span>' : '<span class="err">invalid</span>') + '</div><a href="' + esc(x.receipt) + '" target="_blank" rel="noopener">Open public receipt</a></div>'; }).join('') : '<div class="card flat small">No handoffs yet. Run the sandbox flow first.</div>') +
+    '<div class="card flat small">Signing: ' + (S.signed ? 'receipts are HMAC-signed.' : 'receipts are hash-chained. To also sign them, set a <code>RECEIPT_SECRET</code> secret on the server; until then the receipt says "unsigned".') + '</div>';
+};
+BIND.receipts = function(){};
+
+/* ---------- logs ---------- */
+VIEWS.logs = function(){ return '<h1>Integration Logs</h1><p class="small">Every API call that reads or changes your record is listed: who, what, and whether it was allowed. Denied attempts are logged too.</p><div id="lg"><span class="spin"></span></div>'; };
+BIND.logs = function(){ OX.w('auditlog', null, 'GET').then(function(j){ var el = document.getElementById('lg'); el.innerHTML = j.events && j.events.length ? '<div class="card" style="padding:4px 8px;overflow:auto"><table><tbody>' + j.events.map(function(e){ return '<tr><td class="small">' + OX.ago(e.t) + '</td><td>' + esc(e.actor) + '</td><td>' + esc(e.action) + '</td><td><span class="chip ' + (e.outcome === 'ok' ? 'ok' : 'bad') + '">' + esc(e.outcome) + '</span></td><td class="small">' + esc(e.detail) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="card flat small">No activity yet.</div>'; }); };
+
+var h0 = (location.hash || '').slice(1); if (TABS.some(function(t){ return t[0] === h0; })) tab = h0;
+drawTabs(); load();
+})();
+</script>
+</body>
+</html>
