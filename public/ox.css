@@ -57,3 +57,7 @@ mark{background:#fde04755;color:#fff;border-radius:3px;padding:0 2px}
 .empty{text-align:center;color:var(--mut);padding:26px 10px}
 .kv{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:13px}.kv span:nth-child(odd){color:var(--mut)}
 svg text{font-family:inherit}
+.vface{display:flex;align-items:center;gap:12px;margin:8px 0 12px}
+#vmouth{transform-box:fill-box;transform-origin:center}
+#vmouth.talk{animation:vtalk .28s infinite alternate}
+@keyframes vtalk{from{transform:scaleY(1)}to{transform:scaleY(4.5)}}
