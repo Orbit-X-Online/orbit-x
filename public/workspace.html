@@ -103,13 +103,22 @@ function onboardingCard(){
     '<div class="banner">Synthetic data only. Please do not upload real medical records to this public demo.</div>' +
     '<button class="btn" id="loadsamples">Load the 3 synthetic documents</button><span id="loadmsg" class="small"></span></div>';
 }
+function easySteps(){
+  var d1 = S.docs.length > 0, d2 = askLog.length > 0;
+  function row(n, done, t, btn){ return '<div class="row" style="flex-wrap:nowrap;align-items:center;margin:6px 0"><span class="chip ' + (done ? 'ok' : 'info') + '" style="min-width:26px;text-align:center">' + (done ? '&#10003;' : n) + '</span><span style="flex:1">' + t + '</span>' + (btn || '') + '</div>'; }
+  return '<div class="card"><b>3 easy steps</b>' +
+    row(1, d1, 'Add the documents', d1 ? '' : '<button class="btn s" id="es1">Do it</button>') +
+    row(2, false, 'See what changed', d1 ? '<button class="btn g s" data-go="compare">Open</button>' : '') +
+    row(3, d2, 'Ask a question, then tap Read aloud', d1 ? '<button class="btn g s" data-go="ask">Open</button>' : '') +
+    '<div class="small"><a href="/guide.html">Need help? Read the 1-minute guide</a></div></div>';
+}
 VIEWS = {};
 var BIND = {};
 VIEWS.overview = function(){
-  if (!S.docs.length) return '<h1>Welcome, ' + esc(S.patient.split(' ')[0]) + '</h1>' + onboardingCard() + '<div class="card flat"><b>Or add your own text</b><p class="small">Go to Documents to paste or upload a text document. Orbit extracts only what is written and drops anything it cannot find in the text.</p></div>';
+  if (!S.docs.length) return '<h1>Welcome, ' + esc(S.patient.split(' ')[0]) + '</h1>' + easySteps() + onboardingCard() + '<div class="card flat"><b>Or add your own text</b><p class="small">Go to Documents to paste or upload a text document. Orbit extracts only what is written and drops anything it cannot find in the text.</p></div>';
   var open = S.conflicts.filter(function(c){ return c.type !== 'medication_difference' && !c.decision; }), notable = S.comparisons.filter(function(c){ return c.magnitude !== 'unchanged'; });
   var ins = notable.slice().sort(function(a, b){ return Math.abs(b.pct || 0) - Math.abs(a.pct || 0); }).slice(0, 4);
-  var h = '<h1>Overview</h1><div class="grid"><div class="stat"><b>' + S.docs.length + '</b><span class="small">sources (documents and imports)</span></div><div class="stat"><b>' + S.facts.length + '</b><span class="small">facts, each tied to its source</span></div><div class="stat"><b>' + S.comparisons.length + '</b><span class="small">comparisons calculated</span></div><div class="stat"><b style="color:' + (open.length ? 'var(--amb)' : 'var(--grn)') + '">' + open.length + '</b><span class="small">open conflicts to confirm</span></div></div>';
+  var h = '<h1>Overview</h1>' + easySteps() + '<div class="grid"><div class="stat"><b>' + S.docs.length + '</b><span class="small">sources (documents and imports)</span></div><div class="stat"><b>' + S.facts.length + '</b><span class="small">facts, each tied to its source</span></div><div class="stat"><b>' + S.comparisons.length + '</b><span class="small">comparisons calculated</span></div><div class="stat"><b style="color:' + (open.length ? 'var(--amb)' : 'var(--grn)') + '">' + open.length + '</b><span class="small">open conflicts to confirm</span></div></div>';
   h += '<h2>What stands out</h2>';
   if (!ins.length && !open.length) h += '<div class="card flat small">Nothing notable yet. Add a second report to compare.</div>';
   ins.forEach(function(c){ h += '<div class="card" data-open="' + esc(c.id) + '" style="cursor:pointer"><b>' + esc(c.label) + '</b> <span class="chip ' + (c.magnitude === 'notable' ? 'warn' : 'info') + '">' + esc(c.magnitude) + ' change</span><div>' + fmt(c.fromValue) + ' → ' + fmt(c.toValue) + ' ' + esc(c.unit) + (c.pct !== null ? ' (' + (c.pct > 0 ? '+' : '') + c.pct + '%)' : '') + ' <span class="small">' + esc(c.fromDate) + ' → ' + esc(c.toDate) + '</span></div><div class="small">Tap to open the evidence</div></div>'; });
@@ -120,6 +129,8 @@ VIEWS.overview = function(){
 };
 BIND.overview = function(){
   var ls = document.getElementById('loadsamples'); if (ls) ls.onclick = loadSamples;
+  var e1 = document.getElementById('es1'); if (e1) e1.onclick = function(){ var b = document.getElementById('loadsamples'); if (b) b.click(); };
+  document.querySelectorAll('[data-go]').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-go'); render(); }; });
   document.querySelectorAll('[data-open]').forEach(function(el){ el.onclick = function(){ evidence(el.getAttribute('data-open')); }; });
   document.querySelectorAll('[data-q]').forEach(function(b){ b.onclick = function(){ tab = 'ask'; render(); runAsk(QUESTIONS[+b.getAttribute('data-q')]); }; });
 };
