@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#070B16">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <title>Orbit-X</title>
 <style>
 :root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#6C7FA8;--cy:#38BDF8;--teal:#5EEAD4;--red:#F87171;--pink:#F9A8A8}
@@ -161,28 +164,32 @@ function listen(onText){
 
 /* ---------- welcome / sign-up / join / restore ---------- */
 function stopTimer(){ if (timer) { clearTimeout(timer); timer = null; } }
+function tzNow(){ return -new Date().getTimezoneOffset(); }
 function welcome(msg){
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">Not a doctor. Emergency: 112</span></div>' +
-  '<div class="stage" style="height:250px;margin-bottom:10px">' + faceSvg() + '</div>' +
-  '<div class="center" style="font-size:20px;line-height:1.35;margin:4px 8px 6px">Hello. I am Orbit.</div>' +
-  '<div class="center small" style="margin:0 10px 14px;font-size:14px">Orbit-X turns scattered health records into trusted intelligence you can understand and trace, and into connected information that authorised systems can exchange. Every statement is linked to its source. I never give medical advice.</div>' +
+  '<div class="stage" style="height:210px;margin-bottom:6px">' + faceSvg() + '</div>' +
+  '<div class="center" style="font-size:20px;line-height:1.35;margin:2px 8px 4px">Hello. I am Orbit.</div>' +
+  '<div class="center small" style="margin:0 10px 12px;font-size:14px">I help you keep track of your blood pressure and tablets, and I make sure your family knows if you need help. I never give medical advice.</div>' +
   (msg ? '<div class="err center">' + esc(msg) + '</div>' : '') +
-  '<button class="btn" id="syn">Try it with a synthetic patient</button>' +
-  '<button class="btn ghost" id="go">Create my own workspace</button>' +
-  '<button class="btn ghost" id="cgv">I am a caregiver with an invite</button>' +
-  '<div class="center" style="margin-top:12px"><a class="btn ghost" href="/guide.html" style="display:block;text-decoration:none;text-align:center">How to use Orbit-X (1 minute, with pictures of the steps)</a></div>' +
-  '<div class="center" style="margin-top:8px"><button class="link" id="rst">Restore my account</button> <button class="link" id="dm">See a demo story</button> <a class="link" href="/docs.html" style="text-decoration:none">API docs</a></div>';
-  $('syn').onclick = function(){ $('syn').disabled = true; api('POST', '/api/create', { name: 'Amara Okafor', slots: [], today: todayStr() }).then(function(j){ if (!j.ok) { $('syn').disabled = false; return; } sess = { role: 'patient', pid: j.pid, token: j.token, name: 'Amara Okafor', synthetic: true }; saveSession(sess); location.href = '/workspace.html?sample=1'; }); };
-  $('go').onclick = onboard; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = function(){ codeScreen('restore'); };
+  '<div class="small" style="margin:4px 2px 0">Who are you?</div>' +
+  '<button class="btn" id="go">I want to look after my own health</button>' +
+  '<button class="btn ghost" id="cgv">I am a family member or caregiver (I have an invite)</button>' +
+  '<button class="btn ghost" id="pro">I am a doctor, clinic or organisation</button>' +
+  '<div class="demo" style="margin-top:16px"><b style="color:#7DD3FC">Just want to look around? (demo, not the real app)</b><div class="small" style="margin-top:4px">Nothing here is saved or sent to anyone. It uses pretend people.</div><button class="btn ghost" id="dm" style="margin-top:8px">Watch the 1-minute demo story</button><button class="btn ghost" id="syn" style="margin-top:8px">Try it with a pretend patient (sandbox)</button></div>' +
+  '<div class="center" style="margin-top:12px"><a class="link" href="/guide.html" style="text-decoration:none">How Orbit-X works, in simple words</a> <button class="link" id="rst">Restore my account</button></div>' +
+  '<div class="small center" style="margin-top:10px">Built with Muse Spark Open. Orbit-X is not a medical device.</div>';
+  $('syn').onclick = function(){ $('syn').disabled = true; api('POST', '/api/create', { name: 'Amara Okafor', slots: [], today: todayStr(), accountType: 'provider', org: 'Sandbox' }).then(function(j){ if (!j.ok) { $('syn').disabled = false; return; } sess = { role: 'patient', pid: j.pid, token: j.token, name: 'Amara Okafor', synthetic: true, accountType: 'provider' }; saveSession(sess); location.href = '/workspace.html?sample=1'; }); };
+  $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = function(){ codeScreen('restore'); };
   $('dm').onclick = function(){ location.href = 'demo.html'; };
 }
 function onboard(){
   app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><h2 style="font-weight:500;font-size:20px;margin:18px 0 0">Let us set you up</h2>' +
   '<label class="l" for="nm">What should I call you?</label><input class="field" id="nm" maxlength="40" autocomplete="given-name" placeholder="Your name">' +
+  '<label class="l" for="ph">Your phone number (optional)</label><input class="field" id="ph" type="tel" maxlength="20" autocomplete="tel" placeholder="+234 801 234 5678"><div class="small" style="margin-top:4px">So your family can call you straight from an alert.</div>' +
   '<label class="l">When do you take regular medicine?</label>' +
   '<label class="check"><input type="checkbox" id="sm"> Morning</label><label class="check"><input type="checkbox" id="sa"> Afternoon</label><label class="check"><input type="checkbox" id="se"> Evening</label><label class="check"><input type="checkbox" id="sg"> Night</label>' +
-  '<div class="small" style="margin-top:6px">Leave all empty if you do not take regular medicine. You can change this later.</div>' +
+  '<div class="small" style="margin-top:6px">Leave all empty if you do not take regular medicine. I will remind you at these times. You can change this later.</div>' +
   '<div class="small" style="margin-top:14px">Your readings stay private to you and the family members you invite. Orbit-X is not a doctor and does not give medical advice. If you feel very unwell, call 112.</div>' +
   '<div class="err" id="er"></div><button class="btn" id="st">Start</button>';
   $('bk').onclick = function(){ welcome(); };
@@ -190,9 +197,25 @@ function onboard(){
     var name = $('nm').value.trim(); if (!name) { $('er').textContent = 'Please tell me your name.'; return; }
     var slots = []; if ($('sm').checked) slots.push('morning'); if ($('sa').checked) slots.push('afternoon'); if ($('se').checked) slots.push('evening'); if ($('sg').checked) slots.push('night');
     $('st').disabled = true; $('er').textContent = '';
-    api('POST', '/api/create', { name: name, slots: slots, today: todayStr() }).then(function(j){
+    api('POST', '/api/create', { name: name, slots: slots, phone: $('ph').value, today: todayStr(), tz: tzNow(), accountType: 'individual' }).then(function(j){
       if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
-      sess = { role: 'patient', pid: j.pid, token: j.token, firstRun: true }; saveSession(sess); patientApp();
+      sess = { role: 'patient', pid: j.pid, token: j.token, firstRun: true, accountType: 'individual' }; saveSession(sess); location.href = '/?guardian=1';
+    });
+  };
+}
+function onboardPro(){
+  app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><h2 style="font-weight:500;font-size:20px;margin:18px 0 0">Doctor, clinic or organisation</h2>' +
+  '<div class="small" style="margin-top:6px">This gives you the Developer area: API keys, record import and emergency handoff. It is separate from the personal app. Use synthetic (pretend) data only while Orbit-X is a hackathon project.</div>' +
+  '<label class="l" for="nm">Your name</label><input class="field" id="nm" maxlength="40" autocomplete="name" placeholder="Dr Ade">' +
+  '<label class="l" for="og">Clinic or organisation</label><input class="field" id="og" maxlength="60" placeholder="City Clinic">' +
+  '<div class="err" id="er"></div><button class="btn" id="st">Create organisation account</button><div class="center"><a class="link" href="/docs.html" style="text-decoration:none">Read the API docs first</a></div>';
+  $('bk').onclick = function(){ welcome(); };
+  $('st').onclick = function(){
+    var name = $('nm').value.trim(), og = $('og').value.trim(); if (!name || !og) { $('er').textContent = 'Please fill in both boxes.'; return; }
+    $('st').disabled = true; $('er').textContent = '';
+    api('POST', '/api/create', { name: name, org: og, slots: [], today: todayStr(), tz: tzNow(), accountType: 'provider' }).then(function(j){
+      if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
+      sess = { role: 'patient', pid: j.pid, token: j.token, name: name, accountType: 'provider' }; saveSession(sess); location.href = '/developer.html';
     });
   };
 }
@@ -215,7 +238,7 @@ function codeScreen(kind){
 }
 function doJoin(code, fail){
   api('POST', '/api/join', { code: code }).then(function(j){
-    if (!j.ok) { fail(j._status === 0 ? 'No internet connection. Please try again.' : 'That invite code is not valid, or it was already used. Ask for a new one.'); return; }
+    if (!j.ok) { fail(j._status === 0 ? 'No internet connection. Please try again.' : 'That invite code is not valid, or it was already used on another phone. Ask the person to open Family and tap New invite.'); return; }
     sess = { role: j.role === 'clinician' ? 'clinician' : 'caregiver', pid: j.pid, token: j.token, id: j.id, name: j.name, patientName: j.patientName }; saveSession(sess);
     try { history.replaceState(null, '', location.pathname); } catch(e){}
     if (sess.role === 'clinician') { location.href = '/studio.html'; return; }
@@ -245,9 +268,9 @@ function dosesLine(a){ return a.missed.length ? a.missed.length + ' tablet' + (a
 /* ---------- PATIENT ---------- */
 var pending = null, chatLog = [];
 function patientApp(){
-  if (!params.get('guardian')) { location.replace('/workspace.html'); return; }
+  if (!params.get('guardian')) { location.replace(sess && sess.accountType === 'provider' ? '/developer.html' : '/workspace.html'); return; }
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><a href="/workspace.html" style="color:#7DD3FC;font-size:13px;text-decoration:none">Health Workspace</a><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
+  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><a href="/workspace.html" style="color:#7DD3FC;font-size:13px;text-decoration:none">My records</a><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
   '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
   '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div>' +
   '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">I took my tablet</button><button data-q="how was my week">History</button></div>' +
@@ -256,7 +279,7 @@ function patientApp(){
   '<button class="sos" id="sos">I need help now</button>' +
   '<div class="small center" style="margin-top:10px">Orbit-X is not a doctor and does not give medical advice. In an emergency call 112.</div>' +
   '<div class="overlay" id="evo"></div><div class="overlay" id="fmo"></div><div class="overlay" id="seo"></div>' +
-  '<div class="overlay" id="emer"><div class="pulse"></div><div class="big" id="emtxt"></div><div class="tl" id="emtl"></div><div class="banner on" id="emban" style="display:none"></div><a class="btn red" href="tel:112">Call 112</a><button class="btn ghost" id="emok">I am okay. Cancel the alert</button><button class="btn ghost" id="emclose">Close</button></div>';
+  '<div class="overlay" id="emer"><div class="pulse"></div><div class="big" id="emtxt"></div><div class="tl" id="emtl"></div><div class="banner on" id="emban" style="display:none"></div><div id="emcalls"></div><a class="btn red" href="tel:112">Call 112</a><button class="btn ghost" id="emok">I am okay. Cancel the alert</button><button class="btn ghost" id="emclose">Close</button></div>';
   $('send').onclick = function(){ handle($('txt').value); };
   if (fallOn()) fallStart();
   $('txt').onkeydown = function(e){ if (e.key === 'Enter') handle($('txt').value); };
@@ -275,6 +298,8 @@ function patientApp(){
 }
 function firstLoad(){
   refreshCards(); renderEmergency();
+  if (st.profile.tz !== tzNow()) hApi('profile', { tz: tzNow() }).then(take);
+  quietResync();
   var a = analysis(), pend = pendingToday();
   var txt;
   if (sess.firstRun) {
@@ -302,7 +327,7 @@ function schedulePatient(){
       if (take(j)) { refreshCards(); renderEmergency(); }
       schedulePatient();
     });
-  }, active ? 2000 : 15000);
+  }, active ? 2000 : 30000);
 }
 function renderEmergency(){
   var a = st && st.alert, o = $('emer'); if (!o) return;
@@ -322,6 +347,8 @@ function renderEmergency(){
   $('emtl').innerHTML = a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('');
   $('emtl').innerHTML += '<div style="margin-top:8px"><button class="link" id="emrc">Share proof receipt</button></div>';
   $('emrc').onclick = function(){ hApi('share', {}).then(function(j){ if (j && j.shareId) { var u = location.origin + '/receipt.html?p=' + sess.pid + '&s=' + j.shareId; try { navigator.clipboard.writeText(u).then(function(){ $('emrc').textContent = 'Receipt link copied'; }, function(){ prompt('Copy this link', u); }); } catch(e){ prompt('Copy this link', u); } } }); };
+  var ec = $('emcalls');
+  if (ec) ec.innerHTML = (st.caregivers || []).filter(function(c){ return c.phone && c.role !== 'clinician'; }).map(function(c){ return '<a class="btn green" href="tel:' + esc(c.phone) + '">Call ' + esc(c.name) + ' now</a><a class="btn ghost" href="sms:' + esc(c.phone) + '?body=' + encodeURIComponent('Orbit-X: I need help. Please call me now.') + '">Text ' + esc(c.name) + '</a>'; }).join('');
   var ban = $('emban'); ban.style.display = 'none';
   $('emok').style.display = (a.status === 'ringing' || a.status === 'answered' || a.status === 'unanswered') ? '' : 'none';
   if (!fresh && !o.classList.contains('on')) return;
@@ -416,16 +443,16 @@ function showEvidence(){
 function showFamily(){
   var o = $('fmo');
   var list = st.caregivers.length ? st.caregivers.map(function(c){
-    return '<div class="cg"><b>' + (c.role === 'clinician' ? 'Dr ' : c.order + '. ') + esc(c.name) + '</b><div class="st ' + (c.joined ? 'ok' : '') + '">' + (c.role === 'clinician' ? (c.joined ? 'Doctor. Linked. Writes your alert rules. Does not get rung' : 'Doctor. Waiting to join') : (c.joined ? 'Linked. Will be called' + (c.order === 1 ? ' first' : ' if the one before does not answer') : 'Waiting to join')) + '</div><div class="acts"><button data-inv="' + esc(c.id) + '">' + (c.joined ? 'New invite' : 'Show invite') + '</button><button data-rm="' + esc(c.id) + '">Remove</button></div></div>';
+    return '<div class="cg"><b>' + (c.role === 'clinician' ? 'Dr ' : c.order + '. ') + esc(c.name) + '</b><div class="st ' + (c.joined ? 'ok' : '') + '">' + (c.role === 'clinician' ? (c.joined ? 'Doctor. Linked. Writes your alert rules. Does not get rung' : 'Doctor. Waiting to join') : (c.joined ? 'Linked. Will be called' + (c.order === 1 ? ' first' : ' if the one before does not answer') + (c.alertsOn ? '. Phone alerts ON' : '. Phone alerts not on yet (they must tap Arm this phone)') : 'Waiting to join')) + '</div><div class="acts"><button data-inv="' + esc(c.id) + '">' + (c.joined ? 'New invite' : 'Show invite') + '</button><button data-rm="' + esc(c.id) + '">Remove</button></div></div>';
   }).join('') : '<div class="small" style="margin-top:10px">No one yet. Add someone who should be alerted if you need help, like a child or a neighbour.</div>';
   o.innerHTML = '<h2>Family and caregivers</h2><div class="small">When you press help or Orbit sees a dangerous reading, the first person rings like a phone call. If they do not answer in 20 seconds, the next one rings.</div>' + list +
-    (st.caregivers.length < 4 ? '<label class="l" for="cn">Add a caregiver</label><input class="field" id="cn" maxlength="40" placeholder="Their name"><div class="err" id="er"></div><button class="btn" id="ad">Add and get invite</button>' : '') +
+    (st.caregivers.length < 4 ? '<label class="l" for="cn">Add a caregiver</label><input class="field" id="cn" maxlength="40" placeholder="Their name"><input class="field" id="cp" type="tel" maxlength="20" placeholder="Their phone number (optional, lets you call them)"><div class="err" id="er"></div><button class="btn" id="ad">Add and get invite</button>' : '') +
     (st.caregivers.filter(function(c){ return c.role === 'clinician'; }).length < 3 ? '<label class="l" for="dn">Add your doctor or nurse</label><div class="small">They write alert rules in plain words, like "tell me if she reports headaches with blurred vision". You see every rule, in plain English, before it runs.</div><input class="field" id="dn" maxlength="40" placeholder="Their name"><button class="btn ghost" id="ad2">Add doctor and get invite</button>' : '') +
     '<button class="btn ghost" id="fb">Close</button>';
   o.classList.add('on'); $('fb').onclick = function(){ o.classList.remove('on'); };
   var ad = $('ad'); if (ad) ad.onclick = function(){
     var n = $('cn').value.trim(); if (!n) { $('er').textContent = 'Please type their name.'; return; }
-    ad.disabled = true; hApi('invite', { name: n }).then(function(j){ if (take(j)) showInvite(j.code, n); else { ad.disabled = false; $('er').textContent = 'Could not add. Please try again.'; } });
+    ad.disabled = true; hApi('invite', { name: n, phone: ($('cp') || {}).value || '' }).then(function(j){ if (take(j)) showInvite(j.code, n); else { ad.disabled = false; $('er').textContent = 'Could not add. Please try again.'; } });
   };
   var ad2 = $('ad2'); if (ad2) ad2.onclick = function(){
     var n = $('dn').value.trim(); if (!n) { $('er').textContent = 'Please type their name.'; return; }
@@ -437,13 +464,37 @@ function showFamily(){
 function showInvite(code, name, doctor){
   var link = location.origin + '/?join=' + code;
   var pretty = code.replace(/(.{4})(?=.)/g, '$1-');
-  var msg = doctor ? 'Hello ' + name + ', I added you as my clinician on Orbit-X. You can write plain-language alert rules for me. Tap to join: ' + link : 'Hi ' + name + ', I added you as my caregiver on Orbit-X. If I ever need help, your phone will ring. Tap to join: ' + link;
+  var msg = doctor ? 'Hello ' + name + ', I added you as my clinician on Orbit-X. You can write plain-language alert rules for me. Tap to join: ' + link : 'Hi ' + name + ', I added you as my caregiver on Orbit-X. If I ever need help, your phone will ring. Tap to join, then tap Arm this phone and Allow notifications: ' + link;
   var o = $('fmo');
   o.innerHTML = '<h2>Invite ' + esc(name) + '</h2><div class="small center">Send this to ' + esc(name) + '. It works once. They open it on their own phone and tap Join.</div><div class="code">' + esc(pretty) + '</div>' +
     '<a class="btn green" id="wa" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(msg) + '">Send on WhatsApp</a><button class="btn" id="cp">Copy invite link</button><button class="btn ghost" id="ib">Done</button>';
   $('cp').onclick = function(){ try { navigator.clipboard.writeText(link).then(function(){ $('cp').textContent = 'Copied'; }, function(){ prompt('Copy this link', link); }); } catch(e){ prompt('Copy this link', link); } };
   $('ib').onclick = showFamily;
 }
+
+/* ---------- phone alerts (works with the page closed) ---------- */
+function u8(b64u){ var p = '='.repeat((4 - b64u.length % 4) % 4), b = atob((b64u + p).replace(/-/g, '+').replace(/_/g, '/')), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+function sameKey(sub, k){ try { var x = new Uint8Array(sub.options.applicationServerKey); if (x.length !== k.length) return false; for (var i = 0; i < x.length; i++) if (x[i] !== k[i]) return false; return true; } catch(e){ return false; } }
+function alertsSupported(){ return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window); }
+function enableAlerts(cb, confirm, silent){
+  if (!alertsSupported()) { cb(false, 'This browser cannot show alerts when it is closed. Use Chrome on Android. On iPhone, tap Share, then Add to Home Screen, and open Orbit-X from there.'); return; }
+  var ask = (silent && Notification.permission !== 'granted') ? Promise.resolve('skip') : Notification.requestPermission();
+  ask.then(function(perm){
+    if (perm === 'skip') { cb(false, ''); return; }
+    if (perm !== 'granted') { cb(false, 'Notifications are blocked. Tap the lock icon next to the web address, tap Permissions, and allow Notifications. Then try again.'); return; }
+    return navigator.serviceWorker.register('/sw.js?p=' + sess.pid).then(function(){ return navigator.serviceWorker.ready; }).then(function(reg){
+      return hApi('pushkey', {}).then(function(k){
+        if (!k || !k.key) throw new Error('nokey');
+        var key = u8(k.key);
+        return reg.pushManager.getSubscription().then(function(old){
+          if (old && sameKey(old, key)) return old;
+          return (old ? old.unsubscribe() : Promise.resolve()).then(function(){ return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }); });
+        });
+      });
+    }).then(function(sub){ return hApi('pushsub', { sub: sub.toJSON(), confirm: !!confirm }); }).then(function(j){ if (take(j) || (j && j.ok)) cb(true); else cb(false, 'The server could not save this phone. Please try again.'); });
+  }).catch(function(){ cb(false, 'Could not turn on alerts. Check your internet and try again.'); });
+}
+function quietResync(){ if (alertsSupported() && Notification.permission === 'granted' && sess) enableAlerts(function(){}, false, true); }
 
 /* ---------- fall guard ---------- */
 /* Plain code watches the phone's motion sensor: free fall, then a hard hit, then lying still.
@@ -491,18 +542,22 @@ function fallDisable(){ try { localStorage.removeItem(FKEY); } catch(e){} fallSt
 function showSettings(){
   var o = $('seo'), sl = st.profile.slots;
   o.innerHTML = '<h2>Settings</h2><label class="l" for="sn">Your name</label><input class="field" id="sn" maxlength="40" value="' + esc(st.profile.name) + '">' +
+    '<label class="l" for="sp">Your phone number</label><input class="field" id="sp" type="tel" maxlength="20" value="' + esc(st.profile.phone || '') + '"><div class="small" style="margin-top:4px">So your family can call you from an alert.</div>' +
     '<label class="l">Medicine times</label><label class="check"><input type="checkbox" id="sm"' + (sl.indexOf('morning') > -1 ? ' checked' : '') + '> Morning</label><label class="check"><input type="checkbox" id="sa"' + (sl.indexOf('afternoon') > -1 ? ' checked' : '') + '> Afternoon</label><label class="check"><input type="checkbox" id="se"' + (sl.indexOf('evening') > -1 ? ' checked' : '') + '> Evening</label><label class="check"><input type="checkbox" id="sg"' + (sl.indexOf('night') > -1 ? ' checked' : '') + '> Night</label>' +
+    '<label class="check"><input type="checkbox" id="ta"' + (st.profile.tabletAlerts ? ' checked' : '') + '> Tell my caregivers if I have not logged a tablet</label><div class="small" style="margin-top:4px">I remind you first. If you still have not logged it a few hours later, your caregivers get a gentle heads-up. They are not rung.</div>' +
     '<button class="btn" id="sv">Save</button>' +
+    '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
     '<label class="l">Recovery key</label><div class="small">If you lose this phone, this key restores your account on a new one. Keep it private.</div><button class="btn ghost" id="rk">Show my recovery key</button><div class="code" id="rkv" style="display:none;font-size:13px"></div>' +
     '<label class="l">Fall guard</label><div class="small">If your phone falls and then lies still, Orbit asks "Did you fall?" If you do not answer in 15 seconds, your family is alerted. Works while Orbit-X is open on this phone with the screen on.</div><label class="check"><input type="checkbox" id="fg"' + (fallOn() ? ' checked' : '') + '> Turn on fall guard</label><div class="err" id="fge"></div><button class="btn ghost" id="fgt">Test it now</button>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
-    '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>' +
+    (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
-  $('sv').onclick = function(){ var s = []; if ($('sm').checked) s.push('morning'); if ($('sa').checked) s.push('afternoon'); if ($('se').checked) s.push('evening'); if ($('sg').checked) s.push('night'); hApi('profile', { name: $('sn').value, slots: s }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
+  $('sv').onclick = function(){ var s = []; if ($('sm').checked) s.push('morning'); if ($('sa').checked) s.push('afternoon'); if ($('se').checked) s.push('evening'); if ($('sg').checked) s.push('night'); hApi('profile', { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), slots: s }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
+  $('alb').onclick = function(){ if (st.profile.alertsOn) { hApi('testpush', {}).then(function(j){ $('ale').textContent = j && j.ok ? 'Test sent. Look at your notifications.' : 'Could not send the test.'; }); return; } enableAlerts(function(ok, m){ $('ale').textContent = ok ? 'Phone alerts are on.' : m; if (ok) $('alb').textContent = 'Phone alerts are ON. Send a test'; }, true); };
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
-  $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
+  if ($('kn')) $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
   o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
   $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
   $('so').onclick = function(){ if (confirm('Sign out? You will need your recovery key to come back.')) { clearSession(); sess = null; st = null; welcome(); } };
@@ -510,7 +565,7 @@ function showSettings(){
 }
 
 /* ---------- CAREGIVER ---------- */
-var armed = false, ringCtx = null, wake = null;
+var armed = false, ringCtx = null, wake = null, alertMsg = '';
 function beep(){
   try { var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; ringCtx = ringCtx || new AC();
     var o = ringCtx.createOscillator(), g = ringCtx.createGain(); o.type = 'sine'; o.frequency.value = 880; o.connect(g); g.connect(ringCtx.destination);
@@ -521,22 +576,22 @@ document.addEventListener('visibilitychange', function(){ if (!document.hidden &
 function caregiverApp(){
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + '</span></div><div id="cgv" style="position:relative;flex:1"></div>';
-  cgRender(); cgPoll();
+  cgRender(); cgPoll(); quietResync();
 }
 function cgPoll(){
   hApi('state').then(function(j){
     if (gone(j)) { clearSession(); sess = null; welcome('You were removed as a caregiver, or the invite was replaced.'); return; }
     take(j); cgRender();
     var active = st && st.alert && (st.alert.status === 'ringing' || st.alert.status === 'answered');
-    stopTimer(); timer = setTimeout(cgPoll, active ? 1500 : 5000);
+    stopTimer(); timer = setTimeout(cgPoll, active ? 1500 : (st && st.profile && st.profile.alertsOn ? 20000 : 5000)); // push wakes the phone, so idle polling can be slow (saves free-plan requests)
   });
 }
 function cgRender(){
   var el = $('cgv'); if (!el) return;
   var who = (st && st.profile.name) || sess.patientName || 'them';
-  if (!armed) {
-    el.innerHTML = '<div class="idle"><b>You are a caregiver for ' + esc(who) + '</b><br>Tap below once so this phone can ring.<br>Keep this page open and the screen on.</div><button class="btn" id="arm">Arm this phone</button><div class="center"><button class="link" id="lv">Stop being a caregiver</button></div>';
-    $('arm').onclick = function(){ armed = true; beep(); keepAwake(); cgRender(); };
+  if (!armed && !(st && st.profile && st.profile.alertsOn)) {
+    el.innerHTML = '<div class="idle"><b>You are a caregiver for ' + esc(who) + '</b><br>Step 1: tap the blue button below.<br>Step 2: tap Allow when your phone asks about notifications.<br>Then this phone gets an alert even when Orbit-X is closed.</div><button class="btn" id="arm">Arm this phone</button><div class="center"><button class="link" id="lv">Stop being a caregiver</button></div>';
+    $('arm').onclick = function(){ armed = true; beep(); keepAwake(); cgRender(); enableAlerts(function(ok, m){ alertMsg = ok ? '' : m; cgRender(); }, true); };
     $('lv').onclick = function(){ if (confirm('Leave? You will no longer be alerted.')) { clearSession(); sess = null; st = null; welcome(); } };
     return;
   }
@@ -562,7 +617,15 @@ function cgRender(){
   else if (a && a.status === 'cancelled') note = '<div class="idle"><b>Alert cancelled</b><br>' + esc(who) + ' says they are okay.</div>';
   else if (a && a.status === 'unanswered') note = '<div class="idle"><b>Alert not answered</b><br>Please call ' + esc(who) + ' now.</div>';
   else note = '<div class="idle">Armed. Waiting for an alert...</div>';
-  el.innerHTML = note + summary + '<div class="small center" style="margin-top:14px">Keep this page open and the screen on so this phone can ring.</div>';
+  var on = st.profile.alertsOn;
+  var status = on ? '<div class="banner on" style="display:block">Phone alerts are ON. You will get a notification even if this page is closed.</div><div class="center"><button class="link" id="tp">Send me a test alert</button></div>'
+    : '<div class="err center">' + esc(alertMsg || 'Phone alerts are not on yet.') + '</div><button class="btn" id="al">Turn on phone alerts</button>';
+  var pn = st.careNumbers && st.careNumbers.patient;
+  var calls = pn ? '<a class="btn green" href="tel:' + esc(pn) + '">Call ' + esc(who) + '</a>' : '';
+  var nts = (st.notices || []).filter(function(x){ return x.kind === 'missed_dose'; }).slice(-3).reverse().map(function(x){ return '<div class="ev"><small>' + clock(x.t) + '</small><span>' + esc(x.text) + '</span></div>'; }).join('');
+  el.innerHTML = note + summary + (nts ? '<div class="small" style="margin-top:10px">Tablet reminders</div>' + nts : '') + calls + status + '<div class="small center" style="margin-top:14px">If this page is open you will also hear a ring.</div>';
+  var tp = $('tp'); if (tp) tp.onclick = function(){ hApi('testpush', {}).then(function(j){ tp.textContent = j && j.ok ? 'Test sent. Check your notifications' : 'Could not send the test'; }); };
+  var al = $('al'); if (al) al.onclick = function(){ enableAlerts(function(ok, m){ alertMsg = ok ? '' : m; cgRender(); }, true); };
 }
 
 /* ---------- boot ---------- */
@@ -575,6 +638,7 @@ function boot(skipJoin){
   else welcome();
 }
 window.__orbit = { handle: handle };
+if ('serviceWorker' in navigator && sess && sess.pid) { try { navigator.serviceWorker.register('/sw.js?p=' + sess.pid); } catch(e){} }
 boot();
 })();
 </script>
