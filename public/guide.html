@@ -4,42 +4,70 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#070B16">
-<title>How to use Orbit-X</title>
+<title>How Orbit-X works</title>
 <link rel="stylesheet" href="/ox.css">
 <style>
 .w{max-width:560px;margin:0 auto;padding:18px 16px 50px}
-.big{font-size:19px;line-height:1.45}
+.big{font-size:18px;line-height:1.5}
 .step{display:flex;gap:14px;align-items:flex-start;margin:14px 0}
-.num{flex:none;width:44px;height:44px;border-radius:50%;background:#2563EB;color:#fff;font-weight:700;font-size:22px;display:flex;align-items:center;justify-content:center}
-.step b{font-size:19px}
+.num{flex:none;width:42px;height:42px;border-radius:50%;background:#2563EB;color:#fff;font-weight:700;font-size:21px;display:flex;align-items:center;justify-content:center}
+.step b{font-size:18px}
 .btn{display:inline-block;text-decoration:none;text-align:center}
+.who{border-left:4px solid #38BDF8;padding:4px 12px;margin:10px 0}
 </style>
 </head>
 <body>
 <div class="w">
-<h1>How to use Orbit-X</h1>
-<p class="big">Orbit-X reads health papers and shows you what they say. It always shows where each fact came from. It never gives medical advice. <b>Everything here is pretend (synthetic) data, so you cannot break anything.</b></p>
+<h1>How Orbit-X works</h1>
+<p class="big"><b>Orbit-X is a helper that tells your family when you need help.</b> It also remembers your blood pressure and your tablets. It is not a doctor. It never tells you what medicine to take.</p>
 
-<h2>Part 1 · Read my health papers (1 minute)</h2>
-<div class="step"><div class="num">1</div><div><b>Open the app and tap the blue button</b><div class="big">Tap <b>Try it with a synthetic patient</b>. This makes a pretend patient called Amara.</div></div></div>
-<div class="step"><div class="num">2</div><div><b>Tap "Health workspace", then "Load the 3 synthetic documents"</b><div class="big">Orbit reads two lab reports and a hospital paper and pulls out the numbers.</div></div></div>
-<div class="step"><div class="num">3</div><div><b>Look and ask</b><div class="big">Tap <b>Compare Reports</b> to see what changed. Tap <b>Ask My Records</b>, press a question button, and tap <b>Read aloud</b> to hear the answer.</div></div></div>
-<p><a class="btn" href="/workspace.html">Open the health workspace</a></p>
+<h2>Who is who?</h2>
+<div class="who big"><b>Me</b> (the person who needs looking after). I use the main app.</div>
+<div class="who big"><b>My caregiver</b> (a child, a friend, a neighbour). Their phone gets an alert when I need help.</div>
+<div class="who big"><b>My doctor or nurse</b> (optional). They write simple alert rules, like "tell me if I report a headache and blurry eyes". I read every rule before it starts.</div>
+<div class="who big"><b>A clinic or hospital</b>. They get a special area for connecting their software. A normal person never sees it.</div>
 
-<h2>Part 2 · Connect hospital software (30 seconds)</h2>
-<div class="step"><div class="num">1</div><div><b>Open the Developer area</b><div class="big">It is for apps that talk to Orbit-X.</div></div></div>
-<div class="step"><div class="num">2</div><div><b>Tap "Run the demo for me"</b><div class="big">Orbit does every step by itself: a pretend hospital sends a record, an emergency app asks for help, a receiver gets it, and the receipt is checked.</div></div></div>
-<div class="step"><div class="num">3</div><div><b>Tap "Open the public receipt"</b><div class="big">The receipt proves nothing was changed. It shows no private details.</div></div></div>
-<p><a class="btn" href="/developer.html">Open the Developer area</a></p>
+<h2>If you are the person (5 taps)</h2>
+<div class="step"><div class="num">1</div><div><b>Tap "I want to look after my own health"</b><div class="big">Type your name. Tick the times you take tablets. Tap Start.</div></div></div>
+<div class="step"><div class="num">2</div><div><b>Tap Family, then add a caregiver</b><div class="big">Type their name (and phone number if you like). Tap <b>Add and get invite</b>.</div></div></div>
+<div class="step"><div class="num">3</div><div><b>Send them the invite on WhatsApp</b><div class="big">The invite works one time, on one phone. If it fails, tap <b>New invite</b>.</div></div></div>
+<div class="step"><div class="num">4</div><div><b>Tap Settings, then "Turn on phone alerts"</b><div class="big">Now I can remind you about tablets, even when the app is closed.</div></div></div>
+<div class="step"><div class="num">5</div><div><b>Tap "Log BP" and say or type your reading</b><div class="big">For example: "150 over 95". After 3 days I learn what is normal for you.</div></div></div>
 
-<h2>Good to know</h2>
+<h2>If you are the caregiver (3 taps)</h2>
+<div class="step"><div class="num">1</div><div><b>Open the invite link and tap Join</b></div></div>
+<div class="step"><div class="num">2</div><div><b>Tap "Arm this phone"</b></div></div>
+<div class="step"><div class="num">3</div><div><b>Tap Allow when the phone asks about notifications</b><div class="big">Done. Your phone now gets an alert even when Orbit-X is closed. Tap "Send me a test alert" to check.</div></div></div>
+
+<h2>What happens in an emergency?</h2>
 <div class="card big">
-<p>• <b>Pretend parts:</b> the hospital and the emergency receiver are simulated. Nobody real is contacted.</p>
-<p>• <b>No medical advice:</b> Orbit only shows what is written in the papers and says what is missing.</p>
-<p>• <b>Medicine times:</b> in the main app, Settings lets you pick Morning, Afternoon, Evening and Night.</p>
-<p>• <b>Stuck?</b> Go back to the first page and start again. Your pretend patient stays saved on this phone.</p>
+<p>1. A very high reading, a scary word like "chest pain", or the red <b>I need help now</b> button starts the alert. <b>Plain code decides this. No AI.</b></p>
+<p>2. The first caregiver's phone makes a notification and rings. They have 20 seconds.</p>
+<p>3. No answer? The next caregiver is alerted. Our server does this by itself, even if your phone is off.</p>
+<p>4. If nobody answers, you are told to call <b>112</b> and you get big <b>Call</b> and <b>Text</b> buttons for each caregiver.</p>
 </div>
-<p><a class="btn g" href="/">Back to the start</a></p>
+
+<h2>Tablet reminders</h2>
+<div class="card big">
+<p>At your tablet time I remind <b>you</b>. If you still have not tapped "I took my tablet" a few hours later, your caregivers get a gentle message. You can turn this off in Settings.</p>
+</div>
+
+<h2>Where do I add documents?</h2>
+<div class="card big">
+<p>Open <b>My records</b> (the Health Workspace), then the <b>Documents</b> tab.</p>
+<p>• <b>Paste</b> the words from a lab report or hospital paper into the box, or choose a <b>.txt</b> file. Then tap <b>Analyse</b>.<br>• Or tap <b>Load the synthetic samples</b> to try it with pretend papers.</p>
+<p>Orbit finds the numbers, shows exactly which words they came from, and compares reports over time. It only works with text for now (no photos or PDFs yet).</p>
+</div>
+
+<h2>What Orbit-X never does</h2>
+<div class="card big">
+<p>• It never diagnoses an illness.<br>• It never tells you to start, stop or change a medicine.<br>• It never lets an AI decide an emergency.<br>• It always shows where a fact came from.</p>
+<p>Orbit-X is a hackathon project and not a medical device. In an emergency, call 112.</p>
+</div>
+
+<h2>Just looking? (demo)</h2>
+<p class="big">On the first page, the box called <b>Just want to look around?</b> has a one-minute story and a pretend patient. Nothing in it is real, and nobody is contacted.</p>
+<p><a class="btn" href="/">Back to the start</a></p>
 </div>
 </body>
 </html>
