@@ -3,6 +3,7 @@
    Nothing here is medical advice. */
 (function (root) {
   'use strict';
+  var MIN_DAYS = 3;     // days of readings needed before Orbit starts to spot changes (was 5)
   var HIGH_MARGIN = 16; // mmHg above the patient's own usual (baseline) counts as "higher"
   var OFFS = [0, 1, -1, 0, 2, -1, 0, 1, -2, 0];
   var RISE = {
@@ -119,10 +120,10 @@
     if (n) out.last = byDate[dates[n - 1]];
     out.lastDate = n ? dates[n - 1] : null;
 
-    if (n < 5) {
+    if (n < MIN_DAYS) {
       out.sentence = n === 0
         ? 'Tell me your blood pressure when you measure it, like 130 over 85. After a few days I will learn what is usual for you.'
-        : 'I am learning what is usual for you. ' + (5 - n) + ' more day' + (5 - n === 1 ? '' : 's') + ' of readings and I can start spotting changes.';
+        : 'I am learning what is usual for you. ' + (MIN_DAYS - n) + ' more day' + (MIN_DAYS - n === 1 ? '' : 's') + ' of readings and I can start spotting changes.';
       out.short = out.sentence; return out;
     }
     var base = median(dates.slice(0, 10).map(function (dt) { return byDate[dt].sys; }));
