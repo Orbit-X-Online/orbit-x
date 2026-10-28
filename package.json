@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node test/smoke.mjs",
-    "check": "node --check src/worker.js && node --check src/meta.js"
+    "test": "node test/smoke.mjs && node test/household.test.mjs",
+    "check": "node --check src/worker.js && node --check src/meta.js && node --check src/ai.js"
   },
   "devDependencies": {
     "wrangler": "^4"
