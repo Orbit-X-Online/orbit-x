@@ -14,7 +14,9 @@
 <script>
 var esc = OX.esc;
 function md(s){ return esc(s || '').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>'); }
-fetch('/openapi.json').then(function(r){ return r.json(); }).then(function(sp){
+var __s = OX.session(), __blocked = !!(__s && __s.accountType === 'individual');
+if (__blocked) document.querySelector('.wrap').innerHTML = '<div class="card" style="margin-top:40px"><h2 style="margin-top:0">API docs are for doctors, clinics and organisations</h2><p>Your personal account does not use the API.</p><p><a class="btn" href="/?guardian=1">Back to my app</a></p></div>';
+if (!__blocked) fetch('/openapi.json').then(function(r){ return r.json(); }).then(function(sp){
   var h = '<h1>' + esc(sp.info.title) + ' <span class="chip info">v' + esc(sp.info.version) + '</span></h1><p>' + md(sp.info.description) + '</p><div class="banner">Sandbox connectors and receiving systems are simulated. Synthetic data only.</div>';
   var groups = {};
   Object.keys(sp.paths).forEach(function(p){ Object.keys(sp.paths[p]).forEach(function(m){ var o = sp.paths[p][m], t = (o.tags && o.tags[0]) || 'Other'; (groups[t] = groups[t] || []).push([m, p, o]); }); });
