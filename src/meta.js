@@ -1,6 +1,19 @@
 // Thin Meta Model API client. Server-side only: the key never reaches the browser.
 // The API is OpenAI-compatible (base URL https://api.meta.ai/v1, Bearer MODEL_API_KEY).
 
+// Lists model ids the key can use (GET {base}/models). Used to find the Muse Spark slug without guessing.
+export async function listModels(env) {
+  if (!env.MODEL_API_KEY) throw new MetaError('MODEL_API_KEY is not set', 500);
+  const base = (env.MODEL_BASE_URL || 'https://api.meta.ai/v1').replace(/\/+$/, '');
+  const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const res = await fetch(base + '/models', { headers: { Authorization: 'Bearer ' + env.MODEL_API_KEY }, signal: ctrl.signal });
+    if (!res.ok) throw new MetaError('Models list ' + res.status, 502);
+    const j = await res.json();
+    return (Array.isArray(j.data) ? j.data : []).map((m) => m && m.id).filter((x) => typeof x === 'string');
+  } catch (e) { if (e instanceof MetaError) throw e; throw new MetaError('Could not reach model provider', 502); } finally { clearTimeout(timer); }
+}
+
 export class MetaError extends Error {
   constructor(message, status = 500) {
     super(message);
@@ -9,7 +22,7 @@ export class MetaError extends Error {
   }
 }
 
-export async function metaChat(env, { messages, model, temperature = 0.3 }) {
+export async function metaChat(env, { messages, model, temperature = 0.3, maxTokens, timeoutMs }) {
   if (!env.MODEL_API_KEY) throw new MetaError('MODEL_API_KEY is not set', 500);
 
   const base = (env.MODEL_BASE_URL || 'https://api.meta.ai/v1').replace(/\/+$/, '');
@@ -20,9 +33,10 @@ export async function metaChat(env, { messages, model, temperature = 0.3 }) {
   };
   // Opt-in only, so an unsupported parameter can never break the call.
   if (env.MODEL_REASONING) body.reasoning_effort = env.MODEL_REASONING;
+  if (maxTokens) body.max_tokens = maxTokens;
 
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), Number(env.MODEL_TIMEOUT_MS) || 25000);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs || Number(env.MODEL_TIMEOUT_MS) || 25000);
   try {
     const res = await fetch(base + '/chat/completions', {
       method: 'POST',
