@@ -258,8 +258,8 @@ BIND.compare = function(){
 /* ---------- ask ---------- */
 VIEWS.ask = function(){
   var h = '<h1>Ask My Records</h1><p class="small">Answers come from your own documents only. Facts are found and calculated by code; the AI only helps with wording, and its output is checked against the evidence.</p>' +
-    '<div class="row">' + QUESTIONS.map(function(q, i){ return '<button class="btn g s" data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>' +
-    '<div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="aq" maxlength="300" placeholder="Ask about your records" aria-label="Question"><button class="btn" id="ago">Ask</button></div><div id="aout">';
+    faceHtml() + '<div class="row">' + QUESTIONS.map(function(q, i){ return '<button class="btn g s" data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>' +
+    '<div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="aq" maxlength="300" placeholder="Ask about your records" aria-label="Question"><button class="btn g" id="amic" title="Speak your question" aria-label="Speak your question">&#127908;</button><button class="btn" id="ago">Ask</button></div><div id="aout">';
   if (!S.docs.length) h += '<div class="empty">Add documents first.</div>';
   askLog.slice().reverse().forEach(function(a){ h += renderAnswer(a); });
   return h + '</div>';
@@ -273,18 +273,48 @@ function renderAnswer(a){
   if (a.explanation) h += '<h3>Plain-language explanation <span class="small">(' + (a.ai.mode === 'mock' ? 'MOCK AI, not a Meta model' : esc(a.ai.model || 'Meta Muse Spark Open')) + ', validated)</span></h3>' + a.explanation.map(function(s){ return '<div class="ev ' + (s.kind === 'interpretation' ? 'interp' : s.kind) + '">' + (kindChip[s.kind] || '') + esc(s.text) + '<div>' + s.cites.map(cite).join('') + '</div></div>'; }).join('') + (a.ai.dropped && a.ai.dropped.length ? '<div class="small">' + a.ai.dropped.length + ' statement(s) from the model were removed because they failed a check (' + esc(a.ai.dropped.map(function(d){ return d.reason.replace(/_/g, ' '); }).join(', ')) + ').</div>' : '');
   else if (S.ai && S.ai.mode !== 'off') h += '<div class="banner">AI explanation unavailable' + (a.ai && a.ai.error ? ' (' + esc(a.ai.error.replace(/_/g, ' ')) + ')' : '') + '. The evidence above is complete without it.</div>';
   else h += '<div class="small">The AI is not connected, so this answer is evidence only.</div>';
-  return h + '<div class="small">Tap a blue chip to open the exact source. Orbit does not give medical advice.</div></div>';
+  return h + '<div class="row"><button class="btn g s" data-say="' + esc(a.q) + '">&#128266; Read aloud</button></div><div class="small">Tap a blue chip to open the exact source. Orbit does not give medical advice.</div></div>';
+}
+/* ---------- voice (browser speech; reads only the validated answer text) ---------- */
+var voiceOn = true;
+function faceHtml(){
+  return '<div class="vface"><svg id="vf" viewBox="0 0 120 120" width="76" height="76" role="img" aria-label="Orbit voice"><circle cx="60" cy="60" r="54" fill="#0A1630" stroke="#38BDF8" stroke-width="2"/><circle cx="42" cy="50" r="7" fill="#38BDF8"/><circle cx="78" cy="50" r="7" fill="#38BDF8"/><ellipse id="vmouth" cx="60" cy="82" rx="16" ry="3" fill="#38BDF8"/></svg><div><b>Orbit</b><div class="small" id="vstat">Ready. Ask by voice or text.</div></div><button class="btn g s" id="vmute">Voice: on</button></div>';
+}
+function faceTalk(on){ var m = document.getElementById('vmouth'); if (m) m.classList.toggle('talk', on); var t = document.getElementById('vstat'); if (t && on) t.textContent = 'Speaking'; else if (t) t.textContent = 'Ready. Ask by voice or text.'; }
+function answerSpeech(a){
+  if (!a || !a.ok) return '';
+  var parts = (a.explanation || a.statements || []).map(function(x){ return x.text; });
+  return parts.slice(0, 6).join(' ') + ' This is not medical advice.';
+}
+function sayText(text){
+  if (!voiceOn || !text) return;
+  if (!('speechSynthesis' in window)) { var t = document.getElementById('vstat'); if (t) t.textContent = 'Voice is not supported in this browser.'; return; }
+  try { speechSynthesis.cancel(); var u = new SpeechSynthesisUtterance(text); u.rate = 0.95; u.onstart = function(){ faceTalk(true); }; u.onend = u.onerror = function(){ faceTalk(false); }; speechSynthesis.speak(u); } catch(e){ faceTalk(false); }
 }
 BIND.ask = function(){
   document.querySelectorAll('[data-q]').forEach(function(b){ b.onclick = function(){ runAsk(QUESTIONS[+b.getAttribute('data-q')]); }; });
   document.getElementById('ago').onclick = function(){ runAsk(document.getElementById('aq').value); };
   document.getElementById('aq').onkeydown = function(e){ if (e.key === 'Enter') runAsk(e.target.value); };
   bindCites(document.getElementById('aout'));
+  bindVoice();
 };
-function runAsk(q){
+function bindVoice(){
+  var mu = document.getElementById('vmute'); if (mu) { mu.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off'); mu.onclick = function(){ voiceOn = !voiceOn; if (!voiceOn && window.speechSynthesis) speechSynthesis.cancel(); faceTalk(false); mu.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off'); }; }
+  document.querySelectorAll('[data-say]').forEach(function(b){ b.onclick = function(){ var q = b.getAttribute('data-say'); var a = askLog.filter(function(x){ return x.q === q && x.ok; }).pop(); var was = voiceOn; voiceOn = true; sayText(answerSpeech(a)); voiceOn = was; }; });
+  var mic = document.getElementById('amic'); if (!mic) return;
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { mic.disabled = true; mic.title = 'Voice input is not supported in this browser'; return; }
+  mic.onclick = function(){
+    try { var r = new SR(); r.lang = 'en-US'; r.interimResults = false; var t = document.getElementById('vstat'); if (t) t.textContent = 'Listening...';
+      r.onresult = function(e){ var q = e.results[0][0].transcript; document.getElementById('aq').value = q; runAsk(q, true); };
+      r.onerror = r.onend = function(){ var t2 = document.getElementById('vstat'); if (t2 && t2.textContent === 'Listening...') t2.textContent = 'Ready. Ask by voice or text.'; };
+      r.start(); } catch(e){}
+  };
+}
+function runAsk(q, byVoice){
   q = String(q || '').trim(); if (q.length < 3) return;
   var item = { q: q, pending: true }; askLog.push(item); if (tab === 'ask') { document.getElementById('aout').innerHTML = askLog.slice().reverse().map(renderAnswer).join(''); }
-  OX.w('ask', { q: q }).then(function(j){ Object.keys(item).forEach(function(k){ delete item[k]; }); Object.assign(item, j, { q: q }); if (tab === 'ask') { document.getElementById('aout').innerHTML = askLog.slice().reverse().map(renderAnswer).join(''); bindCites(document.getElementById('aout')); } });
+  OX.w('ask', { q: q }).then(function(j){ Object.keys(item).forEach(function(k){ delete item[k]; }); Object.assign(item, j, { q: q }); if (tab === 'ask') { document.getElementById('aout').innerHTML = askLog.slice().reverse().map(renderAnswer).join(''); bindCites(document.getElementById('aout')); bindVoice(); if (byVoice) sayText(answerSpeech(item)); } });
 }
 
 /* ---------- brief ---------- */
