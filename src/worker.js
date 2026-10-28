@@ -305,6 +305,9 @@ function alertView(a, who, now, escalateMs) {
 }
 
 /* ------------------------------ the household Durable Object ------------------------------ */
+const DOSE_SLOTS = ['morning', 'afternoon', 'evening', 'night'];
+function cleanSlots(a) { return Array.isArray(a) ? DOSE_SLOTS.filter((x) => a.includes(x)) : []; }
+
 export class AlertHub {
   constructor(state, env) {
     this.state = state;
@@ -464,7 +467,7 @@ export class AlertHub {
       if (h) return bad(409, 'exists');
       const name = cleanName(body.name);
       if (!name) return bad(400, 'name_required');
-      const slots = Array.isArray(body.slots) ? [...new Set(body.slots.filter((s) => s === 'morning' || s === 'evening'))] : [];
+      const slots = Array.isArray(body.slots) ? cleanSlots(body.slots) : [];
       const token = rand(40);
       h = { v: 1, pid: String(body.pid || ''), name, slots, phone: cleanPhone(body.phone), createdAt: now, createdDate: validDate(body.today, now) ? body.today : new Date(now).toISOString().slice(0, 10),
         tokenHash: await sha(token), caregivers: [], readings: [], doses: [], alert: null, nextCid: 1 };
@@ -529,7 +532,7 @@ export class AlertHub {
       }
       case 'dose': {
         if (!isPatient) { fail(403, 'patient_only'); break; }
-        if (!(body.slot === 'morning' || body.slot === 'evening') || !validDate(body.date, now)) { fail(400, 'bad_dose'); break; }
+        if (!DOSE_SLOTS.includes(body.slot) || !validDate(body.date, now)) { fail(400, 'bad_dose'); break; }
         if (!h.doses.some((d) => d.date === body.date && d.slot === body.slot)) {
           h.doses.push({ t: now, date: body.date, slot: body.slot });
           if (h.doses.length > 400) h.doses = h.doses.slice(-400);
@@ -590,7 +593,7 @@ export class AlertHub {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         if (body.name !== undefined) { const n = cleanName(body.name); if (!n) { fail(400, 'name_required'); break; } h.name = n; }
         if (body.phone !== undefined) h.phone = cleanPhone(body.phone);
-        if (Array.isArray(body.slots)) h.slots = [...new Set(body.slots.filter((s) => s === 'morning' || s === 'evening'))];
+        if (Array.isArray(body.slots)) h.slots = cleanSlots(body.slots);
         break;
       }
       case 'delete': {
