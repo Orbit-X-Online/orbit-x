@@ -1,0 +1,15 @@
+LAGOS SYNTHETIC DIAGNOSTICS (FICTIONAL) - LABORATORY REPORT
+Patient: Amara Okafor    DOB: 1968-04-12    Sex: F
+Report date: 2026-03-04
+Collected: 2026-03-03
+Medication on request form: Metformin 500 mg once daily
+
+TEST                  RESULT   UNIT      REFERENCE    FLAG
+HbA1c                 7.9      %         4.0-5.6      H
+Fasting glucose       9.4      mmol/L    3.9-5.5      H
+Creatinine            88       µmol/L    45-84        H
+eGFR                  68       mL/min/1.73m2
+LDL cholesterol       3.8      mmol/L    0.0-3.0      H
+Potassium             4.4      mmol/L    3.5-5.1
+
+Synthetic document for demonstration. Not a real patient.
