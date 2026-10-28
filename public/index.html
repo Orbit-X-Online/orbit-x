@@ -171,6 +171,7 @@ function welcome(msg){
   '<button class="btn" id="syn">Try it with a synthetic patient</button>' +
   '<button class="btn ghost" id="go">Create my own workspace</button>' +
   '<button class="btn ghost" id="cgv">I am a caregiver with an invite</button>' +
+  '<div class="center" style="margin-top:12px"><a class="btn ghost" href="/guide.html" style="display:block;text-decoration:none;text-align:center">How to use Orbit-X (1 minute, with pictures of the steps)</a></div>' +
   '<div class="center" style="margin-top:8px"><button class="link" id="rst">Restore my account</button> <button class="link" id="dm">See a demo story</button> <a class="link" href="/docs.html" style="text-decoration:none">API docs</a></div>';
   $('syn').onclick = function(){ $('syn').disabled = true; api('POST', '/api/create', { name: 'Amara Okafor', slots: [], today: todayStr() }).then(function(j){ if (!j.ok) { $('syn').disabled = false; return; } sess = { role: 'patient', pid: j.pid, token: j.token, name: 'Amara Okafor', synthetic: true }; saveSession(sess); location.href = '/workspace.html?sample=1'; }); };
   $('go').onclick = onboard; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = function(){ codeScreen('restore'); };
@@ -180,14 +181,14 @@ function onboard(){
   app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><h2 style="font-weight:500;font-size:20px;margin:18px 0 0">Let us set you up</h2>' +
   '<label class="l" for="nm">What should I call you?</label><input class="field" id="nm" maxlength="40" autocomplete="given-name" placeholder="Your name">' +
   '<label class="l">When do you take regular medicine?</label>' +
-  '<label class="check"><input type="checkbox" id="sm"> Morning</label><label class="check"><input type="checkbox" id="se"> Evening</label>' +
-  '<div class="small" style="margin-top:6px">Leave both empty if you do not take regular medicine. You can change this later.</div>' +
+  '<label class="check"><input type="checkbox" id="sm"> Morning</label><label class="check"><input type="checkbox" id="sa"> Afternoon</label><label class="check"><input type="checkbox" id="se"> Evening</label><label class="check"><input type="checkbox" id="sg"> Night</label>' +
+  '<div class="small" style="margin-top:6px">Leave all empty if you do not take regular medicine. You can change this later.</div>' +
   '<div class="small" style="margin-top:14px">Your readings stay private to you and the family members you invite. Orbit-X is not a doctor and does not give medical advice. If you feel very unwell, call 112.</div>' +
   '<div class="err" id="er"></div><button class="btn" id="st">Start</button>';
   $('bk').onclick = function(){ welcome(); };
   $('st').onclick = function(){
     var name = $('nm').value.trim(); if (!name) { $('er').textContent = 'Please tell me your name.'; return; }
-    var slots = []; if ($('sm').checked) slots.push('morning'); if ($('se').checked) slots.push('evening');
+    var slots = []; if ($('sm').checked) slots.push('morning'); if ($('sa').checked) slots.push('afternoon'); if ($('se').checked) slots.push('evening'); if ($('sg').checked) slots.push('night');
     $('st').disabled = true; $('er').textContent = '';
     api('POST', '/api/create', { name: name, slots: slots, today: todayStr() }).then(function(j){
       if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
@@ -232,11 +233,11 @@ function joinLink(code){
 
 /* ---------- helpers on state ---------- */
 function analysis(){ return D.analyzeReal(st.readings, st.doses, st.profile.slots, todayStr(), st.profile.createdDate); }
-function slotName(s){ return s === 'morning' ? 'morning' : 'evening'; }
+function slotName(s){ return ['morning', 'afternoon', 'evening', 'night'].indexOf(s) > -1 ? s : 'evening'; }
 function pendingToday(){
   var h = new Date().getHours(), t = todayStr(), out = [];
   var gone = {}; st.doses.forEach(function(d){ gone[d.date + '|' + d.slot] = 1; });
-  st.profile.slots.forEach(function(s){ if (!gone[t + '|' + s] && ((s === 'morning' && h >= 11) || (s === 'evening' && h >= 20))) out.push(s); });
+  st.profile.slots.forEach(function(s){ if (!gone[t + '|' + s] && ((s === 'morning' && h >= 11) || (s === 'afternoon' && h >= 16) || (s === 'evening' && h >= 20) || (s === 'night' && h >= 23))) out.push(s); });
   return out;
 }
 function dosesLine(a){ return a.missed.length ? a.missed.length + ' tablet' + (a.missed.length === 1 ? '' : 's') + ' not logged this week' : 'Nothing missed this week'; }
@@ -490,7 +491,7 @@ function fallDisable(){ try { localStorage.removeItem(FKEY); } catch(e){} fallSt
 function showSettings(){
   var o = $('seo'), sl = st.profile.slots;
   o.innerHTML = '<h2>Settings</h2><label class="l" for="sn">Your name</label><input class="field" id="sn" maxlength="40" value="' + esc(st.profile.name) + '">' +
-    '<label class="l">Medicine times</label><label class="check"><input type="checkbox" id="sm"' + (sl.indexOf('morning') > -1 ? ' checked' : '') + '> Morning</label><label class="check"><input type="checkbox" id="se"' + (sl.indexOf('evening') > -1 ? ' checked' : '') + '> Evening</label>' +
+    '<label class="l">Medicine times</label><label class="check"><input type="checkbox" id="sm"' + (sl.indexOf('morning') > -1 ? ' checked' : '') + '> Morning</label><label class="check"><input type="checkbox" id="sa"' + (sl.indexOf('afternoon') > -1 ? ' checked' : '') + '> Afternoon</label><label class="check"><input type="checkbox" id="se"' + (sl.indexOf('evening') > -1 ? ' checked' : '') + '> Evening</label><label class="check"><input type="checkbox" id="sg"' + (sl.indexOf('night') > -1 ? ' checked' : '') + '> Night</label>' +
     '<button class="btn" id="sv">Save</button>' +
     '<label class="l">Recovery key</label><div class="small">If you lose this phone, this key restores your account on a new one. Keep it private.</div><button class="btn ghost" id="rk">Show my recovery key</button><div class="code" id="rkv" style="display:none;font-size:13px"></div>' +
     '<label class="l">Fall guard</label><div class="small">If your phone falls and then lies still, Orbit asks "Did you fall?" If you do not answer in 15 seconds, your family is alerted. Works while Orbit-X is open on this phone with the screen on.</div><label class="check"><input type="checkbox" id="fg"' + (fallOn() ? ' checked' : '') + '> Turn on fall guard</label><div class="err" id="fge"></div><button class="btn ghost" id="fgt">Test it now</button>' +
@@ -498,7 +499,7 @@ function showSettings(){
     '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>' +
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
-  $('sv').onclick = function(){ var s = []; if ($('se').checked) s.push('evening'); if ($('sm').checked) s.unshift('morning'); hApi('profile', { name: $('sn').value, slots: s }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
+  $('sv').onclick = function(){ var s = []; if ($('sm').checked) s.push('morning'); if ($('sa').checked) s.push('afternoon'); if ($('se').checked) s.push('evening'); if ($('sg').checked) s.push('night'); hApi('profile', { name: $('sn').value, slots: s }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
   $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
