@@ -15,7 +15,8 @@ header{display:flex;justify-content:space-between;align-items:center;font-size:1
 header b{color:var(--txt);font-size:16px;letter-spacing:.5px}
 .status{display:flex;align-items:center;gap:6px;color:#7DD3FC}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--teal)}
-.stage{position:relative;height:300px;margin-top:4px}
+.app>*{flex-shrink:0}
+.stage{position:relative;height:300px;margin-top:4px;flex:none;overflow:visible}
 #face{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:260px;height:260px}
 .chip{position:absolute;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:7px 10px;font-size:12px;color:#7DD3FC;transition:opacity .4s,transform .4s}
 .chip b{display:block;font-size:15px;color:var(--txt);font-weight:600}
@@ -163,13 +164,15 @@ function stopTimer(){ if (timer) { clearTimeout(timer); timer = null; } }
 function welcome(msg){
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">Not a doctor. Emergency: 112</span></div>' +
-  '<div class="stage" style="height:260px">' + faceSvg() + '</div>' +
+  '<div class="stage" style="height:250px;margin-bottom:10px">' + faceSvg() + '</div>' +
   '<div class="center" style="font-size:20px;line-height:1.35;margin:4px 8px 6px">Hello. I am Orbit.</div>' +
-  '<div class="center small" style="margin:0 10px 14px;font-size:14px">I help you keep track of your blood pressure and medicine, notice changes in your own numbers, and make sure your family knows if you need help. I never give medical advice.</div>' +
+  '<div class="center small" style="margin:0 10px 14px;font-size:14px">Orbit-X turns scattered health records into trusted intelligence you can understand and trace, and into connected information that authorised systems can exchange. Every statement is linked to its source. I never give medical advice.</div>' +
   (msg ? '<div class="err center">' + esc(msg) + '</div>' : '') +
-  '<button class="btn" id="go">Get started</button>' +
+  '<button class="btn" id="syn">Try it with a synthetic patient</button>' +
+  '<button class="btn ghost" id="go">Create my own workspace</button>' +
   '<button class="btn ghost" id="cgv">I am a caregiver with an invite</button>' +
-  '<div class="center" style="margin-top:8px"><button class="link" id="rst">Restore my account</button> <button class="link" id="dm">See a demo story</button></div>';
+  '<div class="center" style="margin-top:8px"><button class="link" id="rst">Restore my account</button> <button class="link" id="dm">See a demo story</button> <a class="link" href="/docs.html" style="text-decoration:none">API docs</a></div>';
+  $('syn').onclick = function(){ $('syn').disabled = true; api('POST', '/api/create', { name: 'Amara Okafor', slots: [], today: todayStr() }).then(function(j){ if (!j.ok) { $('syn').disabled = false; return; } sess = { role: 'patient', pid: j.pid, token: j.token, name: 'Amara Okafor', synthetic: true }; saveSession(sess); location.href = '/workspace.html?sample=1'; }); };
   $('go').onclick = onboard; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = function(){ codeScreen('restore'); };
   $('dm').onclick = function(){ location.href = 'demo.html'; };
 }
@@ -241,8 +244,9 @@ function dosesLine(a){ return a.missed.length ? a.missed.length + ' tablet' + (a
 /* ---------- PATIENT ---------- */
 var pending = null, chatLog = [];
 function patientApp(){
+  if (!params.get('guardian')) { location.replace('/workspace.html'); return; }
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
+  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><a href="/workspace.html" style="color:#7DD3FC;font-size:13px;text-decoration:none">Health Workspace</a><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
   '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
   '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div>' +
   '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">I took my tablet</button><button data-q="how was my week">History</button></div>' +
