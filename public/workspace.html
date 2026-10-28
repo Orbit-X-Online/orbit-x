@@ -11,7 +11,7 @@
 <div class="wrap">
   <div class="hdr">
     <div><b>Orbit-X</b> <span class="sub" id="who"></span><div class="sub">Health information you can understand, trace and share</div></div>
-    <div class="links"><span id="aib"></span><a href="/developer.html">Developers</a><a href="/?guardian=1">Guardian app</a></div>
+    <div class="links"><span id="aib"></span><a href="/developer.html" id="devlink">Developers</a><a href="/?guardian=1">Family &amp; alerts</a></div>
   </div>
   <div class="tabs" role="tablist" id="tabs"></div>
   <div id="view" aria-live="polite"><div class="empty"><span class="spin"></span>Loading your workspace</div></div>
@@ -20,6 +20,7 @@
 <script>
 (function(){
 var sess = OX.need('patient'); if (!sess) return;
+if (sess.accountType === 'individual') { var dl = document.getElementById('devlink'); if (dl) dl.style.display = 'none'; }
 var esc = OX.esc, S = null, tab = 'overview', docText = {}, askLog = [], busy = '';
 var TABS = [['overview','Overview'],['graph','Evidence Graph'],['memory','Health Memory'],['docs','Documents'],['timeline','Timeline'],['compare','Compare Reports'],['ask','Ask My Records'],['brief','Appointment Brief'],['sharing','Sharing & Permissions']];
 var QUESTIONS = ['What changed between these reports?','What is the most recent documented HbA1c?','Which medications are listed in my latest discharge summary?','Are any dates or values inconsistent between these documents?','Prepare a concise summary I can share with my clinician.'];
