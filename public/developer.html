@@ -20,6 +20,7 @@
 <script>
 (function(){
 var sess = OX.need('patient'); if (!sess) return;
+if (sess.accountType === 'individual') { document.querySelector('.wrap').innerHTML = '<div class="card" style="margin-top:40px"><h2 style="margin-top:0">This area is for doctors, clinics and organisations</h2><p>Orbit Connect (API keys, record import, emergency handoff) is only available to accounts registered as a doctor, healthcare provider or organisation. Your personal account has its own simpler pages.</p><p><a class="btn" href="/workspace.html">Go to my records</a> <a class="btn g" href="/?guardian=1">Family and alerts</a></p></div>'; return; }
 var esc = OX.esc, S = null, tab = 'overview', last = null, SK = 'orbitx.sandbox.v1', stepState = null;
 var TABS = [['overview','API Overview'],['creds','API Credentials'],['sandbox','Import & Handoff Sandbox'],['connectors','Connectors & Imports'],['receipts','Proof Receipts'],['logs','Integration Logs']];
 var SCOPE_HELP = { 'records:write':'send FHIR records in', 'records:read':'read imported records', 'events:write':'report emergency events', 'events:read':'read alert status (legacy)', 'handoff:create':'create emergency handoffs', 'handoff:receive':'receive and acknowledge handoffs', 'audit:read':'read the audit log' };
