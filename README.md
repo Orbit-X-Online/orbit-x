@@ -61,3 +61,15 @@ The end-to-end test (`test/e2e.py`) needs Playwright for Python.
 ## License
 
 MIT. See `LICENSE`.
+
+## Orbit-X: health intelligence + interoperability (hackathon build)
+
+**Orbit Health Intelligence** – upload synthetic lab reports / discharge summaries; facts are extracted with source, date, units and confidence, placed on a timeline, compared (math is deterministic code), and questions are answered evidence-first. Every statement links to a source; documented facts, user-reported info, AI interpretation, conflicts and missing information are kept separate. No medical advice.
+
+**Orbit Connect** – FHIR R4 subset API, simulated EMR connector, provenance, duplicate/conflict detection, scoped API keys, OAuth-style client-credentials tokens, rate limits, audit log, OpenAPI spec (`/openapi.json`, `/docs.html`).
+
+**Emergency handoff** – consent-gated event → summary → verifiable receipt with five states (accepted, generated, sent, received, acknowledged). Delivery is **simulated** and labelled so. Receipts prove integrity (hash chain, optional HMAC), not medical truth, and contain no private details.
+
+**Meta model use** – Muse Spark Open via Baseten (OpenAI-compatible API) proposes extractions and wording. Code validates every output (quotes must appear in the source, numbers must appear in evidence, advice is rejected). If the model is unavailable, a rule-based fallback runs and the UI says "mock/rules mode"; it is never presented as a Meta model. Check `/api/health` and `/api/ai/status`.
+
+**Synthetic data only.** Setup: set secret `MODEL_API_KEY` (Baseten); optional `RECEIPT_SECRET`.
