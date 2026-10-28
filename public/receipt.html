@@ -4,65 +4,46 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#070B16">
-<title>Orbit-X proof receipt</title>
-<style>
-:root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#6C7FA8;--cy:#38BDF8;--teal:#5EEAD4;--red:#F87171}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center}
-.w{width:100%;max-width:520px;padding:18px 16px 40px}
-h1{font-size:20px;font-weight:600;margin:6px 0 2px}
-.small{font-size:13px;color:var(--mut);line-height:1.45}
-.badge{margin:16px 0;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--card);font-size:16px}
-.badge.ok{border-color:#14B8A6;color:var(--teal)}
-.badge.bad{border-color:var(--red);color:var(--red)}
-.e{border-left:2px solid var(--line);margin:0 0 0 6px;padding:2px 0 14px 14px;position:relative}
-.e::before{content:"";position:absolute;left:-6px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--cy)}
-.e.x{border-color:var(--red)}.e.x::before{background:var(--red)}
-.e time{display:block;font-size:12px;color:var(--mut)}
-.e code{display:block;font-size:10px;color:#4B5E86;word-break:break-all;margin-top:3px}
-button{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:10px 16px;font-size:14px;cursor:pointer;margin-right:8px}
-a{color:var(--cy)}
-</style>
+<meta name="robots" content="noindex">
+<title>Orbit-X integrity receipt</title>
+<link rel="stylesheet" href="/ox.css">
+<style>.w{max-width:560px;margin:0 auto;padding:18px 16px 40px}.e{border-left:2px solid var(--line);margin:0 0 0 6px;padding:2px 0 14px 14px;position:relative}.e::before{content:"";position:absolute;left:-6px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--cy)}.e.x{border-color:var(--red)}.e.x::before{background:var(--red)}.e time{display:block;font-size:12px;color:var(--mut)}.e code{display:block;font-size:10px;color:#4B5E86;word-break:break-all;margin-top:3px}</style>
 </head>
 <body><div class="w" id="app"><div class="small">Loading receipt...</div></div>
 <script>
 (function(){
-var q = new URLSearchParams(location.search), P = q.get('p') || '', S = q.get('s') || '';
-var app = document.getElementById('app');
+var q = new URLSearchParams(location.search), P = q.get('p') || '', S = q.get('s') || '', app = document.getElementById('app');
 function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 async function sha(s){ var d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return Array.from(new Uint8Array(d)).map(function(x){ return x.toString(16).padStart(2,'0'); }).join(''); }
-// Recompute the whole chain from the first line. Any edited word or time changes every hash after it.
+// Recompute the chain in this browser: h = sha256(previous | time | kind | d). Any change to a time, kind or fingerprint breaks every later link.
 async function verify(r, entries){
-  var prev = await sha('orbit-x|' + r.pid + '|' + r.alertId), bad = -1;
-  for (var i = 0; i < entries.length; i++) {
-    var h = await sha(prev + '|' + entries[i].t + '|' + entries[i].text);
-    if (h !== entries[i].h) { bad = i; break; }
-    prev = h;
-  }
-  if (bad < 0 && r.head && prev !== r.head) bad = entries.length - 1;
-  return bad;
+  var prev = await sha('orbit-x|' + r.pid + '|' + r.id);
+  for (var i = 0; i < entries.length; i++) { var h = await sha(prev + '|' + entries[i].t + '|' + entries[i].k + '|' + entries[i].d); if (h !== entries[i].h) return i; prev = h; }
+  return r.head && prev !== r.head ? entries.length - 1 : -1;
 }
 function clock(t){ var d = new Date(t); return d.toLocaleDateString([], {day:'numeric',month:'short'}) + ' ' + d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
 function render(r, entries, bad, tampered){
   var ok = bad < 0;
-  app.innerHTML = '<div class="small">ORBIT-X</div><h1>Proof receipt for ' + esc(r.patient) + '</h1>' +
-    '<div class="small">What happened during one alert, in order. Each line is locked to the line before it with a SHA-256 fingerprint.</div>' +
-    '<div class="badge ' + (ok ? 'ok' : 'bad') + '">' + (ok ? '✓ Chain intact. Checked just now in your browser. Nothing was changed.' : '✗ Chain broken at step ' + (bad + 1) + '. This record was altered.') + '</div>' +
-    entries.map(function(e, i){ return '<div class="e' + (bad === i ? ' x' : '') + '"><time>' + clock(e.t) + '</time>' + esc(e.text) + '<code>' + e.h.slice(0, 24) + '...</code></div>'; }).join('') +
-    '<div class="small" style="margin:10px 0 14px">Final fingerprint: <span style="word-break:break-all">' + esc(r.head || '') + '</span></div>' +
-    '<button id="tt">' + (tampered ? 'Restore original' : 'Try to tamper with it') + '</button>' +
-    '<div class="small" style="margin-top:14px">This page does not trust the server\'s word. Your browser recomputes every fingerprint itself. Orbit-X records what its alert chain did. It is not medical advice.</div>';
+  var srv = r.serverVerified ? 'Server also verified this record.' : 'The server could NOT verify this record.';
+  app.innerHTML = '<div class="small">ORBIT-X INTEGRITY RECEIPT</div><h1 style="margin:6px 0">' + (r.type === 'handoff' ? 'Information handoff' : 'Alert') + ' receipt</h1>' +
+    '<div class="small">The sequence of steps below, each locked to the one before it with a SHA-256 fingerprint. This page contains no medical details.</div>' +
+    (r.simulated ? '<div class="banner">Simulated: delivery to the receiving system in this demo is simulated. No real hospital or responder was contacted.</div>' : '') +
+    '<div class="card" style="margin-top:14px;border-color:' + (ok ? '#14B8A6' : 'var(--red)') + '"><b style="color:' + (ok ? 'var(--teal)' : 'var(--red)') + '">' + (ok ? '✓ Chain intact in your browser' : '✗ Chain broken at step ' + (bad + 1)) + '</b><div class="small">' + (tampered ? 'This is a deliberately edited copy.' : esc(srv)) + ' Signature: ' + esc(r.signature || 'unsigned') + (r.signature === 'unsigned' ? ' (hash chain only)' : '') + '.</div></div>' +
+    entries.map(function(e, i){ return '<div class="e' + (bad === i ? ' x' : '') + '"><time>' + clock(e.t) + '</time><b>' + esc(e.label || e.k) + '</b><code>' + e.h.slice(0, 28) + '…</code></div>'; }).join('') +
+    (r.contentHash ? '<div class="small">Content fingerprint of the shared summary: <span style="word-break:break-all">' + esc(r.contentHash) + '</span></div>' : '') +
+    '<div class="small" style="margin:6px 0 14px">Final fingerprint: <span style="word-break:break-all">' + esc(r.head || '') + '</span></div>' +
+    '<button class="btn g" id="tt">' + (tampered ? 'Restore the original' : 'Try to tamper with it') + '</button>' +
+    '<div class="banner green" style="margin-top:14px"><b>Integrity is not truth.</b> ' + esc(r.meaning || '') + '</div>';
   document.getElementById('tt').onclick = function(){
     if (tampered) return load();
-    var copy = entries.map(function(e){ return { t: e.t, text: e.text, h: e.h }; });
-    var k = Math.min(1, copy.length - 1); copy[k].text = copy[k].text + ' (edited)';
-    verify(r, copy).then(function(b){ render(r, copy, b, true); });
+    var c = entries.map(function(e){ return { t: e.t, k: e.k, d: e.d, h: e.h, label: e.label }; }); var k = Math.min(1, c.length - 1); c[k].t = c[k].t + 1000;
+    verify(r, c).then(function(b){ render(r, c, b, true); });
   };
 }
 function load(){
-  if (!/^[a-z0-9]{8}$/.test(P) || !/^[a-z0-9]{10}$/.test(S)) { app.innerHTML = '<h1>Receipt link not valid</h1>'; return; }
+  if (!/^[a-z0-9]{8}$/.test(P) || !/^[a-z0-9]{10}$/.test(S)) { app.innerHTML = '<h1>Orbit-X integrity receipt</h1><div class="banner"><b>No receipt selected.</b> This page opens from a receipt link, not directly. Receipt links are created by the app: in the Developer area run the Emergency Handoff sandbox, or in the app share a record, then open the link it gives you.</div><p><a class="btn" href="/developer.html">Open the Developer area</a></p><p class="small">A receipt shows that a record was not changed after Orbit wrote it (integrity). It does not prove the medical information is true, and it contains no patient details.</p>'; return; }
   fetch('/api/receipt/' + P + '/' + S, { cache: 'no-store' }).then(function(x){ return x.json(); }).then(function(r){
-    if (!r.ok) { app.innerHTML = '<h1>Receipt not found</h1><div class="small">The link may be wrong or the account was deleted.</div>'; return; }
+    if (!r.ok) { app.innerHTML = '<h1>Receipt not found</h1><div class="small">The link may be wrong or the record was deleted.</div>'; return; }
     verify(r, r.entries).then(function(b){ render(r, r.entries, b, false); });
   }).catch(function(){ app.innerHTML = '<h1>Could not load</h1><div class="small">Check your connection and reload.</div>'; });
 }
