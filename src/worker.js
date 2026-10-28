@@ -1,4 +1,6 @@
-import { metaChat, MetaError } from './meta.js';
+import { metaChat, MetaError, listModels } from './meta.js';
+import { handleConnect, WORKSPACE_ACTIONS, V1_ACTIONS, SCOPES, LEGACY_SCOPES, oauthToken, chainAppend, kindOf, signHead, publicReceipt, loadForReceipt, rand as crand, sha as csha } from './connect.js';
+import { aiMode, providerName } from './ai.js';
 
 /* =====================================================================
    Orbit-X server. One file on purpose (easy to upload, nothing to mis-place).
@@ -47,7 +49,7 @@ function corsHeaders(env, req) {
       'Access-Control-Allow-Origin': origin,
       Vary: 'Origin',
       'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Orbit-Key',
     };
   }
   return {};
@@ -227,13 +229,11 @@ function looksLikeSymptom(text) {
 /* ------------------------------ proof receipts ------------------------------
    Every line of an alert's timeline is chained to the one before it with SHA-256. Anyone holding a
    receipt link can recompute the chain in their browser and see if a single word was changed. */
-async function seal(a, pid) {
-  let prev = await sha('orbit-x|' + pid + '|' + a.id);
-  for (const e of a.log) {
-    if (!e.h) e.h = await sha(prev + '|' + e.t + '|' + e.text);
-    prev = e.h;
-  }
-  a.head = prev;
+async function seal(a, pid, env) {
+  if (a.v !== 2) { a.v = 2; a.entries = []; a.salt = null; a.head = null; }
+  a.entries = a.entries || [];
+  for (let i = a.entries.length; i < a.log.length; i++) { const e = await chainAppend(a, pid, a.id, kindOf(a.log[i].text), a.log[i].text, a.log[i].t); delete e.text; }
+  a.signature = await signHead(env, pid, a.id, a.head);
 }
 
 /* ------------------------------ alert chain (household) ------------------------------ */
@@ -367,16 +367,34 @@ export class AlertHub {
   }
 
   /* ---- real households ---- */
+  limited(keyId, now) {
+    this.rl = this.rl || new Map();
+    const arr = (this.rl.get(keyId) || []).filter((t) => now - t < 60000);
+    if (arr.length >= 60) { this.rl.set(keyId, arr); return Math.max(1, Math.ceil((60000 - (now - arr[0])) / 1000)); }
+    arr.push(now); this.rl.set(keyId, arr); return 0;
+  }
   async auth(h, req) {
+    const now = Date.now();
     const key = req.headers.get('X-Orbit-Key');
     if (key) {
       const km = /^ox_([a-z0-9]{8})_([a-z0-9]{24})$/.exec(key);
       if (!km || km[1] !== h.pid) return null;
       const kh = await sha(km[2]);
       const k = (h.apiKeys || []).find((x) => x.hash === kh);
-      return k ? { role: 'api', id: k.id } : null;
+      if (!k) return null;
+      k.lastUsedAt = now;
+      return { role: 'api', id: k.id, label: k.label, scopes: k.scopes || LEGACY_SCOPES, sim: !!k.sim, retry: this.limited(k.id, now) };
     }
-    const m = /^Bearer ([a-z0-9]{20,64})$/.exec(req.headers.get('Authorization') || '');
+    const hdr = req.headers.get('Authorization') || '';
+    const om = /^Bearer (oxt_([a-z0-9]{8})_[a-z0-9]{32})$/.exec(hdr);
+    if (om) {
+      if (om[2] !== h.pid) return null;
+      const th = await sha(om[1]);
+      const t = ((await this.state.storage.get('tokens')) || []).find((x) => x.hash === th && x.exp > now);
+      const k = t && (h.apiKeys || []).find((x) => x.id === t.keyId);
+      return k ? { role: 'api', id: k.id, label: k.label, scopes: t.scopes, sim: !!k.sim, via: 'oauth', retry: this.limited(k.id, now) } : null;
+    }
+    const m = /^Bearer ([a-z0-9]{20,64})$/.exec(hdr);
     if (!m) return null;
     const hash = await sha(m[1]);
     if (hash === h.tokenHash) return { role: 'patient' };
@@ -393,7 +411,7 @@ export class AlertHub {
       rules: (h.rules || []).map((r) => ({ id: r.id, name: r.name, severity: r.severity, author: r.author, readback: r.readback, createdAt: r.createdAt })),
       notices: (h.notices || []).slice(-20),
       symptoms: (h.symptoms || []).slice(-20),
-      apiKeys: who.role === 'patient' ? (h.apiKeys || []).map((k) => ({ id: k.id, label: k.label, createdAt: k.createdAt })) : undefined,
+      apiKeys: who.role === 'patient' ? (h.apiKeys || []).map((k) => ({ id: k.id, label: k.label, createdAt: k.createdAt, scopes: k.scopes || LEGACY_SCOPES, simulated: !!k.sim, lastUsedAt: k.lastUsedAt || null })) : undefined,
       readings: h.readings.slice(-120), doses: h.doses.slice(-240),
       alert: alertView(h.alert, who, now, this.escalateMs),
     };
@@ -460,10 +478,15 @@ export class AlertHub {
     if (action === 'receipt') {
       const sid = new URL(req.url).searchParams.get('s') || '';
       const sh = h.shares.find((x) => x.id === sid);
-      const al = sh && [h.alert, ...h.history].filter(Boolean).find((x) => x.id === sh.alertId);
-      if (!al) return bad(404, 'no_receipt');
-      return json({ ok: true, pid: h.pid, alertId: al.id, patient: String(h.name).split(' ')[0], status: al.status, startedAt: al.startedAt, head: al.head || null,
-        entries: al.log.map((e) => ({ t: e.t, text: e.text, h: e.h })) });
+      if (!sh) return bad(404, 'no_receipt');
+      if (sh.kind !== 'handoff') { const al = [h.alert, ...h.history].filter(Boolean).find((x) => x.id === sh.alertId); if (al && al.v !== 2) { await seal(al, h.pid, this.env); await this.state.storage.put('h', h); } }
+      const D = await loadForReceipt(this.state.storage);
+      const r = await publicReceipt(this.env, h.pid, sh, D, h);
+      return r ? json(r) : bad(404, 'no_receipt');
+    }
+    if (action === 'briefpublic') return handleConnect({ h, storage: this.state.storage, env: this.env, who: { role: 'link' }, body, now, req, action });
+    if (action === 'v1token') {
+      return oauthToken({ storage: this.state.storage }, h, body, this.env, now);
     }
 
     if (action === 'join') {
@@ -483,6 +506,12 @@ export class AlertHub {
     const fail = (s, e) => { status = s; error = e; };
     if (h.alert) advance(h.alert, now, this.escalateMs);
     const isPatient = who.role === 'patient';
+    if (who.retry) return new Response(JSON.stringify({ ok: false, error: 'rate_limited', retryAfterSeconds: who.retry }), { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': String(who.retry), 'Cache-Control': 'no-store' } });
+    if (WORKSPACE_ACTIONS.has(action) || V1_ACTIONS.has(action)) {
+      const res = await handleConnect({ h, storage: this.state.storage, env: this.env, who, body, now, req, action });
+      if (JSON.stringify(h) !== before) await this.state.storage.put('h', h);
+      return res || bad(404, 'unknown_action');
+    }
 
     switch (action) {
       case 'state': break;
@@ -613,16 +642,19 @@ export class AlertHub {
         const al = (body.alertId && [h.alert, ...h.history].filter(Boolean).find((x) => x.id === body.alertId)) || h.alert || h.history[0];
         if (!al) { fail(404, 'no_alert'); break; }
         let sh = h.shares.find((x) => x.alertId === al.id);
-        if (!sh) { sh = { id: rand(10), alertId: al.id, t: now }; h.shares.push(sh); if (h.shares.length > 10) h.shares = h.shares.slice(-10); }
+        if (!sh) { sh = { id: rand(10), alertId: al.id, t: now }; h.shares.push(sh); if (h.shares.length > 10) h.shares = h.shares.slice(-60); }
         extra.shareId = sh.id;
         break;
       }
       case 'apikey': {
         if (!isPatient) { fail(403, 'patient_only'); break; }
-        if (h.apiKeys.length >= 3) { fail(409, 'too_many_keys'); break; }
+        if (h.apiKeys.length >= 5) { fail(409, 'too_many_keys'); break; }
+        const scopes = Array.isArray(body.scopes) ? [...new Set(body.scopes.filter((x) => SCOPES.includes(x)))] : LEGACY_SCOPES;
+        if (!scopes.length) { fail(400, 'no_valid_scopes'); extra.allowed = SCOPES; break; }
         const secret = rand(24), label = cleanName(body.label, 30) || 'My app';
-        h.apiKeys.push({ id: 'k' + now, label, hash: await sha(secret), createdAt: now });
-        extra.key = 'ox_' + h.pid + '_' + secret;
+        const kid = 'k' + now;
+        h.apiKeys.push({ id: kid, label, hash: await sha(secret), createdAt: now, scopes, sim: body.simulated === true });
+        extra.key = 'ox_' + h.pid + '_' + secret; extra.keyId = kid; extra.scopes = scopes;
         break;
       }
       case 'apikeydel': {
@@ -634,6 +666,7 @@ export class AlertHub {
       }
       case 'signal': case 'apistate': {
         if (who.role !== 'api' && !(isPatient && action === 'signal')) { fail(403, 'api_only'); break; }
+        if (who.role === 'api' && !who.scopes.includes(action === 'signal' ? 'events:write' : 'events:read')) { fail(403, 'insufficient_scope'); extra.required = action === 'signal' ? 'events:write' : 'events:read'; break; }
         if (action === 'apistate') break;
         const type = body.type;
         if (type === 'reading') {
@@ -657,11 +690,11 @@ export class AlertHub {
       default: return bad(404, 'unknown_action');
     }
 
-    if (h.alert) await seal(h.alert, h.pid);
+    if (h.alert) await seal(h.alert, h.pid, this.env);
     if (error) { if (JSON.stringify(h) !== before) await this.state.storage.put('h', h); return json({ ok: false, error, ...extra }, status); }
     if (who.role === 'api') {
       const al = h.alert; let receipt = null;
-      if (al) { let sh = h.shares.find((x) => x.alertId === al.id); if (!sh) { sh = { id: rand(10), alertId: al.id, t: now }; h.shares.push(sh); h.shares = h.shares.slice(-10); } receipt = '/receipt.html?p=' + h.pid + '&s=' + sh.id; }
+      if (al) { let sh = h.shares.find((x) => x.alertId === al.id); if (!sh) { sh = { id: rand(10), alertId: al.id, t: now }; h.shares.push(sh); h.shares = h.shares.slice(-60); } receipt = '/receipt.html?p=' + h.pid + '&s=' + sh.id; }
       if (JSON.stringify(h) !== before) await this.state.storage.put('h', h);
       return json({ ok: true, now, alert: alertView(al, { role: 'api' }, now, this.escalateMs), receipt });
     }
@@ -763,6 +796,8 @@ async function handleHousehold(req, env, url, cors) {
   // public, read-only proof receipt. The long random share id is the key.
   const rc = /^\/api\/receipt\/([a-z0-9]{8})\/([a-z0-9]{10})$/.exec(p);
   if (rc && req.method === 'GET') return relay(await forward(hub(env, 'h:' + rc[1]), '/h/receipt?s=' + rc[2], req, undefined), cors);
+  // Orbit Connect v1 API
+  if (p.startsWith('/api/v1/') && p !== '/api/v1/signals' && p !== '/api/v1/alert') return handleV1(req, env, url, cors);
   // Orbit API for partner apps: send a signal, read the live alert.
   if ((p === '/api/v1/signals' && req.method === 'POST') || (p === '/api/v1/alert' && req.method === 'GET')) {
     const km = /^ox_([a-z0-9]{8})_[a-z0-9]{24}$/.exec(req.headers.get('X-Orbit-Key') || '');
@@ -771,6 +806,18 @@ async function handleHousehold(req, env, url, cors) {
     if (text && text.length > 4000) return json({ error: 'too_large' }, 413, cors);
     return relay(await forward(hub(env, 'h:' + km[1]), p === '/api/v1/signals' ? '/h/signal' : '/h/apistate', req, text), cors);
   }
+  // Personal workspace (patient session only)
+  const wm = /^\/api\/w\/([a-z0-9]{8})\/([a-z]{2,12})$/.exec(p);
+  if (wm) {
+    if (!WORKSPACE_ACTIONS.has(wm[2]) || wm[2] === 'briefpublic') return json({ error: 'Not found' }, 404, cors);
+    const get = req.method === 'GET' && ['wstate', 'docget', 'auditlog'].includes(wm[2]);
+    if (!get && req.method !== 'POST') return json({ error: 'Not found' }, 404, cors);
+    const text = req.method === 'POST' ? await req.text() : undefined;
+    if (text && text.length > 90000) return json({ error: 'too_large' }, 413, cors);
+    return relay(await forward(hub(env, 'h:' + wm[1]), '/h/' + wm[2] + url.search, req, text), cors);
+  }
+  const bm = /^\/api\/brief\/([a-z0-9]{8})$/.exec(p);
+  if (bm && req.method === 'GET') return relay(await forward(hub(env, 'h:' + bm[1]), '/h/briefpublic' + url.search, req, undefined), cors);
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
@@ -781,6 +828,50 @@ async function handleHousehold(req, env, url, cors) {
     return relay(await forward(hub(env, 'h:' + m[1]), '/h/' + m[2], req, text), cors);
   }
   return json({ error: 'Not found' }, 404, cors);
+}
+
+async function handleV1(req, env, url, cors) {
+  if (!env.ALERTS) return json({ error: 'store_not_configured' }, 503, cors);
+  const p = url.pathname.replace(/\/+$/, ''); const M = req.method;
+  let action = null, qs = '', needBody = M === 'POST';
+  const hid = /^\/api\/v1\/handoffs\/(ho_[a-z0-9]{10})(?:\/(receive|acknowledge))?$/.exec(p);
+  const vr = /^\/api\/v1\/receipts\/(ho_[a-z0-9]{10})\/verify$/.exec(p);
+  if (p === '/api/v1/oauth/token' && M === 'POST') action = 'v1token';
+  else if (p === '/api/v1/records' && (M === 'POST' || M === 'GET')) { action = 'v1records'; qs = url.search; }
+  else if (p === '/api/v1/records/validate' && M === 'POST') action = 'v1validate';
+  else if (p === '/api/v1/connectors' && M === 'GET') action = 'v1connectors';
+  else if (p === '/api/v1/events' && M === 'POST') action = 'v1events';
+  else if (p === '/api/v1/handoffs' && M === 'POST') action = 'v1handoffcreate';
+  else if (hid && M === 'GET' && !hid[2]) { action = 'v1handoffget'; qs = '?id=' + hid[1]; }
+  else if (hid && M === 'POST' && hid[2] === 'receive') { action = 'v1handoffreceive'; qs = '?id=' + hid[1]; }
+  else if (hid && M === 'POST' && hid[2] === 'acknowledge') { action = 'v1handoffack'; qs = '?id=' + hid[1]; }
+  else if (vr && M === 'GET') { action = 'v1verify'; qs = '?id=' + vr[1]; }
+  else if (p === '/api/v1/audit' && M === 'GET') action = 'v1audit';
+  if (!action) return json({ ok: false, error: 'not_found' }, 404, cors);
+  const text = needBody ? await req.text() : undefined;
+  if (text && text.length > 260000) return json({ ok: false, error: 'payload_too_large', limitBytes: 260000 }, 413, cors);
+  let pid = null, send = text;
+  if (action === 'v1token') {
+    let body = {}; try { const ct = req.headers.get('Content-Type') || ''; body = /json/.test(ct) || /^\s*\{/.test(text || '') ? JSON.parse(text || '{}') : Object.fromEntries(new URLSearchParams(text || '')); } catch { return json({ error: 'invalid_request' }, 400, cors); }
+    const cm = /^(?:ox_)?([a-z0-9]{8})$/.exec(String(body.client_id || ''));
+    if (!cm) return json({ error: 'invalid_client', error_description: 'client_id is your 8-character Orbit id' }, 401, cors);
+    pid = cm[1]; send = JSON.stringify(body);
+  } else {
+    const km = /^ox_([a-z0-9]{8})_[a-z0-9]{24}$/.exec(req.headers.get('X-Orbit-Key') || '') || /^Bearer oxt_([a-z0-9]{8})_[a-z0-9]{32}$/.exec(req.headers.get('Authorization') || '');
+    if (!km) return json({ ok: false, error: 'unauthorized', message: 'Send X-Orbit-Key, or Authorization: Bearer <access_token> from /api/v1/oauth/token.' }, 401, cors);
+    pid = km[1];
+  }
+  const res = await forward(hub(env, 'h:' + pid), '/h/' + action + qs, req, send);
+  const out = relay(res, cors); const ra = res.headers.get('Retry-After'); if (ra) out.headers.set('Retry-After', ra);
+  return out;
+}
+
+async function handleAiStatus(req, env, url, cors) {
+  const out = { ok: true, mode: aiMode(env), provider: aiMode(env) === 'mock' ? 'mock' : providerName(env), configuredModel: env.MODEL_TEXT || null, keyPresent: Boolean(env.MODEL_API_KEY) };
+  if (url.searchParams.get('probe') === '1' && env.MODEL_API_KEY) {
+    try { const ids = await listModels(env); out.models = ids.slice(0, 40); out.museModels = ids.filter((x) => /muse/i.test(x)); } catch (e) { out.probeError = String(e && e.message || '').slice(0, 120); }
+  }
+  return json(out, 200, cors);
 }
 
 // WhatsApp Cloud API webhook (parked). GET = Meta's one-time verification handshake.
@@ -807,12 +898,13 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
     if (url.pathname === '/api/health' && req.method === 'GET') {
-      return json({ ok: true, app: 'orbit-x', time: new Date().toISOString(), metaKeyConfigured: Boolean(env.MODEL_API_KEY) }, 200, cors);
+      return json({ ok: true, app: 'orbit-x', time: new Date().toISOString(), metaKeyConfigured: Boolean(env.MODEL_API_KEY), aiMode: aiMode(env) }, 200, cors);
     }
+    if (url.pathname === '/api/ai/status' && req.method === 'GET') return handleAiStatus(req, env, url, cors);
     if (url.pathname === '/api/assistant' && req.method === 'POST') return handleAssistant(req, env, cors);
     if (url.pathname === '/api/explain' && req.method === 'POST') return handleExplain(req, env, cors);
     if (url.pathname.startsWith('/api/alert/')) return env.ALERTS ? handleDemoAlert(req, env, url, cors) : json({ error: 'Alert store not configured' }, 503, cors);
-    if (url.pathname === '/api/create' || url.pathname === '/api/join' || url.pathname.startsWith('/api/h/') || url.pathname.startsWith('/api/v1/') || url.pathname.startsWith('/api/receipt/')) return handleHousehold(req, env, url, cors);
+    if (url.pathname === '/api/create' || url.pathname === '/api/join' || url.pathname.startsWith('/api/h/') || url.pathname.startsWith('/api/v1/') || url.pathname.startsWith('/api/receipt/') || url.pathname.startsWith('/api/w/') || url.pathname.startsWith('/api/brief/')) return handleHousehold(req, env, url, cors);
     if (url.pathname === '/api/whatsapp/webhook') return handleWhatsApp(req, env, url);
 
     return json({ error: 'Not found' }, 404, cors);
