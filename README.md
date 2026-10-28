@@ -54,9 +54,23 @@ The end-to-end test (`test/e2e.py`) needs Playwright for Python.
 
 ## Known limits
 
-- A caregiver's phone rings only while the page is open with the screen on. Push notifications are the next step.
+- **Phone alerts use Web Push** (free, no app store). A caregiver taps "Arm this phone" once and allows notifications; after that the phone is alerted even when Orbit-X is closed. It shows a notification with vibration, not a full-screen phone call. Do Not Disturb, silenced Chrome notifications and aggressive battery savers can still hide it, so test it on each phone (the app has a "Send me a test alert" button). iPhone needs iOS 16.4 or later and "Add to Home Screen" first. iPhone delivery is untested.
+- Orbit-X does not place real phone calls or SMS by itself (that needs a paid provider). Instead the emergency screen gives the person big **Call** and **Text** buttons that use their own phone and SIM.
 - Voice input uses the browser's speech recognition until Muse Voice Transcribe is connected.
+- Documents are text only (paste or .txt). Photos and PDFs are a next step.
 - Orbit-X is a hackathon project. It is not a medical device.
+
+## Added during the hackathon (day 3)
+
+Server-side escalation with Durable Object alarms (an alert moves to the next caregiver even if every phone is closed), Web Push alerts, tablet reminders for the person plus an opt-out heads-up for caregivers, free Call/Text buttons, separate sign-up for individuals and for doctors/organisations (only the latter reach the API and Developer area, enforced on the server), the 3-day learning period (was 5), and a plain-words guide. See `SUBMISSION.md`.
+
+## Tests (no network, no cost)
+
+```
+node test/smoke.mjs                 # basic server checks
+node test/household.test.mjs        # invites, push, escalation alarm, tablet reminders, account types
+CHROME=/path/to/chrome node test/ui.test.mjs   # real pages in a headless browser (needs Playwright)
+```
 
 ## License
 
