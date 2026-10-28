@@ -1,0 +1,27 @@
+{
+  "resourceType": "Bundle",
+  "type": "collection",
+  "entry": [
+    { "resource": { "resourceType": "Patient", "id": "amara-1", "name": [{ "text": "Amara Okafor" }], "gender": "female", "birthDate": "1968-04-12" } },
+    { "resource": { "resourceType": "Observation", "id": "bp-sys-0920", "status": "final",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8480-6", "display": "Systolic blood pressure" }] },
+        "subject": { "reference": "Patient/amara-1" }, "effectiveDateTime": "2026-09-20T09:30:00Z",
+        "valueQuantity": { "value": 138, "unit": "mmHg", "system": "http://unitsofmeasure.org", "code": "mm[Hg]" } } },
+    { "resource": { "resourceType": "Observation", "id": "bp-dia-0920", "status": "final",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "8462-4", "display": "Diastolic blood pressure" }] },
+        "subject": { "reference": "Patient/amara-1" }, "effectiveDateTime": "2026-09-20T09:30:00Z",
+        "valueQuantity": { "value": 86, "unit": "mmHg", "system": "http://unitsofmeasure.org", "code": "mm[Hg]" } } },
+    { "resource": { "resourceType": "Observation", "id": "a1c-0910", "status": "final",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "4548-4", "display": "Hemoglobin A1c" }] },
+        "subject": { "reference": "Patient/amara-1" }, "effectiveDateTime": "2026-09-10",
+        "valueQuantity": { "value": 7.1, "unit": "%", "system": "http://unitsofmeasure.org", "code": "%" } } },
+    { "resource": { "resourceType": "Observation", "id": "creat-0920", "status": "final",
+        "code": { "coding": [{ "system": "http://loinc.org", "code": "2160-0", "display": "Creatinine" }] },
+        "subject": { "reference": "Patient/amara-1" }, "effectiveDateTime": "2026-09-20",
+        "valueQuantity": { "value": 1.2, "unit": "mg/dL", "system": "http://unitsofmeasure.org", "code": "mg/dL" } } },
+    { "resource": { "resourceType": "AllergyIntolerance", "id": "allergy-pen", "patient": { "reference": "Patient/amara-1" }, "code": { "text": "Penicillin" } } },
+    { "resource": { "resourceType": "MedicationRequest", "id": "med-metf", "status": "active", "intent": "order",
+        "medicationCodeableConcept": { "text": "Metformin" }, "subject": { "reference": "Patient/amara-1" },
+        "authoredOn": "2026-09-20", "dosageInstruction": [{ "text": "500 mg twice daily" }] } }
+  ]
+}
