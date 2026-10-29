@@ -41,7 +41,7 @@ header b{color:var(--txt);font-size:16px;letter-spacing:.5px}
 .demo input{width:100%;accent-color:#38BDF8}
 .demo .l{display:flex;justify-content:space-between;margin-bottom:4px}
 .demo button{margin-top:6px;background:none;border:1px solid var(--line);color:#7DD3FC;border-radius:8px;padding:5px 9px;font-size:12px;cursor:pointer}
-.overlay{position:absolute;inset:0;background:var(--bg);padding:16px;overflow:auto;display:none;z-index:5}
+.overlay{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:440px;background:var(--bg);padding:16px;overflow:auto;display:none;z-index:5;-webkit-overflow-scrolling:touch}
 .overlay.on{display:block}
 .overlay h2{font-size:16px;text-align:center;margin:6px 0 12px;font-weight:500}
 .quote{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:14px;margin-bottom:12px}
@@ -342,6 +342,7 @@ function renderEmergency(){
   else if (a.status === 'cancelled') msg = 'Alert cancelled. I am glad you are okay.';
   else if (a.status === 'handled') msg = a.handledByName + ' is on it. Stay calm and stay where you are.';
   else if (a.status === 'answered') msg = a.answeredByName + ' answered and is checking on you.';
+  else if (a.sys) msg = st.profile.name + ', your reading ' + a.sys + ' over ' + a.dia + ' is very high. Please sit down and rest. If you have chest pain, trouble breathing, weakness, confusion or a severe headache, call 112 now. I am alerting ' + a.targetName + '.';
   else msg = (st.profile.name + ', this sounds dangerous. Call 112 or get to a hospital now. I am alerting ' + a.targetName + '.');
   $('emtxt').textContent = msg;
   $('emtl').innerHTML = a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('');
@@ -391,16 +392,26 @@ function saveBP(sys, dia){
     if (!take(j)) { say('I could not save that. Please check your internet and try again.'); return; }
     refreshCards();
     if (j.emergency) { renderEmergency(); schedulePatient(); return; }
-    var a = analysis();
-    say('Saved ' + sys + ' over ' + dia + '. ' + (a.baseline && sys >= a.baseline + D.HIGH_MARGIN ? 'That is higher than your usual. I will keep watching with you.' : a.baseline ? 'That is close to your usual.' : a.sentence));
+    var a = analysis(), b = D.bpBand(sys, dia);
+    say('Saved ' + sys + ' over ' + dia + '. ' + (b.code !== 'ok' ? 'That is ' + b.label + '. One reading is not a diagnosis. If it stays there, please tell your doctor.' : a.baseline && sys >= a.baseline + D.HIGH_MARGIN ? 'That is higher than your usual. I will keep watching with you.' : a.baseline ? 'That is close to your usual.' : a.sentence));
   });
 }
 function saveDose(){
-  var slot = D.slotForNow(st.profile.slots, new Date().getHours());
-  if (!slot) { say('You told me you do not take regular medicine. You can add medicine times in Settings.'); return; }
+  var slots = st.profile.slots;
+  if (!slots.length) { say('You told me you do not take regular medicine. You can add medicine times in Settings.'); return; }
+  var t = todayStr(), logged = {}; st.doses.forEach(function(d){ if (d.date === t) logged[d.slot] = 1; });
+  if (slots.every(function(s){ return logged[s]; })) { say('You have already logged all your tablet times for today.'); return; }
+  if (slots.length === 1) { logDose(slots[0]); return; }
+  // More than one tablet time: never guess. Ask which one.
+  $('evo').innerHTML = '<h2>Which tablet time did you take?</h2>' + slots.map(function(s){ return '<button class="btn' + (logged[s] ? ' ghost' : '') + '" data-sl="' + s + '"' + (logged[s] ? ' disabled' : '') + '>' + s.charAt(0).toUpperCase() + s.slice(1) + (logged[s] ? ' (already logged)' : '') + '</button>'; }).join('') +
+    '<div class="small" style="margin-top:12px">I only record that you took it. I never record or suggest an amount. Follow what your doctor or pharmacist told you.</div><button class="btn ghost" id="evb">Cancel</button>';
+  $('evo').classList.add('on'); $('evb').onclick = function(){ $('evo').classList.remove('on'); };
+  $('evo').querySelectorAll('[data-sl]').forEach(function(b){ b.onclick = function(){ $('evo').classList.remove('on'); logDose(b.getAttribute('data-sl')); }; });
+}
+function logDose(slot){
   hApi('dose', { slot: slot, date: todayStr() }).then(function(j){
     if (!take(j)) { say('I could not save that. Please check your internet and try again.'); return; }
-    refreshCards(); say('Good. I have logged your ' + slotName(slot) + ' tablet.');
+    refreshCards(); say('Good. I have noted that you took your ' + slotName(slot) + ' tablet. I only keep a record that you took it, never an amount.');
   });
 }
 function withTimeout(p, ms){ return Promise.race([p, new Promise(function(res){ setTimeout(function(){ res(null); }, ms); })]); }
@@ -427,15 +438,22 @@ function chat(text){
 function showEvidence(){
   var a = analysis(); var win = a.win;
   if (!win.length) { say(a.sentence); return; }
-  var W = 264, H = 120, vals = win.map(function(d){ return d.sys; }), minv = Math.min.apply(null, vals) - 4, maxv = Math.max.apply(null, vals) + 4;
-  var pts = win.map(function(d, i){ return { x: 8 + i * (W - 16) / Math.max(1, win.length - 1), y: H - 10 - (d.sys - minv) / Math.max(1, maxv - minv) * (H - 28), d: d }; });
-  var svg = '<svg viewBox="0 0 ' + W + ' ' + (H + 34) + '" width="100%" role="img" aria-label="Your recent systolic pressure with missed tablets marked"><line x1="0" y1="' + (H - 6) + '" x2="' + W + '" y2="' + (H - 6) + '" stroke="#25407A"/>' +
-    '<polyline fill="none" stroke="#5EEAD4" stroke-width="2.5" stroke-linejoin="round" points="' + pts.map(function(p){ return p.x + ',' + p.y; }).join(' ') + '"/>' +
-    pts.map(function(p){ return '<circle cx="' + p.x + '" cy="' + p.y + '" r="4" fill="#5EEAD4"/>' + (p.d.missed ? '<circle cx="' + p.x + '" cy="' + (H + 4) + '" r="5" fill="#F87171"/>' : '') + '<text x="' + p.x + '" y="' + (H + 26) + '" font-size="10" fill="#6C7FA8" text-anchor="middle">' + esc(D.fmtDate(p.d.date)) + '</text>'; }).join('') + '</svg>';
+  var W = 300, H = 150, L = 30, R = 10, T = 10, B = 40, pw = W - L - R, ph = H - T - B;
+  var all = []; win.forEach(function(d){ all.push(d.sys, d.dia); }); all.push(140); if (a.baseline) all.push(a.baseline);
+  var lo = Math.floor((Math.min.apply(null, all) - 6) / 10) * 10, hi = Math.ceil((Math.max.apply(null, all) + 6) / 10) * 10;
+  function X(i){ return L + (win.length === 1 ? pw / 2 : i * pw / (win.length - 1)); }
+  function Y(v){ return T + ph - (v - lo) / Math.max(1, hi - lo) * ph; }
+  function line(key, col){ return '<polyline fill="none" stroke="' + col + '" stroke-width="2.5" stroke-linejoin="round" points="' + win.map(function(d, i){ return X(i) + ',' + Y(d[key]); }).join(' ') + '"/>' + win.map(function(d, i){ return '<circle cx="' + X(i) + '" cy="' + Y(d[key]) + '" r="3.5" fill="' + col + '"/><text x="' + X(i) + '" y="' + (Y(d[key]) - 7) + '" font-size="10" fill="' + col + '" text-anchor="' + (i === 0 && win.length > 1 ? 'start' : i === win.length - 1 && win.length > 1 ? 'end' : 'middle') + '">' + d[key] + '</text>'; }).join(''); }
+  var grid = ''; for (var g = lo; g <= hi; g += 20) grid += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(g) + '" y2="' + Y(g) + '" stroke="#16224a"/><text x="' + (L - 4) + '" y="' + (Y(g) + 3) + '" font-size="9" fill="#6C7FA8" text-anchor="end">' + g + '</text>';
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" role="img" aria-label="Your recent top and bottom blood pressure numbers with missed tablets marked">' + grid +
+    '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(140) + '" y2="' + Y(140) + '" stroke="#FBBF24" stroke-dasharray="4 3"/><text x="' + (L + 2) + '" y="' + (Y(140) - 3) + '" font-size="9" fill="#FBBF24">140</text>' +
+    (a.baseline ? '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + Y(a.baseline) + '" y2="' + Y(a.baseline) + '" stroke="#E6F0FF" stroke-opacity=".5" stroke-dasharray="2 3"/><text x="' + (L + 2) + '" y="' + (Y(a.baseline) + 11) + '" font-size="9" fill="#E6F0FF" fill-opacity=".7">your usual</text>' : '') +
+    line('dia', '#60A5FA') + line('sys', '#5EEAD4') +
+    win.map(function(d, i){ var anc = i === 0 && win.length > 1 ? 'start' : i === win.length - 1 && win.length > 1 ? 'end' : 'middle'; return (d.missed ? '<circle cx="' + X(i) + '" cy="' + (H - 22) + '" r="4.5" fill="#F87171"/>' : '') + '<text x="' + X(i) + '" y="' + (H - 6) + '" font-size="10" fill="#6C7FA8" text-anchor="' + anc + '">' + esc(D.fmtDate(d.date)) + '</text>'; }).join('') + '</svg>';
   var rows = a.evidence.length ? a.evidence.map(function(e){ return '<div class="ev"><small>' + esc(e.title) + '</small><span>' + esc(e.text) + '</span></div>'; }).join('') : '<div class="ev"><span>Nothing unusual in your numbers.</span></div>';
-  $('evo').innerHTML = '<h2>Why Orbit said this</h2><div class="quote">&ldquo;' + esc(a.sentence) + '&rdquo;</div><div class="small" style="color:#7DD3FC;margin-bottom:4px">Your top number, last readings. Red dot = tablet not logged that day</div>' + svg + rows +
+  $('evo').innerHTML = '<h2>Why Orbit said this</h2><div class="quote">&ldquo;' + esc(a.sentence) + '&rdquo;</div><div class="small" style="color:#7DD3FC;margin-bottom:4px"><span style="color:#5EEAD4">Top number</span>, <span style="color:#60A5FA">bottom number</span>. Amber line = 140, the level WHO calls high blood pressure when it stays there. White dashed = your own usual. Red dot = a tablet was not logged that day.</div>' + svg + rows +
     (a.suggestion ? '<div class="ev" style="border-color:#2563EB"><small>Reminder offer</small><span>' + esc(a.suggestion) + '</span></div>' : '') +
-    '<div class="small" style="margin-top:12px">This is only a pattern in your own numbers, not a diagnosis. Please share it with your doctor.</div><button class="btn ghost" id="evb">Back to Orbit</button>';
+    '<div class="small" style="margin-top:12px">This is only a pattern in your own numbers, not a diagnosis. One reading cannot show high blood pressure. Please share it with your doctor.</div><button class="btn ghost" id="evb">Back to Orbit</button>';
   $('evo').classList.add('on'); $('evb').onclick = function(){ $('evo').classList.remove('on'); };
 }
 
@@ -600,7 +618,7 @@ function cgRender(){
   var summary = '<div class="sum"><small>' + esc(who) + '</small>' + (an.last ? 'Last reading ' + an.last.sys + '/' + an.last.dia + ' on ' + esc(D.fmtDate(an.lastDate)) + '.' : 'No readings yet.') + '<br>' + esc(an.sentence) + '</div>';
   if (a && a.status === 'ringing' && a.target === me) {
     beep(); try { navigator.vibrate && navigator.vibrate([300, 150, 300]); } catch(e){}
-    el.innerHTML = '<div id="ring" class="overlay on" style="position:absolute"><div style="color:#7DD3FC;margin-top:28px">Orbit-X alert</div><div class="who">' + esc(who) + '</div><div class="sub">' + (a.sys ? 'Blood pressure dangerously high' : 'Needs help now') + '</div><div class="av">&#129504;</div><div style="color:#6C7FA8;font-size:13px">' + (a.chainNames.length > 1 && a.chainNames[a.chainNames.length - 1] !== st.me.name ? 'No answer in ' + a.secondsLeft + 's? The next person is called' : 'Please answer now') + '</div><div class="cb"><button class="no" id="decl" aria-label="Decline">&#10005;</button><button class="yes" id="ans" aria-label="Answer">&#10003;</button></div></div>';
+    el.innerHTML = '<div id="ring" class="overlay on"><div style="color:#7DD3FC;margin-top:28px">Orbit-X alert</div><div class="who">' + esc(who) + '</div><div class="sub">' + (a.sys ? 'Very high blood pressure reading ' + a.sys + '/' + a.dia : 'Needs help now') + '</div><div class="av">&#129504;</div><div style="color:#6C7FA8;font-size:13px">' + (a.chainNames.length > 1 && a.chainNames[a.chainNames.length - 1] !== st.me.name ? 'No answer in ' + a.secondsLeft + 's? The next person is called' : 'Please answer now') + '</div><div class="cb"><button class="no" id="decl" aria-label="Decline">&#10005;</button><button class="yes" id="ans" aria-label="Answer">&#10003;</button></div></div>';
     $('ans').onclick = function(){ hApi('answer').then(function(j){ take(j); cgRender(); }); };
     $('decl').onclick = function(){ hApi('decline').then(function(j){ take(j); cgRender(); }); };
     return;
