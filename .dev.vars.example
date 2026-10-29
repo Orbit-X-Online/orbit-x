@@ -1,7 +1,11 @@
 # Copy to .dev.vars for local dev (never commit .dev.vars).
 # In production set each one with:  npx wrangler secret put NAME
-MODEL_API_KEY=            # Meta Model API key from dev.meta.ai
-WHATSAPP_TOKEN=           # WhatsApp Cloud API permanent/system-user token
-WHATSAPP_PHONE_ID=        # WhatsApp test number phone-number ID
-WHATSAPP_VERIFY_TOKEN=    # any random string you choose; paste same value in Meta webhook setup
-# MODEL_REASONING=low     # optional: minimal|low|medium|high|xhigh (only set if the model accepts it)
+MODEL_API_KEY=            # AI provider key (Baseten for Muse Spark Open, or Meta Model API). Optional: without it AI features say "not configured".
+RECEIPT_SECRET=           # any long random string; signs integrity receipts. Optional but recommended in production.
+VAPID_SUBJECT=mailto:you@example.com   # contact address sent to browser push services (replace with your own)
+WHATSAPP_TOKEN=           # WhatsApp Cloud API token (parked feature; optional)
+WHATSAPP_PHONE_ID=        # WhatsApp phone-number ID (optional)
+WHATSAPP_VERIFY_TOKEN=    # any random string you choose; same value in the Meta webhook setup (optional)
+# MODEL_REASONING=low     # optional: minimal|low|medium|high|xhigh (only if the model accepts it)
+# AI_MODE=mock            # optional: force the labelled rule-based mock instead of a live model
+# PUSH_EXTRA_HOSTS=       # optional: comma-separated extra push-service hostnames to accept
