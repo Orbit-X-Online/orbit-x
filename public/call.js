@@ -3,7 +3,7 @@
    Signalling goes through the Orbit-X server (the 'rtc' action). Audio itself goes phone to phone (or through TURN if configured).
    opts: { rtc(op, extra) -> Promise<json>, ice() -> Promise<json>, audio: <audio>, onStatus(text, kind), onEnd() } */
 window.OXCall = (function () {
-  var pc = null, stream = null, poll = null, role = null, opts = null, handled = 0, gotAnswer = false, running = false, startedAt = 0, ended = false;
+  var pc = null, stream = null, poll = null, role = null, opts = null, handled = 0, gotAnswer = false, running = false, startedAt = 0, ended = false, attempt = 0, retrying = false, lastServers = null;
 
   function status(t, k) { try { opts && opts.onStatus && opts.onStatus(t, k || ''); } catch (e) {} }
   function supported() { return !!(window.RTCPeerConnection && navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
@@ -23,8 +23,10 @@ window.OXCall = (function () {
       p.addEventListener('icegatheringstatechange', chk);
     });
   }
-  function newPC(servers) {
-    var p = new RTCPeerConnection({ iceServers: servers && servers.length ? servers : [{ urls: 'stun:stun.l.google.com:19302' }] });
+  function newPC(servers, relayOnly) {
+    var cfg = { iceServers: servers && servers.length ? servers : [{ urls: 'stun:stun.l.google.com:19302' }], iceCandidatePoolSize: 2 };
+    if (relayOnly) cfg.iceTransportPolicy = 'relay';
+    var p = new RTCPeerConnection(cfg);
     p.ontrack = function (e) {
       var a = opts.audio; if (!a) return;
       a.srcObject = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
@@ -34,7 +36,10 @@ window.OXCall = (function () {
       var s = p.connectionState;
       if (s === 'connected') { status('Connected. You can talk now.', 'ok'); }
       else if (s === 'disconnected') status('Connection is unstable...', 'warn');
-      else if (s === 'failed') { status('The voice connection could not be made on this network. Use the Call buttons instead.', 'bad'); }
+      else if (s === 'failed') {
+        if (role === 'caller' && running && attempt < 2) { retryRelay(); }
+        else status('The voice connection could not be made on this network. Use the Call buttons instead.', 'bad');
+      }
     };
     return p;
   }
@@ -52,15 +57,30 @@ window.OXCall = (function () {
     status(msg || 'Call ended.', 'end'); try { o && o.onEnd && o.onEnd(); } catch (e) {}
   }
 
+
+  // Second and third try: force the audio through a relay (TURN) server, which gets through strict mobile networks.
+  function retryRelay() {
+    if (retrying) return; retrying = true; attempt++; gotAnswer = false; startedAt = Date.now();
+    status('Trying another route' + (attempt > 1 ? ' (relay)' : '') + '...', 'wait');
+    try { if (pc) pc.close(); } catch (e) {}
+    pc = newPC(lastServers, true);
+    stream.getTracks().forEach(function (t) { pc.addTrack(t, stream); });
+    pc.createOffer({ offerToReceiveAudio: true }).then(function (o) { return pc.setLocalDescription(o); })
+      .then(function () { return gather(pc); })
+      .then(function () { return opts.rtc('offer', { sdp: pc.localDescription.sdp }); })
+      .then(function () { retrying = false; status('Ringing ' + (opts.otherName || 'them') + ' again...', 'wait'); })
+      .catch(function () { retrying = false; status('The voice connection could not be made on this network. Use the Call buttons instead.', 'bad'); });
+  }
+
   function startCaller(o) {
-    opts = o; role = 'caller'; running = true; gotAnswer = false; ended = false; startedAt = Date.now();
+    opts = o; role = 'caller'; running = true; gotAnswer = false; ended = false; startedAt = Date.now(); attempt = 0; retrying = false;
     if (!supported()) { running = false; status('This browser cannot make voice calls. Use the Call buttons.', 'bad'); return Promise.resolve(false); }
     status('Starting the microphone...', 'wait');
     return getMic().then(function (s) {
       stream = s; status('Calling...', 'wait');
       return opts.ice();
     }).then(function (ice) {
-      pc = newPC(ice && ice.iceServers);
+      lastServers = ice && ice.iceServers; pc = newPC(lastServers);
       stream.getTracks().forEach(function (t) { pc.addTrack(t, stream); });
       return pc.createOffer({ offerToReceiveAudio: true });
     }).then(function (offer) { return pc.setLocalDescription(offer); })
@@ -70,9 +90,9 @@ window.OXCall = (function () {
         if (!j || !j.ok) throw new Error('offer_failed');
         status('Ringing ' + (opts.otherName || 'them') + '... waiting for them to connect.', 'wait');
         poll = setInterval(function () {
-          if (!running) return;
+          if (!running || retrying) return;
           opts.rtc('poll').then(function (r) {
-            if (!running || !r) return;
+            if (!running || !r || retrying) return;
             if (r.ok === false && r.error === 'no_call') { endLocal(false, 'The alert is closed. Call ended.'); return; }
             var x = r.rtc; if (!x) return;
             if (x.ended) { endLocal(false, 'The other person ended the call.'); return; }
@@ -80,6 +100,7 @@ window.OXCall = (function () {
               gotAnswer = true; status('Connecting...', 'wait');
               pc.setRemoteDescription({ type: 'answer', sdp: x.answer }).catch(function () { status('Could not connect. Tap Try again.', 'bad'); });
             } else if (!gotAnswer && Date.now() - startedAt > 45000) { status('They have not connected yet. Use the Call buttons, or tap Try again.', 'warn'); }
+            else if (gotAnswer && pc && pc.connectionState !== 'connected' && Date.now() - startedAt > 20000 && attempt < 2) { retryRelay(); }
           });
         }, 1000);
         return true;
