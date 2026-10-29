@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Orbit-X</title>
+<title>Orbit-X Demo (fictional patient)</title>
 <style>
 :root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#6C7FA8;--cy:#38BDF8;--teal:#5EEAD4;--red:#F87171;--pink:#F9A8A8}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -62,9 +62,12 @@ header b{color:var(--txt);font-size:16px;letter-spacing:.5px}
 .banner{background:#0b2a1a;border:1px solid #166534;color:#86efac;border-radius:12px;padding:10px 12px;text-align:center;font-size:14px;margin-top:10px;display:none}
 .banner.on{display:block}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+:focus-visible{outline:3px solid #38BDF8;outline-offset:2px}
 </style>
 </head>
 <body>
+<div role="note" style="background:#1e293b;color:#e2e8f0;font:13px/1.4 system-ui,sans-serif;padding:8px 12px;text-align:center">Demonstration with a <b>fictional patient</b> and made-up readings. No real people, records or live alerts. <a href="/" style="color:#7DD3FC">Back to Orbit-X</a></div>
 <div class="app" id="app"></div>
 <script src="data.js"></script>
 <script>
