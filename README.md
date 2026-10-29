@@ -1,89 +1,164 @@
 # Orbit-X
 
-A voice-first health companion with a talking AI face. It helps a person keep track of their own blood pressure and medicine, notices changes in their own numbers, and makes sure family knows if they need help.
+**Orbit-X is a health-information intelligence and interoperability platform.** It helps a person keep their own health information in one place, understand it with evidence-linked explanations, exchange it using a limited FHIR R4 subset, and (optionally) have family or caregivers alerted if they need help.
 
-Built for the Meta Global AI Developer Hackathon (Startups track).
+Orbit-X **does not give medical advice and is not a medical device.** Plain code finds patterns in the person's own logged data; the AI only rewords facts, and its output is checked so it cannot suggest medicine, doses or diagnoses. Emergencies are decided by fixed code, never by an AI. Built for the Meta Global AI Developer Hackathon (Startups track). Use **synthetic (pretend) data only**.
 
-**Orbit-X does not give medical advice.** Plain code finds patterns in the person's own logged numbers. The AI only puts those facts into plain words, and its output is checked so it cannot suggest medicine, doses or diagnoses. Emergencies are decided by fixed code, never by an AI.
+## The screens
 
-## What it does
+| Screen | Who it is for | What it does |
+|---|---|---|
+| `/` (index) | Everyone | Sign-up, then your daily app: log blood pressure and tablets, talk or type to Orbit, Family and caregivers, Settings (phone alerts, tablet times, account). |
+| `/workspace.html` | Everyone | **Health Workspace** — your documents, extracted facts with sources, timeline, Evidence Graph, appointment brief, sharing and consent. |
+| `/guide.html` | Everyone | A one-minute plain-words explanation. |
+| `/demo.html` | Anyone curious | A walkthrough with a **fictional** patient. No real people or alerts. |
+| `/studio.html` | Doctors you invite | **Rule Studio** — a clinician writes an alert rule in plain words, reads it back, and approves it. |
+| `/developer.html`, `/docs.html`, `/partner.html` | Doctor / organisation accounts only | **Developer tools:** API keys, FHIR record import, emergency handoff, API docs, a test app. Hidden from personal accounts (also enforced on the server). |
+| `/brief.html`, `/receipt.html` | Whoever holds the link | Read-only shared appointment brief and integrity receipt. |
 
-- **A face you talk to.** Speak or type to log a reading ("my pressure is 150 over 95"), log a tablet, or ask about your week.
-- **Proof for every sentence.** When Orbit says "your pressure has been higher than your usual for 4 days", tapping the sentence shows the exact readings and missed tablets behind it.
-- **A fixed emergency rule.** A reading of 180/120 or higher, dangerous symptom words (including Pidgin, such as "chest dey pain"), or the help button starts the alert chain. No AI is in this path.
-- **An alert chain.** Caregivers join with a single-use invite link. The first caregiver's phone rings like a call. If they do not answer in 20 seconds, the next one rings. If nobody is linked or nobody answers, the person is told to call 112. The person can cancel a false alarm.
-- **Private by design.** Each person's data lives in their own isolated store. Keys are stored only as hashes. A person can delete their account and data at any time.
+## What is implemented, partial, mocked or unverified
+
+| Feature | Status |
+|---|---|
+| Accounts, caregiver invites (invited / joined / expired), household isolation | Implemented, automated-tested |
+| Server-side reminder scheduling with Durable Object alarms (works with the page closed) | Implemented, tested against a fake store. **Not yet verified on live Cloudflare.** |
+| Daylight-saving-aware local reminder times (uses the phone's IANA zone name) | Implemented, tested (US DST change) |
+| Web Push request + result tracking (accepted / rejected / expired / throttled / service error / network error) | Implemented, tested with a fake push service. **Not yet verified against real Google/Mozilla/Apple push services.** |
+| "Shown on the phone" confirmation | Implemented: the phone's service worker reports back after displaying. **Not yet verified on a real device.** |
+| Emergency alert chain with server-side escalation | Implemented, tested (fake store) |
+| SMS / phone calls | **Not implemented** (needs a paid provider). The app gives Call/Text buttons that use the person's own SIM. |
+| Health Workspace, evidence graph, pattern engine | Implemented (text documents only) |
+| AI wording (Muse Spark Open via Baseten / Meta Model API) | Implemented; needs your key. Without a key: clear "not configured" message and a labelled rule-based mode. Live model **not verified** in this repo's tests (mocked). |
+| FHIR | **Limited R4 subset**, not full interoperability. Supported resources: Patient, Organization, Practitioner, Encounter, Observation, Condition, MedicationRequest, AllergyIntolerance, DiagnosticReport, DocumentReference, Provenance, Consent, AuditEvent. Structural validation only (not a full conformance validator). |
+| Hospital/EMR connections, emergency handoff delivery | **Simulated** and labelled so. |
+| WhatsApp webhook | Parked stub (verification handshake only). |
+| Voice input | Uses the browser's speech recognition. |
+| iPhone push | Untested (iOS 16.4+, Add to Home Screen). |
+| Regulatory compliance (HIPAA, GDPR, etc.) | **Not assessed and not claimed.** |
+
+## Prerequisites
+
+Node.js 20+ (tested on 22), a free Cloudflare account, and `npx wrangler login`. Durable Objects with SQLite storage are used (available on the Workers free plan).
+
+## Local setup
+
+```
+npm install
+cp .dev.vars.example .dev.vars     # fill in only what you need; never commit this file
+npm run dev                        # http://localhost:8787
+```
+
+Push notifications need HTTPS (or `localhost`). For phone testing use a deployed URL (see below).
+
+## Environment variables and secrets
+
+Names only, set with `npx wrangler secret put NAME`:
+
+| Name | Required? | Purpose |
+|---|---|---|
+| `MODEL_API_KEY` | Optional | AI provider key. Without it the AI says it is not configured; everything else works. |
+| `RECEIPT_SECRET` | Recommended | Signs integrity receipts. Without it receipts are hash-chained but unsigned. |
+| `VAPID_SUBJECT` | Recommended | Your contact address for push services, e.g. `mailto:you@example.com`. Defaults to a placeholder. |
+| `WHATSAPP_*` | Optional | Parked WhatsApp feature. |
+
+Non-secret settings live in `wrangler.toml`: `MODEL_BASE_URL`, `MODEL_TEXT`, `ESCALATE_MS`, `ALLOWED_ORIGINS` (**change this to your own domain**), optional `PUSH_EXTRA_HOSTS`.
+
+Push (VAPID) keys are generated automatically per household and kept inside that household's Durable Object. They are never sent to the browser except the public half.
+
+## Run the tests
+
+```
+npm test          # smoke + household + notifications/security + static front-end (no network, no cost)
+npm run check     # syntax check of every source file and the service worker
+python3 test/ui-smoke.py   # optional: real headless browser, needs `pip install playwright && playwright install chromium`
+```
+
+## Deploy to Cloudflare
+
+1. `npm install`
+2. `npx wrangler login`
+3. Edit `ALLOWED_ORIGINS` in `wrangler.toml` to your domain(s).
+4. `npx wrangler secret put MODEL_API_KEY` (optional), `RECEIPT_SECRET`, and `VAPID_SUBJECT`.
+5. `npm run deploy`
+
+Durable Object configuration (already in `wrangler.toml`; do not rename the class, the migration depends on it):
+
+```
+[[durable_objects.bindings]]  name = "ALERTS", class_name = "AlertHub"
+[[migrations]]                tag = "v1", new_sqlite_classes = ["AlertHub"]
+```
+
+Static files are served from `public/` (`run_worker_first` sends only `/api/*` to the Worker). `public/_headers` adds basic security headers.
+
+## Turn on phone alerts on Android
+
+1. Open your deployed `https://` Orbit-X address in **Chrome** and create your account (tick your tablet times).
+2. Settings → **Turn on phone alerts** → **Allow** when asked.
+3. Tap again to **Send a test**. You will see two steps: "push service accepted" (step 1) and, a few seconds later, "this phone confirmed it displayed the alert" (step 2).
+4. Optional: Chrome menu → **Add to Home screen**.
+
+## Test a reminder with the website closed
+
+1. Make sure step 3 above confirmed on this phone.
+2. Choose a tablet time (e.g. Morning = 08:00 local) and do **not** log the tablet.
+3. Close the Orbit-X tab and swipe Chrome away. Leave the phone on with internet.
+4. At the reminder time (08:00 morning, 13:00 afternoon, 18:00 evening, 21:00 night) a notification appears. If you set up a caregiver phone, it gets a "tablet not logged" heads-up 3 hours later (11:00, 16:00, 21:00, 23:00).
+5. Reminders only start for times **after** the account is created.
+
+## How to read the push diagnostics
+
+| Message | Meaning |
+|---|---|
+| Accepted by the push service (code 201) | Google/Mozilla/Apple took the request. **Not proof the phone showed it.** |
+| Confirmed: this phone displayed it | The phone's service worker ran and reported back. This is the real evidence. |
+| Expired / removed (404, 410) | The browser dropped this subscription. Turn alerts on again on that phone. |
+| Refused (400, 401, 403, 413) | The push service refused the request. Turn alerts off and on again; check `VAPID_SUBJECT`. |
+| Throttled (429) | Too many requests. Wait a minute. |
+| Push service error (5xx) / network error | Temporary. One automatic retry is made, then it is reported. |
+
+The Family screen's activity list (patient only) records kind, state and HTTP code per attempt, never health text, endpoints or keys.
+
+## Known platform limitations
+
+- A phone that is off or has no connection cannot show a notification at that moment. The push service holds a reminder for up to 1 hour (tablet reminder) or 2 hours (caregiver heads-up) and an emergency push for 2 minutes, then discards it.
+- Do Not Disturb, silenced Chrome notifications, battery savers and "force stop" can hide or block alerts.
+- Web Push is free but offers **no delivery guarantee**. Orbit-X therefore never says "delivered" unless the phone itself reports it displayed the notification.
+- Reminders more than 2 hours late (caregiver heads-up: 3 hours) are skipped and recorded rather than sent stale.
+- No SMS or automatic phone calls (paid providers needed). Emergency screens use the device's own Call/Text.
+- Unauthenticated account creation has no global rate limit yet (add Cloudflare rate-limiting rules before public launch).
+
+## Troubleshooting
+
+| Problem | Try |
+|---|---|
+| "Notifications are blocked" | Chrome lock icon → Permissions → Notifications → Allow. |
+| Test says "accepted" but nothing appears and no confirmation | Android Settings → Apps → Chrome → Notifications on; Do Not Disturb off; battery "Unrestricted". Send another test. |
+| "Expired / removed" | Turn phone alerts on again on that phone. |
+| "Refused" | Turn alerts off and on; confirm the site is HTTPS; check `VAPID_SUBJECT`. |
+| "Session expired" | Sign out, then rejoin with a new invite link. |
+| Invite says expired | Invites last 7 days. Tap **New invite**. |
+| AI says "not configured" | Set `MODEL_API_KEY` (optional feature). |
 
 ## Meta models
 
 | Model | Use | Status |
 |---|---|---|
-| Muse Spark | Rewords the facts the pattern engine found, and answers general questions. Output is checked for medical advice. | In progress |
-| Muse Voice Transcribe | Understands speech, including Nigerian-accented English. | Planned |
-| SAM 3.1 | Checks a photo of a tablet. | Planned |
-
-This table is updated as each piece lands. Meta's models are called only from the server, so the API key never reaches the browser.
+| Muse Spark | Rewords the facts the pattern engine found, and answers general questions. Output is checked for medical advice. | Integrated; needs your key |
+| Muse Voice Transcribe | Speech understanding | Planned |
+| SAM 3.1 | Checks a photo of a tablet | Planned |
 
 ## What was built when (hackathon disclosure)
 
 **Before the event** (tagged `scaffold-pre-hackathon`): an empty Cloudflare Worker with a health check, a thin Meta API client (`src/meta.js`), a stub WhatsApp webhook, a "coming soon" page, and a mocked smoke test.
 
-**Before kickoff, on the same day** (hours before the event began): `public/demo.html` and the fictional-patient parts of `public/data.js` were a first prototype of the demo story ("Mr. Briggs", fictional data).
+**Before kickoff, on the same day:** `public/demo.html` and the fictional-patient parts of `public/data.js` were a first prototype of the demo story ("Mr. Briggs", fictional data).
 
-**Built during the hackathon:** everything else, including accounts, invite links, caregiver phones, the alert chain, the household store, real readings and the pattern engine for real users, the medical-advice guard, the settings and recovery flow, and the tests.
+**Built during the hackathon:** everything else, including accounts, invite links, caregiver phones, the alert chain, the household store, the pattern engine, the medical-advice guard, the Health Workspace, Orbit Connect (FHIR subset, API keys, handoff, receipts), and the tests. A later repair pass (see `CHANGELOG-FIXES.md`) fixed notification scheduling and diagnostics, security and documentation.
 
-## How it works
+## Orbit Connect (developers)
 
-- `src/worker.js`: the whole server (routes, the per-person store, the alert chain, the AI guard).
-- `src/meta.js`: the Meta Model API client.
-- `public/index.html`: the app.
-- `public/data.js`: the pattern engine, emergency keywords and command parsing.
-- `public/demo.html`: the fictional demo story.
-- `test/`: automated tests for the server rules, the pattern engine, and a multi-phone end-to-end flow.
-
-Runs on Cloudflare Workers with Durable Objects. There is no separate database.
-
-## Run the tests
-
-```
-node test/api.test.mjs
-node test/engine.test.mjs
-```
-
-The end-to-end test (`test/e2e.py`) needs Playwright for Python.
-
-## Known limits
-
-- **Phone alerts use Web Push** (free, no app store). A caregiver taps "Arm this phone" once and allows notifications; after that the phone is alerted even when Orbit-X is closed. It shows a notification with vibration, not a full-screen phone call. Do Not Disturb, silenced Chrome notifications and aggressive battery savers can still hide it, so test it on each phone (the app has a "Send me a test alert" button). iPhone needs iOS 16.4 or later and "Add to Home Screen" first. iPhone delivery is untested.
-- Orbit-X does not place real phone calls or SMS by itself (that needs a paid provider). Instead the emergency screen gives the person big **Call** and **Text** buttons that use their own phone and SIM.
-- Voice input uses the browser's speech recognition until Muse Voice Transcribe is connected.
-- Documents are text only (paste or .txt). Photos and PDFs are a next step.
-- Orbit-X is a hackathon project. It is not a medical device.
-
-## Added during the hackathon (day 3)
-
-Server-side escalation with Durable Object alarms (an alert moves to the next caregiver even if every phone is closed), Web Push alerts, tablet reminders for the person plus an opt-out heads-up for caregivers, free Call/Text buttons, separate sign-up for individuals and for doctors/organisations (only the latter reach the API and Developer area, enforced on the server), the 3-day learning period (was 5), and a plain-words guide. See `SUBMISSION.md`.
-
-## Tests (no network, no cost)
-
-```
-node test/smoke.mjs                 # basic server checks
-node test/household.test.mjs        # invites, push, escalation alarm, tablet reminders, account types
-CHROME=/path/to/chrome node test/ui.test.mjs   # real pages in a headless browser (needs Playwright)
-```
+FHIR R4 subset API, simulated EMR connector, provenance, duplicate/conflict detection, scoped API keys, OAuth-style client-credentials tokens, rate limits, audit log, OpenAPI spec (`/openapi.json`, `/docs.html`). Emergency handoff is consent-gated and its delivery is **simulated** and labelled; receipts prove integrity (hash chain, optional HMAC), not medical truth. Check `/api/health` and `/api/ai/status` for AI mode.
 
 ## License
 
 MIT. See `LICENSE`.
-
-## Orbit-X: health intelligence + interoperability (hackathon build)
-
-**Orbit Health Intelligence** – upload synthetic lab reports / discharge summaries; facts are extracted with source, date, units and confidence, placed on a timeline, compared (math is deterministic code), and questions are answered evidence-first. Every statement links to a source; documented facts, user-reported info, AI interpretation, conflicts and missing information are kept separate. No medical advice.
-
-**Orbit Connect** – FHIR R4 subset API, simulated EMR connector, provenance, duplicate/conflict detection, scoped API keys, OAuth-style client-credentials tokens, rate limits, audit log, OpenAPI spec (`/openapi.json`, `/docs.html`).
-
-**Emergency handoff** – consent-gated event → summary → verifiable receipt with five states (accepted, generated, sent, received, acknowledged). Delivery is **simulated** and labelled so. Receipts prove integrity (hash chain, optional HMAC), not medical truth, and contain no private details.
-
-**Meta model use** – Muse Spark Open via Baseten (OpenAI-compatible API) proposes extractions and wording. Code validates every output (quotes must appear in the source, numbers must appear in evidence, advice is rejected). If the model is unavailable, a rule-based fallback runs and the UI says "mock/rules mode"; it is never presented as a Meta model. Check `/api/health` and `/api/ai/status`.
-
-**Synthetic data only.** Setup: set secret `MODEL_API_KEY` (Baseten); optional `RECEIPT_SECRET`.
