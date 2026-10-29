@@ -33,6 +33,11 @@ const MAX_CHARS = 2000;
 const DEFAULT_ESCALATE_MS = 20000;
 const HIGH_BP_SYS = 180, HIGH_BP_DIA = 120;
 const MAX_CAREGIVERS = 4;
+const RING_REPEAT_MS = 8000;        // while a caregiver phone is ringing, nudge it again this often
+const JOIN_RETRY_MS = 10 * 60000;   // the same invite code may be re-opened for 10 minutes (double tap, reload, lost signal)
+const REMIND_HOUR = { morning: 8, afternoon: 14, evening: 19, night: 22 }; // local clock hour of each tablet time
+const REMIND_GRACE_MIN = 90;        // minutes after the tablet time before caregivers get a gentle heads-up
+const REMIND_WINDOW_MIN = 6 * 60;   // stop reminding about a tablet time after this long
 
 function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
@@ -75,6 +80,11 @@ function cleanPhone(s) {
   const t = String(s == null ? '' : s).replace(/[\s\-()]/g, '');
   return /^\+?[0-9]{7,15}$/.test(t) ? t : '';
 }
+function cleanTz(v) { return Number.isInteger(v) && v >= -840 && v <= 840 ? v : null; } // minutes, same sign as Date.getTimezoneOffset()
+function localDay(ts, tz) { const d = new Date(ts - tz * 60000); return d.toISOString().slice(0, 10); }
+function localMinutes(ts, tz) { const d = new Date(ts - tz * 60000); return d.getUTCHours() * 60 + d.getUTCMinutes(); }
+function localMidnight(ts, tz) { return Math.floor((ts - tz * 60000) / 86400000) * 86400000 + tz * 60000; }
+function b64u(buf) { let s = ''; const b = new Uint8Array(buf); for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
 function isEmergencyReading(sys, dia) { return sys >= HIGH_BP_SYS || dia >= HIGH_BP_DIA; }
 function validDate(s, now) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
@@ -89,31 +99,6 @@ function parseCode(raw) {
   return { pid: c.slice(0, 8), secret: c.slice(8) };
 }
 
-
-/* ------------------------------ phone notifications (Web Push, free) ------------------------------
-   A phone that has been "armed" gets a real notification even when Orbit-X is closed and the screen is off.
-   The push carries NO health details: it only wakes the phone. The phone then asks our server what to show. */
-const REMIND_HOUR = { morning: 8, afternoon: 13, evening: 18, night: 21 };   // gentle reminder to the person
-const MISSED_HOUR = { morning: 11, afternoon: 16, evening: 21, night: 23 };  // heads-up to caregivers if still not logged
-function b64u(buf) { let s = ''; const b = new Uint8Array(buf); for (const x of b) s += String.fromCharCode(x); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
-async function vapidKeys(storage) {
-  let v = await storage.get('vapid');
-  if (v && v.pub && v.jwk) return v;
-  const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
-  v = { pub: b64u(await crypto.subtle.exportKey('raw', kp.publicKey)), jwk: await crypto.subtle.exportKey('jwk', kp.privateKey) };
-  await storage.put('vapid', v);
-  return v;
-}
-async function vapidAuth(v, endpoint, env) {
-  const enc = (o) => b64u(new TextEncoder().encode(JSON.stringify(o)));
-  const head = enc({ typ: 'JWT', alg: 'ES256' });
-  const claims = enc({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.VAPID_SUBJECT || 'mailto:alerts@orbit-x.online' });
-  const key = await crypto.subtle.importKey('jwk', v.jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
-  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(head + '.' + claims));
-  return 'vapid t=' + head + '.' + claims + '.' + b64u(sig) + ', k=' + v.pub;
-}
-function localParts(now, tz) { const d = new Date(now + (tz || 0) * 60000); const p = (n) => (n < 10 ? '0' : '') + n; return { date: d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()), hour: d.getUTCHours(), dayStart: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - (tz || 0) * 60000 }; }
-function dayShift(ymd, n) { const t = Date.parse(ymd + 'T00:00:00Z') + n * 86400000; return new Date(t).toISOString().slice(0, 10); }
 
 /* ------------------------------ Rule Studio ------------------------------
    A clinician writes a rule in plain words. Code (or the AI) DRAFTS it, a human APPROVES it, and fixed code RUNS it.
@@ -269,7 +254,10 @@ function joinedChain(h) {
 function activeAlert(a) { return a && (a.status === 'ringing' || a.status === 'answered'); }
 
 function startAlert(h, input, now) {
-  if (activeAlert(h.alert)) return h.alert;
+  if (activeAlert(h.alert)) {
+    if (h.alert.test && !input.test) { h.alert.status = 'cancelled'; logLine(h.alert, now, 'Practice alert replaced by a real alert'); }
+    else return h.alert;
+  }
   const sys = Number.isInteger(input.sys) && input.sys >= 50 && input.sys <= 300 ? input.sys : null;
   const dia = Number.isInteger(input.dia) && input.dia >= 30 && input.dia <= 200 ? input.dia : null;
   const both = sys !== null && dia !== null;
@@ -277,13 +265,14 @@ function startAlert(h, input, now) {
   const a = {
     id: String(now), status: 'ringing', chain, idx: 0, ringStart: now, startedAt: now,
     sys: both ? sys : null, dia: both ? dia : null, why: cleanName(input.why, 200),
-    answeredBy: null, handledBy: null, log: [],
+    answeredBy: null, handledBy: null, log: [], test: !!input.test,
   };
-  logLine(a, now, both ? 'Reading ' + sys + '/' + dia : 'Help requested');
+  if (a.test) logLine(a, now, 'PRACTICE ALERT. This is only a test, nobody is in danger');
+  logLine(a, now, both ? 'Reading ' + sys + '/' + dia : (a.test ? 'Practice alert requested' : 'Help requested'));
   logLine(a, now, 'Emergency rule fired');
   if (!chain.length) {
     a.status = 'unanswered';
-    logLine(a, now, 'No caregiver is linked. Call 112 now');
+    logLine(a, now, a.test ? 'No caregiver is linked yet, so the practice alert has nobody to ring' : 'No caregiver is linked. Call 112 now');
   } else {
     logLine(a, now, chain[0].name + ' is being called');
   }
@@ -325,7 +314,7 @@ function alertView(a, who, now, escalateMs) {
     handledBy: a.handledBy, handledByName: a.handledBy ? nameOf(a, a.handledBy) : null,
     cancelled: a.status === 'cancelled', chainNames: a.chain.map((c) => c.name),
     mine: me ? (t && t.id === me) || a.answeredBy === me : false,
-    log: a.log, head: a.head || null,
+    log: a.log, head: a.head || null, test: !!a.test,
   };
 }
 
@@ -343,7 +332,135 @@ export class AlertHub {
   async fetch(req) {
     const url = new URL(req.url);
     if (url.pathname.startsWith('/h/')) return this.household(req, url.pathname.slice(3));
+    if (url.pathname === '/sys/keys') return this.sysKeys();
     return this.demo(req, url); // the original shared demo room (/api/alert/*)
+  }
+
+  /* ---- push notifications (free, no account, no secrets to set) ----
+     A single system object makes one VAPID key pair the first time it is needed and keeps it.
+     The server sends an EMPTY push to a phone; the phone's service worker then asks the server what happened.
+     That keeps every private detail out of the push network and needs no payload encryption. */
+  async sysKeys() {
+    let k = await this.state.storage.get('vapid');
+    if (!k) {
+      const kp = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+      const priv = await crypto.subtle.exportKey('jwk', kp.privateKey);
+      const raw = await crypto.subtle.exportKey('raw', kp.publicKey);
+      k = { priv, pub: b64u(raw) };
+      await this.state.storage.put('vapid', k);
+    }
+    return new Response(JSON.stringify(k), { headers: { 'Content-Type': 'application/json' } });
+  }
+  async vapid() {
+    if (this.vapidKeys) return this.vapidKeys;
+    const res = await this.env.ALERTS.get(this.env.ALERTS.idFromName('sys:vapid')).fetch(new Request('https://alerts.internal/sys/keys'));
+    const k = await res.json();
+    const key = await crypto.subtle.importKey('jwk', k.priv, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+    this.vapidKeys = { key, pub: k.pub };
+    return this.vapidKeys;
+  }
+  async vapidHeader(endpoint) {
+    const { key, pub } = await this.vapid();
+    const enc = (o) => b64u(new TextEncoder().encode(JSON.stringify(o)));
+    const head = enc({ typ: 'JWT', alg: 'ES256' });
+    const body = enc({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: this.env.VAPID_SUBJECT || 'mailto:alerts@orbit-x.online' });
+    const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(head + '.' + body));
+    return 'vapid t=' + head + '.' + body + '.' + b64u(sig) + ', k=' + pub;
+  }
+  // Wakes the phones in `who` (list of 'patient' or caregiver ids). Never throws. Dead subscriptions are removed.
+  async push(h, who, urgency) {
+    const subs = (h.push || []).filter((x) => who.includes(x.who));
+    if (!subs.length) return 0;
+    const gone = new Set(); let sent = 0;
+    await Promise.allSettled(subs.map(async (sub) => {
+      const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 5000);
+      try {
+        const res = await fetch(sub.endpoint, { method: 'POST', headers: { Authorization: await this.vapidHeader(sub.endpoint), TTL: '120', Urgency: urgency || 'high' }, signal: ctrl.signal });
+        if (res.status === 404 || res.status === 410) gone.add(sub.endpoint); else if (res.ok) sent++;
+        this.pushLog = this.pushLog || []; this.pushLog.push({ t: Date.now(), status: res.status }); this.pushLog = this.pushLog.slice(-20);
+      } catch (e) { /* offline phone: the in-page polling and the call buttons are the backup */ } finally { clearTimeout(timer); }
+    }));
+    if (gone.size) { h.push = h.push.filter((x) => !gone.has(x.endpoint)); this.dirty = true; }
+    return sent;
+  }
+  pushTargets(h, a, now) { // who should be woken right now because of this alert
+    if (!a) return [];
+    if (a.status === 'ringing') { const t = target(a); return t ? [t.id] : []; }
+    if (a.status === 'unanswered') return ['patient'];
+    return [];
+  }
+  alertSig(a) { return a ? [a.id, a.status, a.idx].join('|') : ''; }
+
+  // Works out the next moment the server must wake itself (ring repeat, escalation, tablet reminders).
+  nextWake(h, now) {
+    const c = [];
+    const a = h.alert;
+    if (a && a.status === 'ringing') c.push(Math.min(a.ringStart + this.escalateMs, now + RING_REPEAT_MS));
+    if (h.tz !== null && h.tz !== undefined && h.slots && h.slots.length) {
+      const mid = localMidnight(now, h.tz);
+      for (let d = 0; d < 2; d++) for (const sl of h.slots) {
+        const due = mid + d * 86400000 + (REMIND_HOUR[sl] || 19) * 60000 * 60;
+        c.push(due, due + REMIND_GRACE_MIN * 60000);
+      }
+    }
+    const future = c.filter((t) => t > now + 500);
+    return future.length ? Math.min(...future) : null;
+  }
+  async rearm(h) {
+    try {
+      const t = this.nextWake(h, Date.now()), cur = await this.state.storage.getAlarm();
+      if (t) { if (!cur || Math.abs(cur - t) > 1000) await this.state.storage.setAlarm(t); }
+      else if (cur) await this.state.storage.deleteAlarm();
+    } catch (e) { /* alarms unavailable: polling still works */ }
+  }
+
+  // Tablet reminders. Fixed code. A reminder is a nudge to the person; after a grace period family get a gentle heads-up.
+  checkReminders(h, now) {
+    const out = [];
+    if (h.tz === null || h.tz === undefined || !h.slots || !h.slots.length) return out;
+    h.rem = h.rem || {};
+    const day = localDay(now, h.tz), mins = localMinutes(now, h.tz);
+    const taken = new Set((h.doses || []).filter((d) => d.date === day).map((d) => d.slot));
+    for (const k of Object.keys(h.rem)) if (k.slice(0, 10) < localDay(now - 3 * 86400000, h.tz)) delete h.rem[k];
+    const hasFamily = h.caregivers.some((c) => c.tokenHash && (c.role || 'caregiver') === 'caregiver');
+    for (const sl of h.slots) {
+      const due = (REMIND_HOUR[sl] || 19) * 60, key = day + '|' + sl;
+      if (taken.has(sl) || mins < due || mins >= due + REMIND_WINDOW_MIN) continue;
+      const dueTs = now - (mins - due) * 60000;
+      if (h.createdAt > dueTs) continue; // do not nag about a time that passed before the account existed
+      const r = h.rem[key] = h.rem[key] || {};
+      if (!r.p) { r.p = now; out.push({ to: ['patient'], kind: 'remind', slot: sl }); }
+      if (!r.c && hasFamily && mins >= due + REMIND_GRACE_MIN) {
+        r.c = now;
+        const text = h.name + ' has not logged the ' + sl + ' tablet yet. You may want to check in.';
+        h.notices = h.notices || [];
+        h.notices.push({ id: 'm' + now + sl, t: now, kind: 'med', ruleName: 'Tablet reminder', text, evidence: [] });
+        if (h.notices.length > 30) h.notices = h.notices.slice(-30);
+        out.push({ to: h.caregivers.filter((c) => c.tokenHash && (c.role || 'caregiver') === 'caregiver').map((c) => c.id), kind: 'med', slot: sl, urgency: 'normal' });
+      }
+    }
+    return out;
+  }
+
+  // Runs on its own, even if every phone is closed: keeps ringing, moves on to the next caregiver, sends tablet reminders.
+  async alarm() {
+    const h = (await this.state.storage.get('h')) || null; if (!h) return;
+    h.rules = h.rules || []; h.symptoms = h.symptoms || []; h.notices = h.notices || []; h.push = h.push || []; h.history = h.history || [];
+    const now = Date.now(); this.dirty = false;
+    const before = this.alertSig(h.alert);
+    let pushes = [];
+    if (h.alert && h.alert.status === 'ringing') {
+      advance(h.alert, now, this.escalateMs);
+      await seal(h.alert, h.pid, this.env);
+      const after = this.alertSig(h.alert);
+      if (h.alert.status === 'ringing') pushes.push({ to: this.pushTargets(h, h.alert, now), kind: 'ring' });
+      else if (after !== before && h.alert.status === 'unanswered') pushes.push({ to: ['patient'], kind: 'unanswered' });
+    }
+    pushes = pushes.concat(this.checkReminders(h, now));
+    await this.state.storage.put('h', h);
+    for (const p of pushes) await this.push(h, p.to, p.urgency || 'high');
+    if (this.dirty) await this.state.storage.put('h', h);
+    await this.rearm(h);
   }
 
   /* ---- the original demo room: unchanged behaviour, separate storage key ---- */
@@ -430,102 +547,13 @@ export class AlertHub {
     return c ? { role: c.role || 'caregiver', id: c.id } : null;
   }
 
-  /* send a wake-up push to some subscriptions (by endpoint hash). Never throws. */
-  async push(h, ehs, now) {
-    const v = await vapidKeys(this.state.storage);
-    const dead = [];
-    await Promise.all((h.pushSubs || []).filter((x) => ehs.includes(x.eh)).map(async (sub) => {
-      try {
-        const res = await fetch(sub.endpoint, { method: 'POST', headers: { TTL: '120', Urgency: 'high', Authorization: await vapidAuth(v, sub.endpoint, this.env) } });
-        if (res.status === 404 || res.status === 410) dead.push(sub.eh);
-      } catch (e) { /* the phone may be offline; the in-app ring still works */ }
-    }));
-    if (dead.length) h.pushSubs = h.pushSubs.filter((x) => !dead.includes(x.eh));
-  }
-  subsFor(h, pred) { return (h.pushSubs || []).filter(pred).map((x) => x.eh); }
-  say(h, ehs, msg, now) { h.pushQ = h.pushQ || {}; ehs.forEach((e) => { h.pushQ[e] = { ...msg, t: now }; }); const keep = new Set((h.pushSubs || []).map((x) => x.eh)); Object.keys(h.pushQ).forEach((k) => { if (!keep.has(k)) delete h.pushQ[k]; }); }
-
-  // Looks at the alert and the tablet schedule, tells the right phones, and sets the next wake-up time.
-  async afterChange(h, now) {
-    try {
-      h.pushSubs = h.pushSubs || []; h.pushQ = h.pushQ || {};
-      const a = h.alert, mark = a ? a.id + '|' + a.status + '|' + a.idx : '';
-      if (a && h.lastPushed !== mark) {
-        h.lastPushed = mark;
-        const t = target(a), name = h.name || 'Someone';
-        let ehs = [], msg = null;
-        if (a.status === 'ringing' && t) { ehs = this.subsFor(h, (x) => x.role === 'caregiver' && x.id === t.id); msg = { title: 'Orbit-X ALERT: ' + name + ' needs help', body: (a.sys ? 'Reading ' + a.sys + '/' + a.dia + '. ' : '') + 'Tap to answer now.', tag: 'orbit-alert', urgent: true }; }
-        else if (a.status === 'unanswered') { ehs = this.subsFor(h, (x) => x.role === 'caregiver' || x.role === 'patient'); msg = { title: 'Orbit-X: no one answered', body: 'Please call ' + name + ' now. If it is an emergency call 112.', tag: 'orbit-alert', urgent: true }; }
-        else if (a.status === 'cancelled') { ehs = this.subsFor(h, (x) => x.role === 'caregiver'); msg = { title: 'Orbit-X: alert cancelled', body: name + ' says they are okay.', tag: 'orbit-alert' }; }
-        else if (a.status === 'answered' || a.status === 'handled') { ehs = this.subsFor(h, (x) => x.role === 'caregiver' && x.id !== a.answeredBy); msg = { title: 'Orbit-X: someone is helping', body: 'Another caregiver is handling ' + name + "'s alert.", tag: 'orbit-alert' }; }
-        if (msg && ehs.length) { this.say(h, ehs, msg, now); await this.push(h, ehs, now); }
-      }
-      await this.doseCheck(h, now);
-      await this.schedule(h, now);
-    } catch (e) { console.error('afterChange error:', e && e.message); }
-  }
-
-  // Tablet reminders. The person gets a gentle reminder; caregivers get a heads-up only if the person allows it.
-  async doseCheck(h, now) {
-    const slots = h.slots || []; if (!slots.length) return;
-    h.sent = h.sent || {};
-    const lp = localParts(now, h.tz || 0), name = h.name || 'Someone';
-    const logged = new Set((h.doses || []).map((d) => d.date + '|' + d.slot));
-    for (const slot of slots) {
-      const key = lp.date + '|' + slot;
-      if (logged.has(key)) continue;
-      const remindAt = lp.dayStart + REMIND_HOUR[slot] * 3600000, missAt = lp.dayStart + MISSED_HOUR[slot] * 3600000;
-      if (now >= remindAt && now - remindAt < 2 * 3600000 && remindAt > h.createdAt && !h.sent['r|' + key]) {
-        h.sent['r|' + key] = 1;
-        const ehs = this.subsFor(h, (x) => x.role === 'patient');
-        if (ehs.length) { this.say(h, ehs, { title: 'Orbit-X: your ' + slot + ' tablet', body: 'Tap I took my tablet when you have taken it.', tag: 'orbit-dose' }, now); await this.push(h, ehs, now); }
-      }
-      if (now >= missAt && now - missAt < 3 * 3600000 && missAt > h.createdAt && !h.sent['m|' + key]) {
-        h.sent['m|' + key] = 1;
-        if (h.tabletAlerts !== false && joinedChain(h).length) {
-          h.notices = h.notices || [];
-          h.notices.push({ id: 'd' + now + slot, t: now, kind: 'missed_dose', text: name + ' has not logged the ' + slot + ' tablet yet.' });
-          if (h.notices.length > 30) h.notices = h.notices.slice(-30);
-          const ehs = this.subsFor(h, (x) => x.role === 'caregiver');
-          if (ehs.length) { this.say(h, ehs, { title: 'Orbit-X: tablet not logged', body: name + ' has not logged the ' + slot + ' tablet yet. A call or message may help.', tag: 'orbit-dose-' + slot }, now); await this.push(h, ehs, now); }
-        }
-      }
-    }
-    Object.keys(h.sent).forEach((k) => { const d = k.split('|')[1]; if (d && d < dayShift(lp.date, -3)) delete h.sent[k]; });
-  }
-
-  // Sets the Durable Object alarm for the earliest thing that needs to happen next.
-  async schedule(h, now) {
-    const times = [];
-    const a = h.alert;
-    if (a && a.status === 'ringing') times.push(a.ringStart + this.escalateMs + 300);
-    if ((h.slots || []).length) {
-      const lp = localParts(now, h.tz || 0);
-      for (const off of [0, 1]) for (const slot of h.slots) for (const hr of [REMIND_HOUR[slot], MISSED_HOUR[slot]]) { const t = lp.dayStart + off * 86400000 + hr * 3600000; if (t > now + 1000) times.push(t); }
-    }
-    if (!times.length) { if (h.alarmAt) { h.alarmAt = 0; try { await this.state.storage.deleteAlarm(); } catch (e) { /* none */ } } return; }
-    const next = Math.max(now + 1000, Math.min(...times));
-    if (h.alarmAt && h.alarmAt > now && h.alarmAt === next) return; // already set: no extra writes on every poll
-    h.alarmAt = next;
-    try { await this.state.storage.setAlarm(next); } catch (e) { console.error('alarm error:', e && e.message); }
-  }
-
-  async alarm() {
-    const h = await this.state.storage.get('h');
-    if (!h) return;
-    const now = Date.now();
-    if (h.alert) { advance(h.alert, now, this.escalateMs); await seal(h.alert, h.pid, this.env); }
-    await this.afterChange(h, now);
-    await this.state.storage.put('h', h);
-  }
-
   stateView(h, who, now) {
     return {
       ok: true, now, role: who.role, pid: h.pid,
       me: who.role === 'caregiver' || who.role === 'clinician' ? { id: who.id, name: (h.caregivers.find((c) => c.id === who.id) || {}).name, role: who.role } : null,
-      profile: { name: h.name, slots: h.slots, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)) },
-      caregivers: who.role === 'patient' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, order: c.order, joined: !!c.tokenHash, role: c.role || 'caregiver', phone: c.phone || '', alertsOn: (h.pushSubs || []).some((x) => x.id === c.id) })) : undefined,
-      careNumbers: who.role === 'caregiver' ? { patient: h.phone || '' } : undefined,
+      profile: { name: h.name, slots: h.slots, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, tz: h.tz === undefined ? null : h.tz },
+      pushOn: (h.push || []).some((x) => x.who === (who.role === 'patient' ? 'patient' : who.id)),
+      caregivers: who.role === 'patient' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, order: c.order, joined: !!c.tokenHash, role: c.role || 'caregiver', phone: c.phone || '', pushOn: (h.push || []).some((x) => x.who === c.id) })) : undefined,
       rules: (h.rules || []).map((r) => ({ id: r.id, name: r.name, severity: r.severity, author: r.author, readback: r.readback, createdAt: r.createdAt })),
       notices: (h.notices || []).slice(-20),
       symptoms: (h.symptoms || []).slice(-20),
@@ -585,10 +613,9 @@ export class AlertHub {
       const slots = Array.isArray(body.slots) ? cleanSlots(body.slots) : [];
       const token = rand(40);
       h = { v: 1, pid: String(body.pid || ''), name, slots, phone: cleanPhone(body.phone), createdAt: now, createdDate: validDate(body.today, now) ? body.today : new Date(now).toISOString().slice(0, 10),
-        tokenHash: await sha(token), caregivers: [], readings: [], doses: [], alert: null, nextCid: 1,
-        accountType: body.accountType === 'provider' ? 'provider' : 'individual', org: cleanName(body.org, 60), tz: Number.isInteger(body.tz) && Math.abs(body.tz) <= 840 ? body.tz : 0, tabletAlerts: true };
+        tokenHash: await sha(token), caregivers: [], readings: [], doses: [], alert: null, nextCid: 1, tz: cleanTz(body.tz), push: [], rem: {} };
       await this.state.storage.put('h', h);
-      return json({ ok: true, pid: h.pid, token, accountType: h.accountType });
+      return json({ ok: true, pid: h.pid, token });
     }
     if (!h) return bad(404, 'not_found');
     h.rules = h.rules || []; h.rulesFired = h.rulesFired || {}; h.symptoms = h.symptoms || []; h.notices = h.notices || [];
@@ -603,11 +630,6 @@ export class AlertHub {
       const r = await publicReceipt(this.env, h.pid, sh, D, h);
       return r ? json(r) : bad(404, 'no_receipt');
     }
-    if (action === 'pushmsg') {
-      const e = new URL(req.url).searchParams.get('e') || '';
-      const q = h.pushQ && /^[a-f0-9]{64}$/.test(e) ? h.pushQ[e] : null;
-      return q ? json({ ok: true, title: q.title, body: q.body, tag: q.tag || 'orbit', urgent: !!q.urgent, t: q.t }) : json({ ok: true, title: 'Orbit-X', body: 'Open Orbit-X to see what is new.', tag: 'orbit' });
-    }
     if (action === 'briefpublic') return handleConnect({ h, storage: this.state.storage, env: this.env, who: { role: 'link' }, body, now, req, action });
     if (action === 'v1token') {
       return oauthToken({ storage: this.state.storage }, h, body, this.env, now);
@@ -615,10 +637,13 @@ export class AlertHub {
 
     if (action === 'join') {
       const secretHash = await sha(String(body.secret || ''));
-      const c = h.caregivers.find((x) => x.secretHash && x.secretHash === secretHash);
+      let c = h.caregivers.find((x) => x.secretHash && x.secretHash === secretHash);
+      // Same code again within a few minutes (double tap, reload, bad signal) is allowed once more and gets a fresh key.
+      if (!c) c = h.caregivers.find((x) => x.lastSecretHash && x.lastSecretHash === secretHash && now - (x.joinedAt || 0) < JOIN_RETRY_MS);
       if (!c) return bad(404, 'invalid_code');
       const token = rand(40);
-      c.tokenHash = await sha(token); c.secretHash = null; c.joinedAt = now;
+      c.tokenHash = await sha(token); c.lastSecretHash = c.secretHash || c.lastSecretHash; c.secretHash = null; c.joinedAt = now;
+      h.push = (h.push || []).filter((x) => x.who !== c.id);
       await this.state.storage.put('h', h);
       return json({ ok: true, pid: h.pid, token, id: c.id, name: c.name, role: c.role || 'caregiver', patientName: h.name });
     }
@@ -626,6 +651,8 @@ export class AlertHub {
     const who = await this.auth(h, req);
     if (!who) return bad(401, 'unauthorized');
     const before = JSON.stringify(h);
+    h.push = h.push || []; h.rem = h.rem || {};
+    const sigBefore = this.alertSig(h.alert);
     let extra = {}, status = 200, error = null;
     const fail = (s, e) => { status = s; error = e; };
     if (h.alert) advance(h.alert, now, this.escalateMs);
@@ -667,7 +694,7 @@ export class AlertHub {
       }
       case 'cancel': {
         if (!isPatient) { fail(403, 'patient_only'); break; }
-        if (activeAlert(h.alert) || (h.alert && h.alert.status === 'unanswered')) { h.alert.status = 'cancelled'; logLine(h.alert, now, h.name + ' says they are okay. Alert cancelled'); }
+        if (activeAlert(h.alert)) { h.alert.status = 'cancelled'; logLine(h.alert, now, h.name + ' says they are okay. Alert cancelled'); }
         else fail(409, 'no_alert');
         break;
       }
@@ -706,6 +733,7 @@ export class AlertHub {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         const i = h.caregivers.findIndex((x) => x.id === body.id);
         if (i < 0) { fail(404, 'no_caregiver'); break; }
+        h.push = (h.push || []).filter((x) => x.who !== h.caregivers[i].id);
         h.caregivers.splice(i, 1);
         h.caregivers.filter((x) => (x.role || 'caregiver') === 'caregiver').forEach((c, k) => { c.order = k + 1; });
         break;
@@ -715,37 +743,40 @@ export class AlertHub {
         if (body.name !== undefined) { const n = cleanName(body.name); if (!n) { fail(400, 'name_required'); break; } h.name = n; }
         if (body.phone !== undefined) h.phone = cleanPhone(body.phone);
         if (Array.isArray(body.slots)) h.slots = cleanSlots(body.slots);
-        if (Number.isInteger(body.tz) && Math.abs(body.tz) <= 840) h.tz = body.tz;
-        if (typeof body.tabletAlerts === 'boolean') h.tabletAlerts = body.tabletAlerts;
+        if (body.tz !== undefined) h.tz = cleanTz(body.tz);
         break;
       }
-      case 'pushkey': { extra.key = (await vapidKeys(this.state.storage)).pub; break; }
-      case 'pushsub': {
-        const sub = body.sub, ep = sub && typeof sub.endpoint === 'string' ? sub.endpoint : '';
-        if (!/^https:\/\/[^\s]{10,600}$/.test(ep)) { fail(400, 'bad_subscription'); break; }
-        const eh = await sha(ep);
-        h.pushSubs = (h.pushSubs || []).filter((x) => x.eh !== eh);
-        h.pushSubs.push({ eh, endpoint: ep, role: who.role, id: who.id || null, t: now });
-        if (h.pushSubs.length > 12) h.pushSubs = h.pushSubs.slice(-12);
-        h.pushQ = h.pushQ || {};
-        h.pushQ[eh] = { title: 'Orbit-X', body: 'Alerts are on for this phone.', tag: 'orbit-ready', t: now };
-        if (body.confirm === true) await this.push(h, [eh], now);
-        extra.eh = eh;
+      case 'test': {
+        if (!isPatient) { fail(403, 'patient_only'); break; }
+        if (activeAlert(h.alert) && !h.alert.test) { fail(409, 'real_alert_active'); break; }
+        startAlert(h, { why: 'Practice alert', test: true }, now);
         break;
       }
-      case 'pushoff': {
-        h.pushSubs = (h.pushSubs || []).filter((x) => !(x.role === who.role && (x.id || null) === (who.id || null)));
+      case 'subscribe': {
+        if (who.role === 'api') { fail(403, 'not_allowed'); break; }
+        const ep = String(body.endpoint || '');
+        if (!/^https:\/\/[^\s]{10,700}$/.test(ep)) { fail(400, 'bad_endpoint'); break; }
+        const w = isPatient ? 'patient' : who.id;
+        h.push = h.push.filter((x) => x.endpoint !== ep);
+        while (h.push.filter((x) => x.who === w).length >= 4) { const i = h.push.findIndex((x) => x.who === w); h.push.splice(i, 1); }
+        h.push.push({ who: w, endpoint: ep, t: now });
+        if (h.push.length > 24) h.push = h.push.slice(-24);
         break;
       }
-      case 'testpush': {
-        const mine = (h.pushSubs || []).filter((x) => x.role === who.role && (x.id || null) === (who.id || null)).map((x) => x.eh);
-        if (!mine.length) { fail(409, 'alerts_not_on'); break; }
-        mine.forEach((e) => { h.pushQ[e] = { title: 'Orbit-X test', body: 'This is a test. Your phone can get alerts.', tag: 'orbit-test', t: now }; });
-        await this.push(h, mine, now);
+      case 'unsubscribe': {
+        if (who.role === 'api') { fail(403, 'not_allowed'); break; }
+        const w = isPatient ? 'patient' : who.id;
+        h.push = h.push.filter((x) => x.who !== w);
+        break;
+      }
+      case 'pushtest': {
+        if (who.role === 'api') { fail(403, 'not_allowed'); break; }
+        extra.pushSent = await this.push(h, [isPatient ? 'patient' : who.id], 'high');
         break;
       }
       case 'delete': {
         if (!isPatient) { fail(403, 'patient_only'); break; }
+        try { await this.state.storage.deleteAlarm(); } catch (e) { /* ignore */ }
         await this.state.storage.deleteAll();
         return json({ ok: true, deleted: true });
       }
@@ -799,7 +830,6 @@ export class AlertHub {
       }
       case 'apikey': {
         if (!isPatient) { fail(403, 'patient_only'); break; }
-        if (h.accountType === 'individual') { fail(403, 'provider_only'); break; }
         if (h.apiKeys.length >= 5) { fail(409, 'too_many_keys'); break; }
         const scopes = Array.isArray(body.scopes) ? [...new Set(body.scopes.filter((x) => SCOPES.includes(x)))] : LEGACY_SCOPES;
         if (!scopes.length) { fail(400, 'no_valid_scopes'); extra.allowed = SCOPES; break; }
@@ -843,15 +873,24 @@ export class AlertHub {
     }
 
     if (h.alert) await seal(h.alert, h.pid, this.env);
-    await this.afterChange(h, now);
+    // Wake the right phones when the alert just started or just moved to the next person.
+    const sigAfter = this.alertSig(h.alert);
+    const wake = !error && sigAfter !== sigBefore ? this.pushTargets(h, h.alert, now) : [];
+    const finish = async () => {
+      if (JSON.stringify(h) !== before) await this.state.storage.put('h', h); // save first, then wake phones
+      this.dirty = false;
+      if (wake.length) await this.push(h, wake, 'high');
+      await this.rearm(h);
+      if (this.dirty) await this.state.storage.put('h', h);
+    };
     if (error) { if (JSON.stringify(h) !== before) await this.state.storage.put('h', h); return json({ ok: false, error, ...extra }, status); }
     if (who.role === 'api') {
       const al = h.alert; let receipt = null;
       if (al) { let sh = h.shares.find((x) => x.alertId === al.id); if (!sh) { sh = { id: rand(10), alertId: al.id, t: now }; h.shares.push(sh); h.shares = h.shares.slice(-60); } receipt = '/receipt.html?p=' + h.pid + '&s=' + sh.id; }
-      if (JSON.stringify(h) !== before) await this.state.storage.put('h', h);
+      await finish();
       return json({ ok: true, now, alert: alertView(al, { role: 'api' }, now, this.escalateMs), receipt });
     }
-    if (JSON.stringify(h) !== before) await this.state.storage.put('h', h);
+    await finish();
     return json({ ...this.stateView(h, who, now), ...extra }, 200);
   }
 }
@@ -969,14 +1008,12 @@ async function handleHousehold(req, env, url, cors) {
     if (text && text.length > 90000) return json({ error: 'too_large' }, 413, cors);
     return relay(await forward(hub(env, 'h:' + wm[1]), '/h/' + wm[2] + url.search, req, text), cors);
   }
-  const pm = /^\/api\/push\/msg\/([a-z0-9]{8})$/.exec(p);
-  if (pm && req.method === 'GET') return relay(await forward(hub(env, 'h:' + pm[1]), '/h/pushmsg' + url.search, req, undefined), cors);
   const bm = /^\/api\/brief\/([a-z0-9]{8})$/.exec(p);
   if (bm && req.method === 'GET') return relay(await forward(hub(env, 'h:' + bm[1]), '/h/briefpublic' + url.search, req, undefined), cors);
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
-    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush'].includes(m[2]);
+    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'share', 'apikey', 'apikeydel', 'signal', 'test', 'subscribe', 'unsubscribe', 'pushtest'].includes(m[2]);
     if (!get && !post) return json({ error: 'Not found' }, 404, cors);
     const text = post ? await req.text() : undefined;
     if (text && text.length > 4000) return json({ error: 'too_large' }, 413, cors);
@@ -1055,11 +1092,16 @@ export default {
     if (url.pathname === '/api/health' && req.method === 'GET') {
       return json({ ok: true, app: 'orbit-x', time: new Date().toISOString(), metaKeyConfigured: Boolean(env.MODEL_API_KEY), aiMode: aiMode(env) }, 200, cors);
     }
+    if (url.pathname === '/api/push/key' && req.method === 'GET') {
+      if (!env.ALERTS) return json({ ok: false, error: 'store_not_configured' }, 503, cors);
+      try { const r = await hub(env, 'sys:vapid').fetch(new Request('https://alerts.internal/sys/keys')); const k = await r.json(); return json({ ok: true, key: k.pub }, 200, cors); }
+      catch (e) { return json({ ok: false, error: 'unavailable' }, 503, cors); }
+    }
     if (url.pathname === '/api/ai/status' && req.method === 'GET') return handleAiStatus(req, env, url, cors);
     if (url.pathname === '/api/assistant' && req.method === 'POST') return handleAssistant(req, env, cors);
     if (url.pathname === '/api/explain' && req.method === 'POST') return handleExplain(req, env, cors);
     if (url.pathname.startsWith('/api/alert/')) return env.ALERTS ? handleDemoAlert(req, env, url, cors) : json({ error: 'Alert store not configured' }, 503, cors);
-    if (url.pathname === '/api/create' || url.pathname === '/api/join' || url.pathname.startsWith('/api/h/') || url.pathname.startsWith('/api/v1/') || url.pathname.startsWith('/api/receipt/') || url.pathname.startsWith('/api/w/') || url.pathname.startsWith('/api/brief/') || url.pathname.startsWith('/api/push/')) return handleHousehold(req, env, url, cors);
+    if (url.pathname === '/api/create' || url.pathname === '/api/join' || url.pathname.startsWith('/api/h/') || url.pathname.startsWith('/api/v1/') || url.pathname.startsWith('/api/receipt/') || url.pathname.startsWith('/api/w/') || url.pathname.startsWith('/api/brief/')) return handleHousehold(req, env, url, cors);
     if (url.pathname === '/api/whatsapp/webhook') return handleWhatsApp(req, env, url);
 
     return json({ error: 'Not found' }, 404, cors);
