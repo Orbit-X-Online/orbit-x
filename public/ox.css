@@ -61,3 +61,5 @@ svg text{font-family:inherit}
 #vmouth{transform-box:fill-box;transform-origin:center}
 #vmouth.talk{animation:vtalk .28s infinite alternate}
 @keyframes vtalk{from{transform:scaleY(1)}to{transform:scaleY(4.5)}}
+
+:focus-visible{outline:3px solid #38BDF8;outline-offset:2px}
