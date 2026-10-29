@@ -11,7 +11,9 @@ function mine(){
 self.addEventListener('install', function(){ self.skipWaiting(); });
 self.addEventListener('activate', function(e){ e.waitUntil(self.clients.claim()); });
 self.addEventListener('push', function(e){
-  e.waitUntil(mine().then(function(eh){
+  var eh = null;
+  e.waitUntil(mine().then(function(h){
+    eh = h;
     var fallback = { title: 'Orbit-X', body: 'Open Orbit-X to see what is new.', tag: 'orbit', urgent: false };
     if (!eh || !PID) return fallback;
     return fetch('/api/push/msg/' + PID + '?e=' + eh, { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){ return j && j.title ? j : fallback; }).catch(function(){ return fallback; });
@@ -20,6 +22,10 @@ self.addEventListener('push', function(e){
       body: m.body, tag: m.tag || 'orbit', renotify: true, requireInteraction: !!m.urgent,
       vibrate: m.urgent ? [400, 150, 400, 150, 400, 150, 400] : [200], icon: '/icon-192.png', badge: '/icon-192.png', data: { url: '/?guardian=1' }
     });
+  }).then(function(){
+    // Tell the server this phone really displayed it. This is the only real "shown on the device" evidence we can get.
+    if (!eh || !PID) return;
+    return fetch('/api/push/ack/' + PID + '?e=' + eh, { method: 'POST', cache: 'no-store' }).catch(function(){});
   }));
 });
 self.addEventListener('notificationclick', function(e){
