@@ -8,8 +8,32 @@ function mine(){
     return crypto.subtle.digest('SHA-256', new TextEncoder().encode(s.endpoint)).then(hex);
   });
 }
-self.addEventListener('install', function(){ self.skipWaiting(); });
-self.addEventListener('activate', function(e){ e.waitUntil(self.clients.claim()); });
+/* Offline shell: the app opens with no internet. Pages are fetched fresh when online (so updates arrive) and kept for when the signal drops. */
+var SHELL = 'orbitx-shell-v2';
+var FILES = ['/', '/index.html', '/ox.css', '/data.js', '/call.js', '/ox.js', '/manifest.webmanifest', '/icon-192.png'];
+self.addEventListener('install', function(e){
+  e.waitUntil(caches.open(SHELL).then(function(c){ return Promise.all(FILES.map(function(f){ return c.add(f).catch(function(){}); })); }).then(function(){ return self.skipWaiting(); }));
+});
+self.addEventListener('activate', function(e){
+  e.waitUntil(caches.keys().then(function(ks){ return Promise.all(ks.filter(function(k){ return k !== SHELL; }).map(function(k){ return caches.delete(k); })); }).then(function(){ return self.clients.claim(); }));
+});
+function fromCache(r){ return caches.match(r, { ignoreSearch: true }).then(function(m){ return m || (r.mode === 'navigate' ? caches.match('/index.html') : null); }); }
+self.addEventListener('fetch', function(e){
+  var r = e.request; if (r.method !== 'GET') return;
+  var u = new URL(r.url); if (u.origin !== self.location.origin || u.pathname.indexOf('/api/') === 0 || u.pathname === '/sw.js') return;
+  e.respondWith(new Promise(function(resolve){
+    var done = false;
+    var t = setTimeout(function(){ fromCache(r).then(function(m){ if (m && !done) { done = true; resolve(m); } }); }, 4000); // weak signal: use the saved copy
+    fetch(r).then(function(res){
+      clearTimeout(t); if (done) return; done = true;
+      if (res && res.ok) { var cp = res.clone(); caches.open(SHELL).then(function(c){ c.put(r, cp); }); }
+      resolve(res);
+    }, function(){
+      clearTimeout(t);
+      fromCache(r).then(function(m){ if (done) return; done = true; resolve(m || Response.error()); });
+    });
+  }));
+});
 self.addEventListener('push', function(e){
   var eh = null;
   e.waitUntil(mine().then(function(h){
