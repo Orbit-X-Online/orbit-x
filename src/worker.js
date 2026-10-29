@@ -97,7 +97,7 @@ const REMIND_HOUR = { morning: 8, afternoon: 13, evening: 18, night: 21 };   // 
 const MISSED_HOUR = { morning: 11, afternoon: 16, evening: 21, night: 23 };  // heads-up to caregivers if still not logged
 const PUSH_KIND = { // TTL = how long the push service may hold the message while the phone is off/offline
   emergency: { ttl: 120, urgency: 'high' }, escalation: { ttl: 120, urgency: 'high' }, unanswered: { ttl: 300, urgency: 'high' },
-  cancel_notice: { ttl: 300, urgency: 'normal' }, handled_notice: { ttl: 300, urgency: 'normal' },
+  cancel_notice: { ttl: 300, urgency: 'normal' }, handled_notice: { ttl: 300, urgency: 'normal' }, answered_notice: { ttl: 300, urgency: 'high' },
   reminder: { ttl: 3600, urgency: 'normal' }, missed_dose: { ttl: 7200, urgency: 'normal' },
   test: { ttl: 60, urgency: 'high' }, ready: { ttl: 60, urgency: 'normal' },
 };
@@ -551,6 +551,11 @@ export class AlertHub {
         else if (a.status === 'cancelled') { kind = 'cancel_notice'; ehs = this.subsFor(h, (x) => x.role === 'caregiver'); msg = { title: 'Orbit-X: alert cancelled', body: name + ' says they are okay.', tag: 'orbit-alert' }; }
         else if (a.status === 'answered' || a.status === 'handled') { kind = 'handled_notice'; ehs = this.subsFor(h, (x) => x.role === 'caregiver' && x.id !== a.answeredBy); msg = { title: 'Orbit-X: someone is helping', body: 'Another caregiver is handling ' + name + "'s alert.", tag: 'orbit-alert' }; }
         if (msg) await this.deliver(h, ehs, msg, now, kind, label);
+        if (a.status === 'answered' && a.answeredBy) { // tell the person help has answered so they can open the app and talk
+          const who2 = nameOf(a, a.answeredBy) || 'A caregiver';
+          const pe = this.subsFor(h, (x) => x.role === 'patient');
+          if (pe.length) await this.deliver(h, pe, { title: 'Orbit-X: ' + who2 + ' answered', body: 'Open Orbit-X to talk to ' + who2 + ' now.', tag: 'orbit-alert', urgent: true }, now, 'answered_notice', 'patient');
+        }
       }
       await this.doseCheck(h, now);
       await this.schedule(h, now);
@@ -788,6 +793,38 @@ export class AlertHub {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         if (activeAlert(h.alert) || (h.alert && h.alert.status === 'unanswered')) { h.alert.status = 'cancelled'; logLine(h.alert, now, h.name + ' says they are okay. Alert cancelled'); }
         else fail(409, 'no_alert');
+        break;
+      }
+      case 'undose': {
+        if (!isPatient) { fail(403, 'patient_only'); break; }
+        if (!DOSE_SLOTS.includes(body.slot) || !validDate(body.date, now)) { fail(400, 'bad_dose'); break; }
+        h.doses = h.doses.filter((d) => !(d.date === body.date && d.slot === body.slot));
+        break;
+      }
+      case 'ice': { // network helpers for the in-app voice call. STUN always; TURN too when Cloudflare TURN secrets are set.
+        if (who.role !== 'patient' && who.role !== 'caregiver') { fail(403, 'forbidden'); break; }
+        let servers = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
+        if (this.env.TURN_KEY_ID && this.env.TURN_API_TOKEN) {
+          try {
+            const r = await fetch('https://rtc.live.cloudflare.com/v1/turn/keys/' + encodeURIComponent(this.env.TURN_KEY_ID) + '/credentials/generate-ice-servers', {
+              method: 'POST', headers: { Authorization: 'Bearer ' + this.env.TURN_API_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 7200 }) });
+            if (r.ok) { const j = await r.json(); if (Array.isArray(j.iceServers)) servers = servers.concat(j.iceServers); }
+          } catch (e) { console.error('turn error:', e && e.message); }
+        }
+        extra.iceServers = servers; extra.turn = servers.length > 1;
+        break;
+      }
+      case 'rtc': { // signalling for a live voice call between the person and the caregiver who answered
+        const a = h.alert;
+        const okRole = isPatient || (who.role === 'caregiver' && a && a.answeredBy === who.id);
+        if (!a || !okRole || a.status !== 'answered') { fail(409, 'no_call'); break; }
+        if (!h.rtc || h.rtc.aid !== a.id) h.rtc = { aid: a.id, offerId: 0, offer: null, answer: null, ended: false };
+        const r = h.rtc, op = String(body.op || 'poll'), sdp = typeof body.sdp === 'string' ? body.sdp : '';
+        const okSdp = sdp.length > 20 && sdp.length <= 12000 && sdp.startsWith('v=0');
+        if (op === 'offer' && !isPatient && okSdp) { r.offerId = now; r.offer = sdp; r.answer = null; r.ended = false; logLine(a, now, 'Voice call started'); }
+        else if (op === 'answer' && isPatient && okSdp && Number(body.offerId) === r.offerId && !r.answer) { r.answer = sdp; }
+        else if (op === 'end') { r.ended = true; }
+        extra.rtc = { offerId: r.offerId, offer: isPatient ? r.offer : null, answer: isPatient ? null : r.answer, ended: r.ended };
         break;
       }
       case 'answer': case 'decline': case 'handled': {
@@ -1107,10 +1144,10 @@ async function handleHousehold(req, env, url, cors) {
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
-    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush'].includes(m[2]);
+    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc'].includes(m[2]);
     if (!get && !post) return json({ error: 'Not found' }, 404, cors);
     const text = post ? await req.text() : undefined;
-    if (text && text.length > 4000) return json({ error: 'too_large' }, 413, cors);
+    if (text && text.length > (m[2] === 'rtc' ? 14000 : 4000)) return json({ error: 'too_large' }, 413, cors);
     return relay(await forward(hub(env, 'h:' + m[1]), '/h/' + m[2], req, text), cors);
   }
   return json({ error: 'Not found' }, 404, cors);
