@@ -38,6 +38,7 @@ function call(method, path, body){
     .catch(function(){ document.getElementById('o').textContent = 'No internet.'; });
 }
 var d = new Date().toISOString().slice(0, 10);
+try { var sk = JSON.parse(localStorage.getItem('orbitx.sandbox.v1') || sessionStorage.getItem('orbitx.sandbox.v1') || '{}'); if (sk.evt) { document.getElementById('k').value = sk.evt; document.getElementById('o').textContent = 'Sandbox key filled in for you. Tap a button.'; } } catch(e){}
 document.getElementById('b1').onclick = function(){ call('POST', '/api/v1/signals', { type: 'reading', sys: 190, dia: 120, date: d }); };
 document.getElementById('b2').onclick = function(){ call('POST', '/api/v1/signals', { type: 'reading', sys: 125, dia: 80, date: d }); };
 document.getElementById('b3').onclick = function(){ call('POST', '/api/v1/signals', { type: 'fall' }); };
