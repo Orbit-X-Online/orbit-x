@@ -93,6 +93,7 @@ a.btn{text-decoration:none;text-align:center}
 <body>
 <div class="app" id="app"></div>
 <script src="data.js"></script>
+<script src="call.js"></script>
 <script>
 (function(){
 'use strict';
@@ -257,6 +258,47 @@ function joinLink(code){
   $('no').onclick = function(){ try { history.replaceState(null, '', location.pathname); } catch(e){} boot(true); };
 }
 
+
+/* ---------- live voice call (WebRTC) helpers ---------- */
+var lastCall = { text: '', kind: '' }, cmuted = false;
+function showCall(id, text, kind, role){
+  var b = $(id); if (!b) return;
+  lastCall = { text: text, kind: kind };
+  if (!text) { b.innerHTML = ''; return; }
+  var running = window.OXCall && OXCall.isRunning();
+  var col = kind === 'ok' ? '#86efac' : kind === 'bad' ? '#fca5a5' : kind === 'warn' ? '#fcd34d' : '#cbd5e1';
+  var h = '<div role="status" aria-live="polite" style="margin:10px 0;padding:10px 12px;border:1px solid #1e3a8a;border-radius:12px;text-align:center;color:' + col + '">' + esc(text) + '</div>';
+  if (kind === 'tap') h += '<button class="btn green" id="cplay">Tap to hear</button>';
+  if (running) h += '<button class="btn ghost" id="cmute">' + (cmuted ? 'Unmute microphone' : 'Mute microphone') + '</button><button class="btn red" id="cend">End voice call</button>';
+  if (role === 'caller' && !running) h += '<button class="btn green" id="cgo">' + (kind === 'idle' ? 'Start voice call' : 'Try voice call again') + '</button>';
+  b.innerHTML = h;
+  var q;
+  if ((q = $('cplay'))) q.onclick = function(){ OXCall.playNow(); };
+  if ((q = $('cmute'))) q.onclick = function(){ cmuted = !cmuted; OXCall.setMuted(cmuted); q.textContent = cmuted ? 'Unmute microphone' : 'Mute microphone'; };
+  if ((q = $('cend'))) q.onclick = function(){ OXCall.end('Call ended.'); };
+  if ((q = $('cgo'))) q.onclick = function(){ startCallerNow(); };
+}
+function callOpts(boxId, role, other){
+  return {
+    audio: $('rtcaudio'), otherName: other,
+    rtc: function(op, ex){ return hApi('rtc', Object.assign({ op: op }, ex || {})); },
+    ice: function(){ return hApi('ice', {}); },
+    onStatus: function(t, k){ showCall(boxId, t, k, role); },
+    onEnd: function(){}
+  };
+}
+function startCallerNow(){
+  if (!window.OXCall) return;
+  var who = (st && st.profile && st.profile.name) || (sess && sess.patientName) || 'them';
+  OXCall.stopQuiet(); cmuted = false;
+  OXCall.startCaller(callOpts('callbox', 'caller', who));
+}
+function syncPatientCall(a){
+  if (!window.OXCall || !OXCall.supported()) return;
+  if (a && a.status === 'answered') { if (!OXCall.isRunning()) OXCall.startCallee(callOpts('callbox', 'callee')); }
+  else if (OXCall.isRunning()) { OXCall.stopQuiet(); showCall('callbox', '', ''); }
+}
+
 /* ---------- helpers on state ---------- */
 function analysis(){ return D.analyzeReal(st.readings, st.doses, st.profile.slots, todayStr(), st.profile.createdDate); }
 function slotName(s){ return ['morning', 'afternoon', 'evening', 'night'].indexOf(s) > -1 ? s : 'evening'; }
@@ -282,7 +324,7 @@ function patientApp(){
   '<button class="sos" id="sos">I need help now</button>' +
   '<div class="small center" style="margin-top:10px">Orbit-X is not a doctor and does not give medical advice. In an emergency call 112.</div>' +
   '<div class="overlay" id="evo"></div><div class="overlay" id="fmo"></div><div class="overlay" id="seo"></div>' +
-  '<div class="overlay" id="emer"><div class="pulse"></div><div class="big" id="emtxt"></div><div class="tl" id="emtl"></div><div class="banner on" id="emban" style="display:none"></div><div id="emcalls"></div><a class="btn red" href="tel:112">Call 112</a><button class="btn ghost" id="emok">I am okay. Cancel the alert</button><button class="btn ghost" id="emclose">Close</button></div>';
+  '<div class="overlay" id="emer"><div class="pulse"></div><div class="big" id="emtxt"></div><div class="tl" id="emtl"></div><div class="banner on" id="emban" style="display:none"></div><div id="callbox"></div><audio id="rtcaudio" autoplay playsinline></audio><div id="emcalls"></div><a class="btn red" href="tel:112">Call 112</a><button class="btn ghost" id="emok">I am okay. Cancel the alert</button><button class="btn ghost" id="emclose">Close</button></div>';
   $('send').onclick = function(){ handle($('txt').value); };
   if (fallOn()) fallStart();
   $('txt').onkeydown = function(e){ if (e.key === 'Enter') handle($('txt').value); };
@@ -354,6 +396,7 @@ function renderEmergency(){
   var ec = $('emcalls');
   if (ec) ec.innerHTML = (st.caregivers || []).filter(function(c){ return c.phone && c.role !== 'clinician'; }).map(function(c){ return '<a class="btn green" href="tel:' + esc(c.phone) + '">Call ' + esc(c.name) + ' now</a><a class="btn ghost" href="sms:' + esc(c.phone) + '?body=' + encodeURIComponent('Orbit-X: I need help. Please call me now.') + '">Text ' + esc(c.name) + '</a>'; }).join('');
   var ban = $('emban'); ban.style.display = 'none';
+  syncPatientCall(a);
   $('emok').style.display = (a.status === 'ringing' || a.status === 'answered' || a.status === 'unanswered') ? '' : 'none';
   if (!fresh && !o.classList.contains('on')) return;
   if (a.status !== lastSpoken.status || a.id !== lastSpoken.id) { lastSpoken = { id: a.id, status: a.status }; if (a.status !== 'cancelled') say(msg); }
@@ -402,14 +445,28 @@ function saveBP(sys, dia){
 function saveDose(){
   var slots = st.profile.slots;
   if (!slots.length) { say('You told me you do not take regular medicine. You can add medicine times in Settings.'); return; }
-  var t = todayStr(), logged = {}; st.doses.forEach(function(d){ if (d.date === t) logged[d.slot] = 1; });
-  if (slots.every(function(s){ return logged[s]; })) { say('You have already logged all your tablet times for today.'); return; }
-  if (slots.length === 1) { logDose(slots[0]); return; }
-  // More than one tablet time: never guess. Ask which one.
-  $('evo').innerHTML = '<h2>Which tablet time did you take?</h2>' + slots.map(function(s){ return '<button class="btn' + (logged[s] ? ' ghost' : '') + '" data-sl="' + s + '"' + (logged[s] ? ' disabled' : '') + '>' + s.charAt(0).toUpperCase() + s.slice(1) + (logged[s] ? ' (already logged)' : '') + '</button>'; }).join('') +
-    '<div class="small" style="margin-top:12px">I only record that you took it. I never record or suggest an amount. Follow what your doctor or pharmacist told you.</div><button class="btn ghost" id="evb">Cancel</button>';
+  // Re-read the server first so a new day always starts fresh and nothing stale is shown.
+  hApi('state').then(function(j){ take(j); refreshCards(); openDoseSheet(); });
+}
+function openDoseSheet(){
+  var slots = st.profile.slots, t = todayStr(), logged = {};
+  st.doses.forEach(function(d){ if (d.date === t) logged[d.slot] = d; });
+  if (slots.length === 1 && !logged[slots[0]]) { logDose(slots[0]); return; }
+  var nice = new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+  var cap = function(x){ return x.charAt(0).toUpperCase() + x.slice(1); };
+  $('evo').innerHTML = '<h2>Today\'s tablets</h2><div class="small" style="margin-bottom:10px">' + esc(nice) + '. Each day starts fresh.</div>' +
+    slots.map(function(sl){
+      return logged[sl]
+        ? '<div class="cg"><b>' + cap(sl) + '</b><div class="small">Taken today at ' + clock(logged[sl].t) + '</div><div class="acts"><button data-un="' + sl + '">Logged by mistake? Undo</button></div></div>'
+        : '<button class="btn" data-sl="' + sl + '">I took my ' + sl + ' tablet</button>';
+    }).join('') +
+    '<div class="small" style="margin-top:12px">I only record that you took it. I never record or suggest an amount. Follow what your doctor or pharmacist told you.</div><button class="btn ghost" id="evb">Close</button>';
   $('evo').classList.add('on'); $('evb').onclick = function(){ $('evo').classList.remove('on'); };
   $('evo').querySelectorAll('[data-sl]').forEach(function(b){ b.onclick = function(){ $('evo').classList.remove('on'); logDose(b.getAttribute('data-sl')); }; });
+  $('evo').querySelectorAll('[data-un]').forEach(function(b){ b.onclick = function(){
+    var sl = b.getAttribute('data-un'); b.disabled = true;
+    hApi('undose', { slot: sl, date: t }).then(function(j){ if (take(j)) { refreshCards(); openDoseSheet(); say('Okay. I removed today\'s ' + sl + ' tablet from your record.'); } else { b.disabled = false; say('I could not undo that. Please try again.'); } });
+  }; });
 }
 function logDose(slot){
   hApi('dose', { slot: slot, date: todayStr() }).then(function(j){
@@ -608,7 +665,7 @@ function showSettings(){
     '<label class="l">Recovery key</label><div class="small">If you lose this phone, this key restores your account on a new one. Keep it private.</div><button class="btn ghost" id="rk">Show my recovery key</button><div class="code" id="rkv" style="display:none;font-size:13px"></div>' +
     '<label class="l">Fall guard</label><div class="small">If your phone falls and then lies still, Orbit asks "Did you fall?" If you do not answer in 15 seconds, your family is alerted. Works while Orbit-X is open on this phone with the screen on.</div><label class="check"><input type="checkbox" id="fg"' + (fallOn() ? ' checked' : '') + '> Turn on fall guard</label><div class="err" id="fge"></div><button class="btn ghost" id="fgt">Test it now</button>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
-    (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
+    (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private. <a href="/developer.html" style="color:#7DD3FC">Try the API demo in a safe sandbox</a>.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   $('sv').onclick = function(){ var s = []; if ($('sm').checked) s.push('morning'); if ($('sa').checked) s.push('afternoon'); if ($('se').checked) s.push('evening'); if ($('sg').checked) s.push('night'); hApi('profile', { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: s }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
@@ -630,10 +687,10 @@ function beep(){
     g.gain.setValueAtTime(.0001, ringCtx.currentTime); g.gain.exponentialRampToValueAtTime(.25, ringCtx.currentTime + .05); g.gain.exponentialRampToValueAtTime(.0001, ringCtx.currentTime + .5); o.start(); o.stop(ringCtx.currentTime + .55); } catch(e){}
 }
 function keepAwake(){ try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function(l){ wake = l; }, function(){}); } catch(e){} }
-document.addEventListener('visibilitychange', function(){ if (!document.hidden && armed) keepAwake(); });
+document.addEventListener('visibilitychange', function(){ if (!document.hidden && armed) keepAwake(); if (!document.hidden && sess && sess.pid && sess.role === 'patient' && document.getElementById('c2')) { hApi('state').then(function(j){ if (take(j)) { refreshCards(); renderEmergency(); } }); } });
 function caregiverApp(){
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + '</span></div><div id="cgv" style="position:relative;flex:1"></div>';
+  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + '</span></div><div id="cgv" style="position:relative;flex:1"></div><audio id="rtcaudio" autoplay playsinline></audio>';
   cgRender(); cgPoll(); quietResync();
 }
 function cgPoll(){
@@ -655,17 +712,19 @@ function cgRender(){
   }
   if (!st) { el.innerHTML = '<div class="idle"><b>Connecting...</b><br>Check your internet. Keep this page open.</div>'; return; }
   var a = st.alert, me = st.me && st.me.id, an = analysis();
+  if (window.OXCall && OXCall.isRunning() && OXCall.role() === 'caller' && !(a && a.status === 'answered' && a.answeredBy === me)) { OXCall.stopQuiet(); lastCall = { text: '', kind: '' }; }
   var summary = '<div class="sum"><small>' + esc(who) + '</small>' + (an.last ? 'Last reading ' + an.last.sys + '/' + an.last.dia + ' on ' + esc(D.fmtDate(an.lastDate)) + '.' : 'No readings yet.') + '<br>' + esc(an.sentence) + '</div>';
   if (a && a.status === 'ringing' && a.target === me) {
     beep(); try { navigator.vibrate && navigator.vibrate([300, 150, 300]); } catch(e){}
     el.innerHTML = '<div id="ring" class="overlay on"><div style="color:#7DD3FC;margin-top:28px">Orbit-X alert</div><div class="who">' + esc(who) + '</div><div class="sub">' + (a.sys ? 'Very high blood pressure reading ' + a.sys + '/' + a.dia : 'Needs help now') + '</div><div class="av">&#129504;</div><div style="color:#6C7FA8;font-size:13px">' + (a.chainNames.length > 1 && a.chainNames[a.chainNames.length - 1] !== st.me.name ? 'No answer in ' + a.secondsLeft + 's? The next person is called' : 'Please answer now') + '</div><div class="cb"><button class="no" id="decl" aria-label="Decline">&#10005;</button><button class="yes" id="ans" aria-label="Answer">&#10003;</button></div></div>';
-    $('ans').onclick = function(){ hApi('answer').then(function(j){ take(j); cgRender(); }); };
+    $('ans').onclick = function(){ hApi('answer').then(function(j){ take(j); cgRender(); if (j && j.ok) startCallerNow(); }); };
     $('decl').onclick = function(){ hApi('decline').then(function(j){ take(j); cgRender(); }); };
     return;
   }
   if (a && a.status === 'answered' && a.answeredBy === me) {
-    el.innerHTML = '<div class="center" style="margin-top:20px;font-weight:500">Orbit brief</div><div class="quote" style="margin-top:12px;text-align:center">' + (a.sys ? esc(a.sys + '/' + a.dia) + ' just now.' : 'Reason: ' + esc(a.why)) + '<br>' + esc(an.sentence) + '</div><div class="tl">' + a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('') + '</div><a class="btn red" href="tel:112">Call 112</a><button class="btn" id="hd">Mark as handled</button>';
-    $('hd').onclick = function(){ hApi('handled').then(function(j){ take(j); cgRender(); }); };
+    el.innerHTML = '<div class="center" style="margin-top:20px;font-weight:500">Orbit brief</div><div id="callbox"></div><div class="quote" style="margin-top:12px;text-align:center">' + (a.sys ? esc(a.sys + '/' + a.dia) + ' just now.' : 'Reason: ' + esc(a.why)) + '<br>' + esc(an.sentence) + '</div><div class="tl">' + a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('') + '</div>' + (st.careNumbers && st.careNumbers.patient ? '<a class="btn green" href="tel:' + esc(st.careNumbers.patient) + '">Call ' + esc(who) + ' on the phone</a>' : '') + '<a class="btn red" href="tel:112">Call 112</a><button class="btn" id="hd">Mark as handled</button>';
+    showCall('callbox', lastCall.text || 'Voice call not started yet.', lastCall.text ? lastCall.kind : 'idle', 'caller');
+    $('hd').onclick = function(){ if (window.OXCall && OXCall.isRunning()) OXCall.end('Call ended.'); hApi('handled').then(function(j){ take(j); cgRender(); }); };
     return;
   }
   var note = '';
