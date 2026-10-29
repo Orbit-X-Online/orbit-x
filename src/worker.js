@@ -1,4 +1,4 @@
-import { metaChat, MetaError, listModels } from './meta.js';
+import { metaChat, MetaError, listModels, probeAI } from './meta.js';
 import { handleConnect, WORKSPACE_ACTIONS, V1_ACTIONS, SCOPES, LEGACY_SCOPES, oauthToken, chainAppend, kindOf, signHead, publicReceipt, loadForReceipt, rand as crand, sha as csha } from './connect.js';
 import { aiMode, providerName } from './ai.js';
 
@@ -374,6 +374,31 @@ function alertView(a, who, now, escalateMs) {
   };
 }
 
+
+/* ------------------------------ real SMS (optional paid provider) ------------------------------
+   Web Push needs internet on the caregiver's phone. SMS travels over the mobile network, so it reaches a
+   caregiver who has no data. Set TWILIO_SID, TWILIO_TOKEN and TWILIO_FROM (or AT_USERNAME, AT_API_KEY for Africa's Talking SMS).
+   Server-placed phone calls are switched off on purpose; live voice calls happen inside the app (WebRTC + TURN). */
+function smsConfigured(env) { return Boolean((env.TWILIO_SID && env.TWILIO_TOKEN && env.TWILIO_FROM) || (env.AT_USERNAME && env.AT_API_KEY)); }
+async function sendSms(env, to, body) {
+  const num = cleanPhone(to); if (!num) return { state: 'bad_number' };
+  const withPlus = num.startsWith('+') ? num : '+' + num;
+  try {
+    if (env.TWILIO_SID && env.TWILIO_TOKEN && env.TWILIO_FROM) {
+      const r = await fetch('https://api.twilio.com/2010-04-01/Accounts/' + encodeURIComponent(env.TWILIO_SID) + '/Messages.json', { method: 'POST',
+        headers: { Authorization: 'Basic ' + btoa(env.TWILIO_SID + ':' + env.TWILIO_TOKEN), 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ To: withPlus, From: env.TWILIO_FROM, Body: body }).toString() });
+      return { state: r.ok ? 'sent' : 'rejected', http: r.status };
+    }
+    if (env.AT_USERNAME && env.AT_API_KEY) {
+      const f = { username: env.AT_USERNAME, to: withPlus, message: body }; if (env.AT_FROM) f.from = env.AT_FROM;
+      const r = await fetch(env.AT_USERNAME === 'sandbox' ? 'https://api.sandbox.africastalking.com/version1/messaging' : 'https://api.africastalking.com/version1/messaging', { method: 'POST',
+        headers: { apiKey: env.AT_API_KEY, Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(f).toString() });
+      return { state: r.ok ? 'sent' : 'rejected', http: r.status };
+    }
+  } catch (e) { return { state: 'network_error' }; }
+  return { state: 'not_configured' };
+}
 /* ------------------------------ the household Durable Object ------------------------------ */
 const DOSE_SLOTS = ['morning', 'afternoon', 'evening', 'night'];
 function cleanSlots(a) { return Array.isArray(a) ? DOSE_SLOTS.filter((x) => a.includes(x)) : []; }
@@ -537,6 +562,28 @@ export class AlertHub {
     return this.push(h, ehs, now, kind);
   }
 
+
+  // SMS to whoever is being alerted. Runs once per alert state (same dedupe mark as the push).
+  async external(h, a, now) {
+    if (!smsConfigured(this.env)) return;
+    const name = h.name || 'Someone', t = target(a);
+    const phoneOf = (id) => { const c = h.caregivers.find((x) => x.id === id); return c ? c.phone : ''; };
+    const jobs = [];
+    if (a.status === 'ringing' && t) {
+      const ph = phoneOf(t.id);
+      if (ph) {
+        jobs.push(['sms', ph, 'ORBIT-X ALERT: ' + name + ' needs help now. Please call them straight away' + (h.phone ? ' on ' + h.phone : '') + '. In an emergency call 112.', t.id]);
+      }
+    } else if (a.status === 'unanswered') {
+      for (const c of h.caregivers) if (c.phone && c.role !== 'clinician') jobs.push(['sms', c.phone, 'ORBIT-X: no one has answered ' + name + "'s alert. Please call " + name + ' now. If it is an emergency call 112.', c.id]);
+      if (h.phone) jobs.push(['sms', h.phone, 'ORBIT-X: no caregiver answered your alert. Please call 112 now.', 'patient']);
+    }
+    for (const j of jobs.slice(0, 8)) {
+      const r = await sendSms(this.env, j[1], j[2]);
+      this.ev(h, now, 'sms', r.state, j[3], r.http);
+    }
+  }
+
   // Looks at the alert and the tablet schedule, tells the right phones, and sets the next wake-up time.
   async afterChange(h, now) {
     try {
@@ -551,6 +598,7 @@ export class AlertHub {
         else if (a.status === 'cancelled') { kind = 'cancel_notice'; ehs = this.subsFor(h, (x) => x.role === 'caregiver'); msg = { title: 'Orbit-X: alert cancelled', body: name + ' says they are okay.', tag: 'orbit-alert' }; }
         else if (a.status === 'answered' || a.status === 'handled') { kind = 'handled_notice'; ehs = this.subsFor(h, (x) => x.role === 'caregiver' && x.id !== a.answeredBy); msg = { title: 'Orbit-X: someone is helping', body: 'Another caregiver is handling ' + name + "'s alert.", tag: 'orbit-alert' }; }
         if (msg) await this.deliver(h, ehs, msg, now, kind, label);
+        try { await this.external(h, a, now); } catch (e) { console.error('external notify error:', e && e.message); }
         if (a.status === 'answered' && a.answeredBy) { // tell the person help has answered so they can open the app and talk
           const who2 = nameOf(a, a.answeredBy) || 'A caregiver';
           const pe = this.subsFor(h, (x) => x.role === 'patient');
@@ -808,15 +856,27 @@ export class AlertHub {
       }
       case 'ice': { // network helpers for the in-app voice call. STUN always; TURN too when Cloudflare TURN secrets are set.
         if (who.role !== 'patient' && who.role !== 'caregiver') { fail(403, 'forbidden'); break; }
+        // STUN alone fails on most mobile networks (carrier NAT). A relay (TURN) is what makes calls go through.
         let servers = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
+        let relay = 'none';
         if (this.env.TURN_KEY_ID && this.env.TURN_API_TOKEN) {
           try {
             const r = await fetch('https://rtc.live.cloudflare.com/v1/turn/keys/' + encodeURIComponent(this.env.TURN_KEY_ID) + '/credentials/generate-ice-servers', {
               method: 'POST', headers: { Authorization: 'Bearer ' + this.env.TURN_API_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 7200 }) });
-            if (r.ok) { const j = await r.json(); if (Array.isArray(j.iceServers)) servers = servers.concat(j.iceServers); }
+            if (r.ok) { const j = await r.json(); const list = Array.isArray(j.iceServers) ? j.iceServers : (j.iceServers ? [j.iceServers] : []); // Cloudflare returns an array; older replies an object
+              const clean = list.map((x) => ({ ...x, urls: [].concat(x.urls || []).filter((u) => !/:53(\?|$)/.test(u)) })).filter((x) => x.urls.length && x.username && x.credential); // port 53 is blocked by browsers
+              if (clean.length) { servers = servers.concat(clean); relay = 'cloudflare'; } else console.error('turn: unexpected reply'); }
+            else console.error('turn http', r.status);
           } catch (e) { console.error('turn error:', e && e.message); }
         }
-        extra.iceServers = servers; extra.turn = servers.length > 1;
+        if (this.env.TURN_URLS && this.env.TURN_USERNAME && this.env.TURN_CREDENTIAL) {
+          servers.push({ urls: String(this.env.TURN_URLS).split(',').map((x) => x.trim()).filter(Boolean), username: this.env.TURN_USERNAME, credential: this.env.TURN_CREDENTIAL }); relay = 'custom';
+        }
+        if (relay === 'none') { // free public relay so calls work out of the box. Set Cloudflare TURN secrets for a private, reliable one.
+          servers.push({ urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp', 'turns:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }); relay = 'public';
+        }
+        extra.relay = relay;
+        extra.iceServers = servers; extra.turn = relay !== 'none';
         break;
       }
       case 'rtc': { // signalling for a live voice call between the person and the caregiver who answered
@@ -1199,6 +1259,7 @@ async function handleAiStatus(req, env, url, cors) {
   if (url.searchParams.get('probe') === '1' && env.MODEL_API_KEY) {
     try { const ids = await listModels(env); out.models = ids.slice(0, 40); out.museModels = ids.filter((x) => /muse/i.test(x)); } catch (e) { out.probeError = String(e && e.message || '').slice(0, 120); }
   }
+  if (url.searchParams.get('test') === '1') { out.test = await probeAI(env); out.working = !!out.test.ok; }
   return json(out, 200, cors);
 }
 
