@@ -17,10 +17,11 @@
   <div id="view" aria-live="polite"><div class="empty"><span class="spin"></span>Loading your workspace</div></div>
 </div>
 <script src="/ox.js"></script>
+<script src="/docread.js"></script>
 <script>
 (function(){
 var sess = OX.need('patient'); if (!sess) return;
-if (sess.accountType === 'individual') { var dl = document.getElementById('devlink'); if (dl) dl.style.display = 'none'; }
+if (sess.accountType === 'individual') { var dl = document.getElementById('devlink'); if (dl) dl.textContent = 'API demo'; }
 var esc = OX.esc, S = null, tab = 'overview', docText = {}, askLog = [], busy = '';
 var TABS = [['overview','Overview'],['graph','Evidence Graph'],['memory','Health Memory'],['docs','Documents'],['timeline','Timeline'],['compare','Compare Reports'],['ask','Ask My Records'],['brief','Appointment Brief'],['sharing','Sharing & Permissions']];
 var QUESTIONS = ['What changed between these reports?','What is the most recent documented HbA1c?','Which medications are listed in my latest discharge summary?','Are any dates or values inconsistent between these documents?','Prepare a concise summary I can share with my clinician.'];
@@ -98,17 +99,51 @@ function evidence(id){
 }
 function sev(k){ return k.severity === 'high' ? 'high' : k.severity === 'medium' ? 'medium' : 'info'; }
 
+
+/* ---------- add a document (sheet with Choose file / Take photo / paste) ---------- */
+function addDocForm(){
+  return '<h2 style="margin-top:0">Add a document</h2><div class="banner">Synthetic or your own documents. Reading happens on your phone. Do not add real records to this public demo.</div>' +
+    '<div class="row"><button class="btn" id="pickf">Choose a file (PDF, Word, text, photo)</button><button class="btn g" id="pickp">Take a photo</button></div>' +
+    '<input type="file" id="df" accept=".pdf,.docx,.txt,.text,.md,.csv,application/pdf,image/*,text/plain" style="display:none"><input type="file" id="dp" accept="image/*" capture="environment" style="display:none">' +
+    '<label class="l" for="dn">Name</label><input id="dn" maxlength="80" placeholder="e.g. Lab report, June"><label class="l" for="dt">Or paste the text of the document</label><textarea id="dt" placeholder="Paste text here"></textarea>' +
+    '<div class="err" id="der"></div><button class="btn" id="dadd">Analyse</button><span id="dmsg" class="small"></span>';
+}
+function openAddDoc(){ OX.openSheet(addDocForm()); bindAddDoc(); }
+function bindAddDoc(){
+  var g = function(i){ return document.getElementById(i); };
+  function pick(inp){ var f = inp.files[0]; if (!f) return; g('der').textContent = ''; g('dadd').disabled = true; g('dmsg').innerHTML = '<span class="spin"></span>Opening ' + esc(f.name) + '...';
+    OXRead.read(f, function(m){ g('dmsg').innerHTML = '<span class="spin"></span>' + esc(m); }).then(function(r){
+      g('dt').value = r.text; if (!g('dn').value) g('dn').value = f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 80);
+      g('dmsg').textContent = 'File read (' + r.text.length + ' characters).' + (r.truncated ? ' Long file: only the first 40,000 characters are used.' : '') + ' Check it, then tap Analyse.'; g('dadd').disabled = false;
+    }, function(e){ g('dmsg').textContent = ''; g('der').textContent = (e && e.message) || 'Could not read that file.'; g('dadd').disabled = false; inp.value = ''; }); }
+  g('pickf').onclick = function(){ g('df').click(); }; g('pickp').onclick = function(){ g('dp').click(); };
+  g('df').onchange = function(){ pick(g('df')); }; g('dp').onchange = function(){ pick(g('dp')); };
+  g('dadd').onclick = function(){
+    var t = g('dt').value, n = g('dn').value, er = g('der'), b = g('dadd'); er.textContent = '';
+    if (t.trim().length < 20) { er.textContent = 'Please choose a file or paste the document text first.'; return; }
+    b.disabled = true; g('dmsg').innerHTML = '<span class="spin"></span>Reading the document. This can take up to 30 seconds when the AI is on.';
+    OX.w('docadd', { name: n, text: t }).then(function(j){
+      if (take(j)) { var m = document.getElementById('modal'); if (m) m.classList.remove('on'); tab = 'docs'; render(); return; }
+      b.disabled = false; g('dmsg').textContent = '';
+      er.textContent = j.error === 'duplicate_document' ? 'That document is already here.' : j.error === 'too_many_documents' ? 'The limit is 8 documents. Delete one first.' : 'Could not read that document (' + (j.error || 'error') + ').';
+    });
+  };
+}
+(function(){ var f = document.createElement('button'); f.id = 'fab'; f.textContent = '+ Add document';
+  f.style.cssText = 'position:fixed;right:14px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:15;background:#2563EB;color:#fff;border:0;border-radius:999px;padding:14px 18px;font-size:15px;font-weight:600;box-shadow:0 6px 18px #000a;font-family:inherit;cursor:pointer';
+  f.onclick = function(){ openAddDoc(); }; document.body.appendChild(f); })();
+
 /* ---------- overview ---------- */
 function onboardingCard(){
   return '<div class="card"><h2 style="margin-top:0">Start in one tap</h2><p>Orbit-X reads your documents, keeps every fact tied to the exact words it came from, compares reports over time, and tells you what is unknown. Try it with a <b>synthetic</b> patient (Amara Okafor): two lab reports and one discharge summary, all made up.</p>' +
     '<div class="banner">Synthetic data only. Please do not upload real medical records to this public demo.</div>' +
-    '<button class="btn" id="loadsamples">Load the 3 synthetic documents</button><span id="loadmsg" class="small"></span></div>';
+    '<button class="btn" id="upl">Upload my own document</button><button class="btn g" id="loadsamples">Load the 3 synthetic documents</button><span id="loadmsg" class="small"></span></div>';
 }
 function easySteps(){
   var d1 = S.docs.length > 0, d2 = askLog.length > 0;
   function row(n, done, t, btn){ return '<div class="row" style="flex-wrap:nowrap;align-items:center;margin:6px 0"><span class="chip ' + (done ? 'ok' : 'info') + '" style="min-width:26px;text-align:center">' + (done ? '&#10003;' : n) + '</span><span style="flex:1">' + t + '</span>' + (btn || '') + '</div>'; }
   return '<div class="card"><b>3 easy steps</b>' +
-    row(1, d1, 'Add the documents', d1 ? '' : '<button class="btn s" id="es1">Do it</button>') +
+    row(1, d1, 'Add the documents', d1 ? '' : '<button class="btn s" id="es1">Upload</button>') +
     row(2, false, 'See what changed', d1 ? '<button class="btn g s" data-go="compare">Open</button>' : '') +
     row(3, d2, 'Ask a question, then tap Read aloud', d1 ? '<button class="btn g s" data-go="ask">Open</button>' : '') +
     '<div class="small"><a href="/guide.html">Need help? Read the 1-minute guide</a></div></div>';
@@ -130,7 +165,7 @@ VIEWS.overview = function(){
 };
 BIND.overview = function(){
   var ls = document.getElementById('loadsamples'); if (ls) ls.onclick = loadSamples;
-  var e1 = document.getElementById('es1'); if (e1) e1.onclick = function(){ var b = document.getElementById('loadsamples'); if (b) b.click(); };
+  var e1 = document.getElementById('es1'); if (e1) e1.onclick = openAddDoc; var up1 = document.getElementById('upl'); if (up1) up1.onclick = openAddDoc;
   document.querySelectorAll('[data-go]').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-go'); render(); }; });
   document.querySelectorAll('[data-open]').forEach(function(el){ el.onclick = function(){ evidence(el.getAttribute('data-open')); }; });
   document.querySelectorAll('[data-q]').forEach(function(b){ b.onclick = function(){ tab = 'ask'; render(); runAsk(QUESTIONS[+b.getAttribute('data-q')]); }; });
@@ -213,7 +248,7 @@ VIEWS.docs = function(){
       (ex.rejected && ex.rejected.length ? '<details class="small"><summary>' + ex.rejected.length + ' model output(s) rejected by the validators</summary>' + ex.rejected.map(function(r){ return '<div>' + esc(r.name) + ': ' + esc(r.reason.replace(/_/g, ' ')) + '</div>'; }).join('') + '</details>' : '')) +
       '<div class="row" style="margin-top:6px">' + (d.kind !== 'connector' ? '<button class="btn g s" data-view="' + esc(d.id) + '">View source</button>' : '') + '<button class="btn r s" data-del="' + esc(d.id) + '">Delete</button></div></div>';
   });
-  h += '<h2>Add a document</h2><div class="card"><div class="banner">Synthetic or your own text. Text only (paste or .txt). Do not upload real records to this public demo.</div><label class="l" for="dn">Name</label><input id="dn" maxlength="80" placeholder="e.g. Lab report, June"><label class="l" for="dt">Paste the text of the document</label><textarea id="dt" placeholder="Paste text here"></textarea><label class="l" for="df">Or choose a .txt file</label><input type="file" id="df" accept=".txt,.text,.md,.csv"><div class="err" id="der"></div><button class="btn" id="dadd">Analyse</button><span id="dmsg" class="small"></span></div>';
+  h += '<h2>Add a document</h2><div class="card"><p class="small">Upload a PDF, a photo of a report, a Word file or a text file, or paste text.</p><button class="btn" id="addbtn">Upload or paste a document</button></div>';
   if (S.docs.length) h += '<div class="row" style="margin-top:14px"><button class="btn g s" id="loadsamples">Load the synthetic samples</button><button class="btn r s" id="wipe">Remove everything in this workspace</button></div>';
   return h;
 };
@@ -222,13 +257,7 @@ BIND.docs = function(){
   document.querySelectorAll('[data-view]').forEach(function(b){ b.onclick = function(){ viewDoc(b.getAttribute('data-view')); }; });
   document.querySelectorAll('[data-del]').forEach(function(b){ b.onclick = function(){ if (confirm('Delete this source and the facts read from it?')) OX.w('docdel', { id: b.getAttribute('data-del') }).then(take); }; });
   var wp = document.getElementById('wipe'); if (wp) wp.onclick = function(){ if (confirm('Remove all documents, facts, imports and handoffs from this workspace?')) OX.w('wipe', {}).then(take); };
-  var df = document.getElementById('df'); df.onchange = function(){ var f = df.files[0]; if (!f) return; if (f.size > 60000) { document.getElementById('der').textContent = 'That file is too large (limit about 40,000 characters).'; return; } var r = new FileReader(); r.onload = function(){ document.getElementById('dt').value = r.result; if (!document.getElementById('dn').value) document.getElementById('dn').value = f.name.replace(/\.[a-z]+$/i, ''); }; r.readAsText(f); };
-  document.getElementById('dadd').onclick = function(){
-    var t = document.getElementById('dt').value, n = document.getElementById('dn').value, er = document.getElementById('der'), b = document.getElementById('dadd'); er.textContent = '';
-    if (t.trim().length < 20) { er.textContent = 'Please paste the document text first.'; return; }
-    b.disabled = true; document.getElementById('dmsg').innerHTML = '<span class="spin"></span>Reading the document. This can take up to 30 seconds when the AI is on.';
-    OX.w('docadd', { name: n, text: t }).then(function(j){ if (!take(j)) { b.disabled = false; document.getElementById('dmsg').textContent = ''; er.textContent = j.error === 'duplicate_document' ? 'That document is already here.' : j.error === 'too_many_documents' ? 'The limit is 8 documents.' : 'Could not read that document (' + (j.error || 'error') + ').'; } });
-  };
+  var ab = document.getElementById('addbtn'); if (ab) ab.onclick = openAddDoc; var up = document.getElementById('upl'); if (up) up.onclick = openAddDoc;
 };
 function viewDoc(id){ getText(id).then(function(t){ var d = S.docs.filter(function(x){ return x.id === id; })[0]; OX.openSheet('<h2 style="margin-top:0">' + esc(d ? d.name : 'Document') + '</h2><pre>' + esc(t || 'No text stored.') + '</pre>'); }); }
 
