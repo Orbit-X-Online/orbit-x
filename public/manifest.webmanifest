@@ -1,7 +1,7 @@
 {
   "name": "Orbit-X",
   "short_name": "Orbit-X",
-  "description": "A talking health companion that makes sure family knows if you need help.",
+  "description": "Orbit-X: health-information intelligence and interoperability. Your records, evidence-linked explanations, FHIR exchange, and optional family alerts.",
   "start_url": "/?guardian=1",
   "scope": "/",
   "display": "standalone",
@@ -12,4 +12,3 @@
     { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }
-
