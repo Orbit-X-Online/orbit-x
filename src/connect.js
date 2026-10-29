@@ -2,9 +2,9 @@
 // Every household is its own tenant: nothing here can read another household's storage.
 import { ANALYTES, normName, compareFacts, findConflicts, buildTimeline, evidenceStatements, citeUniverse, answerQuestion, buildBrief, extractRules, finishFact, convertToCanon, daysBetween, isDate, fnv, fmtNum, quoteInText } from './intel.js';
 import { validateBundle, validateResource, resourceToFacts, factsToBundle } from './fhir.js';
-import { extractWithAI, explainWithAI, suggestMappings, aiMode, providerName } from './ai.js';
+import { extractWithAI, explainWithAI, suggestMappings, explainDocWithAI, aiMode, providerName } from './ai.js';
 
-export const WORKSPACE_ACTIONS = new Set(['wstate', 'docadd', 'docdel', 'docget', 'ask', 'brief', 'briefshare', 'briefrevoke', 'decide', 'suggest', 'mapconfirm', 'consent', 'auditlog', 'wipe', 'briefpublic']);
+export const WORKSPACE_ACTIONS = new Set(['wstate', 'docadd', 'docdel', 'docget', 'ask', 'brief', 'briefshare', 'briefrevoke', 'decide', 'suggest', 'mapconfirm', 'consent', 'auditlog', 'wipe', 'briefpublic', 'docexplain', 'docretry']);
 export const V1_ACTIONS = new Set(['v1records', 'v1validate', 'v1connectors', 'v1events', 'v1handoffcreate', 'v1handoffget', 'v1handoffreceive', 'v1handoffack', 'v1verify', 'v1audit']);
 export const SCOPES = ['records:write', 'records:read', 'events:write', 'events:read', 'handoff:create', 'handoff:receive', 'audit:read'];
 export const LEGACY_SCOPES = ['events:write', 'events:read'];
@@ -100,7 +100,7 @@ function wstateView(D, ctx) {
   const st = computeState(D, ctx); const h = ctx.h;
   return {
     ok: true, now: ctx.now, patient: h.name, signed: Boolean(ctx.env.RECEIPT_SECRET),
-    ai: { mode: aiMode(ctx.env), provider: aiMode(ctx.env) === 'mock' ? 'mock' : providerName(ctx.env), model: ctx.env.MODEL_TEXT && ctx.env.MODEL_TEXT !== 'auto' ? ctx.env.MODEL_TEXT : (aiMode(ctx.env) === 'live' ? 'auto (first Muse model on this key)' : null) },
+    ai: { mode: aiMode(ctx.env), provider: aiMode(ctx.env) === 'mock' ? 'mock' : providerName(ctx.env), model: ctx.env.MODEL_TEXT && ctx.env.MODEL_TEXT !== 'auto' ? ctx.env.MODEL_TEXT : (aiMode(ctx.env) === 'live' ? 'auto (Muse Spark Open)' : null) },
     docs: D.docs.map((d) => ({ id: d.id, name: d.name, kind: d.kind, meta: d.meta, uploadedAt: d.uploadedAt, size: d.size, extraction: d.extraction, factCount: D.facts.filter((f) => f.docId === d.id).length })),
     facts: D.facts.map((f) => publicFact(f, D.docs)), comparisons: st.comparisons, conflicts: st.conflicts, latest: st.latest,
     timeline: buildTimeline(D.docs, D.facts).map((e) => ({ ...e, docName: (D.docs.find((d) => d.id === e.docId) || {}).name })),
@@ -156,6 +156,30 @@ async function docdel(ctx, D) {
   for (const f of D.facts) if (f.corroboratedBy) f.corroboratedBy = f.corroboratedBy.filter((c) => c.docId !== id);
   await ctx.storage.delete('doc:' + id);
   await logAudit(ctx, D, 'patient', 'document.delete', 'ok', d.name); await save(ctx, D, ['docs', 'facts']);
+  return J(wstateView(D, ctx));
+}
+
+// Plain-language help for one document: what each term is, in everyday words, plus questions to ask a clinician.
+async function docexplain(ctx, D) {
+  const id = String(ctx.body.id || ''); const d = D.docs.find((x) => x.id === id);
+  if (!d) return J({ ok: false, error: 'not_found' }, 404);
+  const facts = D.facts.filter((f) => f.docId === id);
+  const ex = await explainDocWithAI(ctx.env, d, facts);
+  const items = facts.slice(0, 40).map((f) => ({ id: f.id, name: f.name, value: f.value, unit: f.unit, dose: f.dose, flag: f.flag, refRange: f.refRange, date: f.date, quote: f.quote }));
+  await logAudit(ctx, D, 'patient', 'document.explain', 'ok', d.name + ' [' + ex.mode + ']');
+  return J({ ok: true, id, name: d.name, mode: ex.mode, model: ex.model, aiError: ex.aiError || null, summary: ex.summary, terms: ex.terms, questions: ex.questions, items });
+}
+// Run the AI reading again for a document that fell back to the rule-based parser.
+async function docretry(ctx, D) {
+  const id = String(ctx.body.id || ''); const d = D.docs.find((x) => x.id === id);
+  if (!d || d.kind === 'connector') return J({ ok: false, error: 'not_found' }, 404);
+  const text = await ctx.storage.get('doc:' + id); if (!text) return J({ ok: false, error: 'no_source_text' }, 409);
+  const ex = await extractDoc(ctx, text, id); ex.info.accepted = ex.facts.length;
+  if (ex.info.aiError && D.facts.some((f) => f.docId === id) && ex.facts.length < D.facts.filter((f) => f.docId === id).length) return J({ ok: false, error: 'ai_still_unavailable', detail: ex.info.aiError }, 502);
+  for (const f of ex.facts) { f.source = { type: 'document', docId: id, docName: d.name, ...f.source }; f.hash = factHash(f); }
+  D.facts = D.facts.filter((f) => f.docId !== id).concat(ex.facts); d.meta = ex.doc; d.extraction = ex.info;
+  await logAudit(ctx, D, 'patient', 'document.retry', ex.info.aiError ? 'fallback' : 'ok', d.name + ' via ' + ex.info.mode + ' (' + ex.facts.length + ' facts)');
+  await save(ctx, D, ['docs', 'facts']);
   return J(wstateView(D, ctx));
 }
 async function docget(ctx, D) {
@@ -306,7 +330,7 @@ async function v1records(ctx, D) {
   }
   if (newFacts.length || report.duplicates) {
     let doc = D.docs.find((d) => d.kind === 'connector' && d.system === sysLabel);
-    if (!doc) { doc = { id: sysId, name: 'EMR import: ' + sysLabel + (who.sim ? ' (simulated)' : ''), kind: 'connector', system: sysLabel, meta: { docType: 'connector', docDate: null, patientName: ctx.h.name }, uploadedAt: ctx.now, size: 0, extraction: { mode: 'connector', model: null } }; D.docs.push(doc); }
+    if (!doc) { doc = { id: sysId, name: 'EMR import: ' + sysLabel + (who.sim && !/simulated/i.test(sysLabel) ? ' (simulated)' : ''), kind: 'connector', system: sysLabel, meta: { docType: 'connector', docDate: null, patientName: ctx.h.name }, uploadedAt: ctx.now, size: 0, extraction: { mode: 'connector', model: null } }; D.docs.push(doc); }
     for (const f of newFacts) f.docId = doc.id, f.source.docId = doc.id;
     for (const f of D.facts) if (f.corroboratedBy) for (const c of f.corroboratedBy) if (c.docId === sysId) c.docId = doc.id;
     D.facts.push(...newFacts);
@@ -485,6 +509,8 @@ export async function handleConnect(ctx) {
       case 'docadd': return docadd(ctx, D);
       case 'docdel': return docdel(ctx, D);
       case 'docget': return docget(ctx, D);
+      case 'docexplain': return docexplain(ctx, D);
+      case 'docretry': return docretry(ctx, D);
       case 'ask': return ask(ctx, D);
       case 'brief': return brief(ctx, D);
       case 'briefshare': return briefshare(ctx, D);
