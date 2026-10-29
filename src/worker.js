@@ -767,7 +767,8 @@ export class AlertHub {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         const sys = body.sys, dia = body.dia;
         if (!Number.isInteger(sys) || !Number.isInteger(dia) || sys < 50 || sys > 300 || dia < 30 || dia > 200 || sys <= dia || !validDate(body.date, now)) { fail(400, 'bad_reading'); break; }
-        h.readings.push({ t: now, date: body.date, sys, dia });
+        const rsrc = ['bluetooth', 'simulated'].includes(body.src) ? body.src : undefined; // where the number came from (a cuff paired over Bluetooth, or the demo cuff)
+        h.readings.push(rsrc ? { t: now, date: body.date, sys, dia, src: rsrc } : { t: now, date: body.date, sys, dia });
         if (h.readings.length > 400) h.readings = h.readings.slice(-400);
         const emergency = isEmergencyReading(sys, dia);
         if (emergency) startAlert(h, { sys, dia, why: 'High reading' }, now);
@@ -787,6 +788,10 @@ export class AlertHub {
       case 'sos': {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         startAlert(h, { sys: body.sys, dia: body.dia, why: body.why || 'Help requested' }, now);
+        if (h.alert && Number.isFinite(body.offlineAt)) { // pressed while the phone had no internet; sent when signal returned
+          const mins = Math.round((now - body.offlineAt) / 60000);
+          if (mins >= 1 && mins <= 1440) logLine(h.alert, now, 'Help was pressed ' + mins + ' min ago with no internet. Sent when signal returned');
+        }
         break;
       }
       case 'cancel': {
