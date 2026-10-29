@@ -122,7 +122,7 @@ function api(method, path, body){
     .catch(function(){ return { ok: false, _status: 0, error: 'offline' }; });
 }
 function hApi(action, body){ return api(action === 'state' ? 'GET' : 'POST', '/api/h/' + sess.pid + '/' + action, body === undefined && action !== 'state' ? {} : body); }
-function take(j){ if (j && j.ok && j.profile) { st = j; return true; } return false; }
+function take(j){ if (j && j.ok && j.profile) { st = j; rememberState(j); return true; } return false; }
 function gone(j){ return j && (j._status === 401 || j._status === 404); }
 
 /* ---------- face + voice ---------- */
@@ -317,7 +317,7 @@ function patientApp(){
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><a href="/workspace.html" style="color:#7DD3FC;font-size:13px;text-decoration:none">My records</a><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
   '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
-  '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div>' +
+  '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div><div class="banner" id="offb" style="display:none;border-color:#1e3a8a;background:#0b1530;color:#bfdbfe"></div>' +
   '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">I took my tablet</button><button data-q="how was my week">History</button></div>' +
   '<div class="inputbar"><input id="txt" placeholder="Type to Orbit" autocomplete="off" enterkeyhint="send"><button id="send">Send</button><button id="mic" aria-label="Talk to Orbit">&#127908;</button></div>' +
   '<div class="row" style="margin-top:12px"><button id="fam">Family</button><button id="set">Settings</button></div>' +
@@ -334,10 +334,10 @@ function patientApp(){
   $('fam').onclick = showFamily; $('set').onclick = showSettings;
   $('sos').onclick = function(){ startHelp('Pressed the help button'); };
   $('emclose').onclick = function(){ $('emer').classList.remove('on'); };
-  $('emok').onclick = function(){ hApi('cancel').then(function(j){ if (take(j)) { renderEmergency(); say('Okay. I have told your family you are fine.'); $('emer').classList.remove('on'); } }); };
+  $('emok').onclick = function(){ var had = qDrop('sos'); hApi('cancel').then(function(j){ if (take(j)) { renderEmergency(); say('Okay. I have told your family you are fine.'); $('emer').classList.remove('on'); } else if (had || (j && j._status === 0)) { $('emer').classList.remove('on'); say('Okay. I cancelled the saved help request.'); } }); };
   hApi('state').then(function(j){
     if (gone(j)) { clearSession(); sess = null; welcome('That account is no longer available.'); return; }
-    if (take(j)) { firstLoad(); } else { setCaption('I cannot reach the internet. I will keep trying.'); }
+    if (take(j)) { firstLoad(); qFlush(); } else { var ls = j && j._status === 0 ? lastGet() : null; if (ls) { st = ls; firstLoad(); } setCaption('I cannot reach the internet. I will keep trying. Your readings, tablets and help button still work.'); offlineBanner(); }
     schedulePatient();
   });
 }
@@ -367,6 +367,7 @@ function schedulePatient(){
   stopTimer();
   var active = st && st.alert && (st.alert.status === 'ringing' || st.alert.status === 'answered');
   timer = setTimeout(function(){
+    qFlush();
     hApi('state').then(function(j){
       if (gone(j)) { clearSession(); sess = null; welcome('That account is no longer available.'); return; }
       if (take(j)) { refreshCards(); renderEmergency(); }
@@ -404,7 +405,8 @@ function renderEmergency(){
 var lastShownAlert = '', lastSpoken = {};
 function startHelp(why, sys, dia){
   var o = $('emer'); o.classList.add('on'); $('emtxt').textContent = 'Alerting your family...'; $('emtl').innerHTML = '';
-  hApi('sos', { why: why, sys: sys, dia: dia }).then(function(j){
+  hQ('sos', { why: why, sys: sys, dia: dia }).then(function(j){
+    if (j && j.queued) { offlineHelp(why); return; }
     if (take(j)) { renderEmergency(); schedulePatient(); }
     else { $('emtxt').textContent = 'I could not reach the internet. Call 112 now.'; say('I could not reach the internet. Call 112 now.'); }
   });
@@ -433,8 +435,113 @@ function handle(text){
   if (/\b(family|caregiver|add someone)\b/i.test(text)) { showFamily(); return; }
   chat(text);
 }
-function saveBP(sys, dia){
-  hApi('bp', { sys: sys, dia: dia, date: todayStr() }).then(function(j){
+
+/* ---------- offline safety (the person only) ---------- */
+var QKEY = 'orbitx.queue.v1', CKEY = 'orbitx.cache.v1', LKEY = 'orbitx.laststate.v1', flushing = false;
+function qGet(){ try { return JSON.parse(localStorage.getItem(QKEY) || '[]'); } catch(e){ return []; } }
+function qSet(a){ try { localStorage.setItem(QKEY, JSON.stringify(a.slice(-30))); } catch(e){} }
+function qMine(){ return qGet().filter(function(x){ return sess && x.pid === sess.pid; }); }
+function qDrop(action){ var all = qGet(), keep = all.filter(function(x){ return !(sess && x.pid === sess.pid && x.a === action); }); qSet(keep); offlineBanner(); return all.length !== keep.length; }
+function rememberState(j){
+  if (!sess || sess.role !== 'patient') return;
+  try {
+    localStorage.setItem(CKEY, JSON.stringify({ pid: sess.pid, name: j.profile.name, cg: (j.caregivers || []).filter(function(c){ return c.phone && c.role !== 'clinician'; }).map(function(c){ return { name: c.name, phone: c.phone }; }) }));
+    localStorage.setItem(LKEY, JSON.stringify({ pid: sess.pid, st: j }));
+  } catch(e){}
+}
+function cacheGet(){ try { var c = JSON.parse(localStorage.getItem(CKEY) || 'null'); return c && sess && c.pid === sess.pid ? c : null; } catch(e){ return null; } }
+function lastGet(){ try { var c = JSON.parse(localStorage.getItem(LKEY) || 'null'); return c && sess && c.pid === sess.pid ? c.st : null; } catch(e){ return null; } }
+// Send now. With no internet, keep it on the phone and send it automatically when signal returns.
+function hQ(action, body){
+  body = body || {};
+  return hApi(action, body).then(function(j){
+    if (j && j._status === 0) { var q = qGet(); q.push({ pid: sess.pid, a: action, b: body, t: Date.now() }); qSet(q); offlineBanner(); return { ok: true, queued: true }; }
+    return j;
+  });
+}
+function qFlush(){
+  if (flushing || !sess || sess.role !== 'patient') return Promise.resolve();
+  var q = qMine(); if (!q.length) { offlineBanner(); return Promise.resolve(); }
+  flushing = true;
+  function next(i){
+    if (i >= q.length) return Promise.resolve(true);
+    var x = q[i], body = Object.assign({}, x.b); if (x.a === 'sos') body.offlineAt = x.t;
+    return api('POST', '/api/h/' + sess.pid + '/' + x.a, body).then(function(j){
+      if (j._status === 0 || j._status === 429) return false;
+      var cur = qGet(), k = cur.findIndex(function(y){ return y.t === x.t && y.a === x.a && y.pid === x.pid; }); if (k > -1) { cur.splice(k, 1); qSet(cur); }
+      return next(i + 1);
+    });
+  }
+  return next(0).then(function(){ flushing = false; offlineBanner(); return hApi('state').then(function(j){ if (take(j)) { refreshCards(); renderEmergency(); } }); }, function(){ flushing = false; });
+}
+function offlineBanner(){
+  var b = $('offb'); if (!b) return;
+  var n = qMine().length, off = navigator.onLine === false;
+  if (!n && !off) { b.style.display = 'none'; return; }
+  b.textContent = (off ? 'No internet. ' : '') + (n ? n + ' item' + (n === 1 ? '' : 's') + ' saved on this phone. Sent automatically when signal returns.' : 'Orbit-X still works. Help falls back to calls and text messages.');
+  b.style.display = 'block';
+}
+window.addEventListener('online', function(){ qFlush(); });
+window.addEventListener('offline', offlineBanner);
+function offlineHelp(why){
+  var o = $('emer'); o.classList.add('on'); $('emok').style.display = '';
+  var c = cacheGet(), name = (st && st.profile && st.profile.name) || (c && c.name) || 'Someone';
+  var list = (st && st.caregivers ? st.caregivers.filter(function(x){ return x.phone && x.role !== 'clinician'; }).map(function(x){ return { name: x.name, phone: x.phone }; }) : (c ? c.cg : [])) || [];
+  $('emtxt').textContent = 'No internet. Your help request is saved and goes to your family the moment signal returns. Do not wait: call 112 or text your family now.';
+  $('emtl').innerHTML = '<div>' + clock(Date.now()) + ' Help pressed with no internet. Saved on this phone</div>';
+  var base = 'Orbit-X EMERGENCY: ' + name + ' needs help now (' + why + ') at ' + clock(Date.now()) + '. Please call straight away.';
+  function paint(loc){
+    var body = encodeURIComponent(base + (loc ? ' My location: ' + loc : '')), nums = list.map(function(x){ return x.phone; }).join(',');
+    $('emcalls').innerHTML = '<a class="btn red" href="tel:112">Call 112</a>' + (nums ? '<a class="btn" href="sms:' + esc(nums) + '?body=' + body + '">Text everyone now</a>' : '') +
+      list.map(function(x){ return '<a class="btn ghost" href="tel:' + esc(x.phone) + '">Call ' + esc(x.name) + '</a><a class="btn ghost" href="sms:' + esc(x.phone) + '?body=' + body + '">Text ' + esc(x.name) + '</a>'; }).join('') +
+      (list.length ? '' : '<div class="small">Add a family phone number in Family so I can text them when there is no internet.</div>') + (loc ? '<div class="small">Your location is included in the text.</div>' : '');
+  }
+  paint('');
+  try { if (navigator.geolocation) navigator.geolocation.getCurrentPosition(function(p){ paint('https://maps.google.com/?q=' + p.coords.latitude.toFixed(5) + ',' + p.coords.longitude.toFixed(5)); }, function(){}, { timeout: 8000, maximumAge: 120000 }); } catch(e){}
+  say('No internet. Call 112 now, or text your family.');
+}
+
+/* ---------- Bluetooth blood-pressure cuff (standard Bluetooth blood-pressure service) ---------- */
+function sfloat(v){ var raw = v & 0x0FFF; if (raw >= 0x07FE && raw <= 0x0802) return NaN; var m = raw >= 0x0800 ? raw - 0x1000 : raw, e = v >> 12; if (e >= 8) e -= 16; return m * Math.pow(10, e); }
+function parseBpm(dv){
+  var f = dv.getUint8(0), sys = sfloat(dv.getUint16(1, true)), dia = sfloat(dv.getUint16(3, true));
+  if (f & 1) { sys *= 7.50062; dia *= 7.50062; } // kPa to mmHg
+  var off = 7 + (f & 2 ? 7 : 0), pulse = (f & 4) && dv.byteLength >= off + 2 ? Math.round(sfloat(dv.getUint16(off, true))) : null;
+  return { sys: Math.round(sys), dia: Math.round(dia), pulse: pulse };
+}
+function connectCuff(){
+  var er = $('bte'), mg = $('btm'); er.textContent = '';
+  if (!navigator.bluetooth) { er.textContent = 'This browser cannot use Bluetooth devices. Use Chrome on Android, or try the demo cuff.'; return; }
+  mg.textContent = 'Choose your cuff from the list...';
+  navigator.bluetooth.requestDevice({ filters: [{ services: ['blood_pressure'] }] }).then(function(d){
+    mg.textContent = 'Connecting to ' + (d.name || 'your cuff') + '...';
+    d.addEventListener('gattserverdisconnected', function(){ if ($('btm')) $('btm').textContent = 'Cuff disconnected. Tap Connect a cuff to pair again.'; });
+    return d.gatt.connect();
+  }).then(function(g){ return g.getPrimaryService('blood_pressure'); })
+    .then(function(svc){ return svc.getCharacteristic('blood_pressure_measurement'); })
+    .then(function(ch){ return ch.startNotifications().then(function(){
+      ch.addEventListener('characteristicvaluechanged', function(e){ var r; try { r = parseBpm(e.target.value); } catch(x){ r = null; } gotCuff(r, 'bluetooth'); });
+      mg.textContent = 'Connected. Take a measurement on the cuff now. The reading will appear here.';
+    }); })
+    .catch(function(e){ mg.textContent = ''; er.textContent = e && e.name === 'NotFoundError' ? 'No cuff was chosen, or none was found nearby.' : 'Could not connect to the cuff: ' + ((e && e.message) || 'error'); });
+}
+function gotCuff(r, src){
+  if (!r || !(r.sys >= 50 && r.sys <= 300 && r.dia >= 30 && r.dia <= 200 && r.sys > r.dia)) { say('The cuff sent a reading I could not understand. Please measure again.'); return; }
+  $('seo').classList.remove('on');
+  $('evo').innerHTML = '<h2>' + (src === 'simulated' ? 'Demo cuff reading' : 'Cuff reading') + '</h2><div style="font-size:38px;font-weight:700;text-align:center;margin:10px 0">' + r.sys + ' / ' + r.dia + '</div>' + (r.pulse ? '<div class="small" style="text-align:center">Pulse ' + r.pulse + '</div>' : '') +
+    '<div class="small" style="margin-top:8px">' + (src === 'simulated' ? 'This is a pretend cuff for the demo. If you save it, it is marked as simulated.' : 'Saved only if you tap Save. I never record a reading without you.') + '</div>' +
+    '<button class="btn" id="cfs">Save this reading</button><button class="btn ghost" id="cfd">Discard</button>';
+  $('evo').classList.add('on');
+  $('cfd').onclick = function(){ $('evo').classList.remove('on'); };
+  $('cfs').onclick = function(){ $('evo').classList.remove('on'); saveBP(r.sys, r.dia, src); };
+}
+function saveBP(sys, dia, src){
+  hQ('bp', { sys: sys, dia: dia, date: todayStr(), src: src }).then(function(j){
+    if (j && j.queued) {
+      st.readings.push({ t: Date.now(), date: todayStr(), sys: sys, dia: dia, src: src }); refreshCards();
+      if (D.isEmergencyReading(sys, dia)) { startHelp('Very high reading ' + sys + '/' + dia, sys, dia); return; }
+      say('No internet. I saved ' + sys + ' over ' + dia + ' on this phone and will send it when signal returns.'); return;
+    }
     if (!take(j)) { say('I could not save that. Please check your internet and try again.'); return; }
     refreshCards();
     if (j.emergency) { renderEmergency(); schedulePatient(); return; }
@@ -469,7 +576,8 @@ function openDoseSheet(){
   }; });
 }
 function logDose(slot){
-  hApi('dose', { slot: slot, date: todayStr() }).then(function(j){
+  hQ('dose', { slot: slot, date: todayStr() }).then(function(j){
+    if (j && j.queued) { st.doses.push({ t: Date.now(), date: todayStr(), slot: slot }); refreshCards(); say('No internet. I saved your ' + slotName(slot) + ' tablet on this phone and will send it when signal returns.'); return; }
     if (!take(j)) { say('I could not save that. Please check your internet and try again.'); return; }
     refreshCards(); say('Good. I have noted that you took your ' + slotName(slot) + ' tablet. I only keep a record that you took it, never an amount.');
   });
@@ -664,6 +772,8 @@ function showSettings(){
     '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
     '<label class="l">Recovery key</label><div class="small">If you lose this phone, this key restores your account on a new one. Keep it private.</div><button class="btn ghost" id="rk">Show my recovery key</button><div class="code" id="rkv" style="display:none;font-size:13px"></div>' +
     '<label class="l">Fall guard</label><div class="small">If your phone falls and then lies still, Orbit asks "Did you fall?" If you do not answer in 15 seconds, your family is alerted. Works while Orbit-X is open on this phone with the screen on.</div><label class="check"><input type="checkbox" id="fg"' + (fallOn() ? ' checked' : '') + '> Turn on fall guard</label><div class="err" id="fge"></div><button class="btn ghost" id="fgt">Test it now</button>' +
+    '<label class="l">No internet? Orbit-X keeps working</label><div class="small">Readings and tablets are saved on this phone and sent when signal returns. If you press help with no internet, I save the alert, show Call 112 and text buttons (with your location), and send the alert automatically the moment signal is back.</div>' +
+    '<label class="l">Bluetooth blood-pressure cuff</label><div class="small">Pair a cuff that uses the standard Bluetooth blood-pressure service (Chrome on Android). Each reading comes straight in, works with no internet, and you confirm it before it is saved.</div><div class="err" id="bte"></div><button class="btn ghost" id="btc">Connect a cuff</button><button class="btn ghost" id="bts">Try a demo cuff</button><div class="small" id="btm"></div>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
     (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private. <a href="/developer.html" style="color:#7DD3FC">Try the API demo in a safe sandbox</a>.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
@@ -672,6 +782,7 @@ function showSettings(){
   $('alb').onclick = function(){ if (st.profile.alertsOn) { var t0 = Date.now(); $('ale').textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ $('ale').textContent = diagText(j); if (j && j.ok && j.diag && j.diag[0] && j.diag[0].state === 'accepted') watchDisplayed(t0, function(m){ $('ale').textContent = m; }); }); return; } enableAlerts(function(ok, m){ $('ale').textContent = ok ? 'Phone alerts are on.' : m; if (ok) $('alb').textContent = 'Phone alerts are ON. Send a test'; }, true); };
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
+  $('btc').onclick = connectCuff; $('bts').onclick = function(){ gotCuff({ sys: 148, dia: 92, pulse: 76 }, 'simulated'); };
   if ($('kn')) $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
   o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
   $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
@@ -687,7 +798,7 @@ function beep(){
     g.gain.setValueAtTime(.0001, ringCtx.currentTime); g.gain.exponentialRampToValueAtTime(.25, ringCtx.currentTime + .05); g.gain.exponentialRampToValueAtTime(.0001, ringCtx.currentTime + .5); o.start(); o.stop(ringCtx.currentTime + .55); } catch(e){}
 }
 function keepAwake(){ try { if (navigator.wakeLock) navigator.wakeLock.request('screen').then(function(l){ wake = l; }, function(){}); } catch(e){} }
-document.addEventListener('visibilitychange', function(){ if (!document.hidden && armed) keepAwake(); if (!document.hidden && sess && sess.pid && sess.role === 'patient' && document.getElementById('c2')) { hApi('state').then(function(j){ if (take(j)) { refreshCards(); renderEmergency(); } }); } });
+document.addEventListener('visibilitychange', function(){ if (!document.hidden && armed) keepAwake(); if (!document.hidden) qFlush(); if (!document.hidden && sess && sess.pid && sess.role === 'patient' && document.getElementById('c2')) { hApi('state').then(function(j){ if (take(j)) { refreshCards(); renderEmergency(); } }); } });
 function caregiverApp(){
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + '</span></div><div id="cgv" style="position:relative;flex:1"></div><audio id="rtcaudio" autoplay playsinline></audio>';
