@@ -22,5 +22,29 @@ window.OX = (function(){
     var t = ai.mode === 'live' ? 'Meta Muse Spark Open via Baseten: live' : ai.mode === 'mock' ? 'MOCK AI (not a Meta model)' : 'AI off: rule-based only';
     return '<span class="badge ' + cls + '" title="' + esc(ai.provider || '') + '"><i></i>' + esc(t) + '</span>';
   }
-  return { esc: esc, session: session, need: need, api: api, w: w, ago: ago, copy: copy, openSheet: openSheet, aiBadge: aiBadge, SKEY: SKEY };
+
+  var BKEY = 'orbitx.session.backup';
+  function today(){ var d = new Date(), p = function(n){ return ('0' + n).slice(-2); }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
+  // Opens a separate, pretend organisation account for the API demo. The person's own login is kept safe and can be restored.
+  function enterSandbox(next){
+    var cur = session();
+    if (cur && cur.synthetic && cur.accountType === 'provider') { location.href = next || '/developer.html'; return Promise.resolve(true); }
+    try { if (cur && !cur.synthetic) localStorage.setItem(BKEY, JSON.stringify(cur)); } catch(e){}
+    return api('POST', '/api/create', { name: 'Amara Okafor', slots: [], today: today(), accountType: 'provider', org: 'Sandbox' }).then(function(j){
+      if (!j || !j.ok) return false;
+      try { localStorage.setItem(SKEY, JSON.stringify({ role: 'patient', pid: j.pid, token: j.token, name: 'Amara Okafor', synthetic: true, accountType: 'provider' })); } catch(e){ return false; }
+      location.href = next || '/developer.html'; return true;
+    });
+  }
+  function backBar(){
+    var b = null; try { b = localStorage.getItem(BKEY); } catch(e){}
+    var s = session(); if (!b || !s || !s.synthetic) return;
+    var w = document.querySelector('.wrap'); if (!w) return;
+    var d = document.createElement('div'); d.className = 'banner'; d.style.cssText = 'display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap';
+    d.innerHTML = '<span>You are in the <b>demo sandbox</b> with a pretend patient.</span><button class="btn g s" id="bkacct">Back to my account</button>';
+    w.insertBefore(d, w.firstChild);
+    document.getElementById('bkacct').onclick = function(){ try { localStorage.setItem(SKEY, b); localStorage.removeItem(BKEY); } catch(e){} location.href = '/workspace.html'; };
+  }
+  try { backBar(); } catch(e){}
+  return { enterSandbox: enterSandbox, esc: esc, session: session, need: need, api: api, w: w, ago: ago, copy: copy, openSheet: openSheet, aiBadge: aiBadge, SKEY: SKEY };
 })();
