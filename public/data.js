@@ -97,6 +97,22 @@
   function listDates(arr) { return arr.map(fmtDate).join(', '); }
   function slotWord(slot) { return ['morning', 'afternoon', 'evening', 'night'].indexOf(slot) > -1 ? slot : 'evening'; }
 
+  /* Reading bands. WHO (2021): hypertension is 140/90 or higher, confirmed on two different days.
+     WHO publishes no emergency number (its guideline excludes hypertensive crisis). 180/110 or higher is the
+     "severe" line used by national guidelines, so that is where the fixed emergency rule starts.
+     A band describes ONE reading. It is never a diagnosis. */
+  function bpBand(sys, dia) {
+    if (sys >= 180 || dia >= 110) return { code: 'severe', label: 'very high (180/110 or more)' };
+    if (sys >= 160 || dia >= 100) return { code: 'high2', label: 'high (160/100 or more)' };
+    if (sys >= 140 || dia >= 90) return { code: 'high1', label: 'at or above 140/90' };
+    return { code: 'ok', label: 'below 140/90' };
+  }
+  function slotList(list) {
+    var seen = [], out = [];
+    list.forEach(function (m) { if (seen.indexOf(m.slot) < 0) { seen.push(m.slot); out.push(slotWord(m.slot)); } });
+    return out.length ? out.join(' and ') + (out.length > 1 ? ' tablets' : ' tablet') : '';
+  }
+
   function analyzeReal(readings, doses, slots, today, createdDate) {
     slots = slots || [];
     var byDate = {};
@@ -115,8 +131,8 @@
       slots.forEach(function (sl) { if (!gone[d + '|' + sl]) missed.push({ date: d, slot: sl }); });
     }
     out.missed = missed;
-    var missDates = {}; missed.forEach(function (m) { missDates[m.date] = true; });
-    out.win = dates.slice(-7).map(function (dt) { return { date: dt, sys: byDate[dt].sys, dia: byDate[dt].dia, missed: !!missDates[dt] }; });
+    var missDates = {}, missSlots = {}; missed.forEach(function (m) { missDates[m.date] = true; (missSlots[m.date] = missSlots[m.date] || []).push(m.slot); });
+    out.win = dates.slice(-7).map(function (dt) { return { date: dt, sys: byDate[dt].sys, dia: byDate[dt].dia, missed: !!missDates[dt], missedSlots: missSlots[dt] || [] }; });
     if (n) out.last = byDate[dates[n - 1]];
     out.lastDate = n ? dates[n - 1] : null;
 
@@ -128,6 +144,7 @@
     }
     var base = median(dates.slice(0, 10).map(function (dt) { return byDate[dt].sys; }));
     out.baseline = base;
+    out.band = bpBand(out.last.sys, out.last.dia);
     var gap = Math.round((Date.parse(today + 'T00:00:00Z') - Date.parse(out.lastDate + 'T00:00:00Z')) / 86400000);
     if (gap > 3) {
       out.level = 'stale';
@@ -151,9 +168,16 @@
       out.level = 'watch';
       out.sentence = 'Your pressure has been higher than your usual for ' + streak + ' days. You may want to share this with your doctor.';
       out.short = out.sentence;
+    } else if (out.lastDate >= addDays(today, -1) && (out.last.sys >= base + HIGH_MARGIN || out.band.code !== 'ok')) {
+      var lr = out.last.sys + '/' + out.last.dia, rel = out.last.sys >= base + HIGH_MARGIN;
+      out.level = 'high';
+      out.sentence = 'Your last reading, ' + lr + ', is ' + (rel ? 'higher than your usual of about ' + base + '.' : out.band.label + '.') +
+        (missedYest.length ? ' You also did not log your ' + slotList(missedYest) + ' yesterday.' : '') +
+        ' One reading is not a diagnosis. You may want to share this with your doctor.';
+      out.short = out.sentence;
     } else if (missedYest.length) {
       out.level = 'calm';
-      out.sentence = 'You did not log your ' + slotWord(missedYest[0].slot) + ' tablet yesterday. One miss happens. Let us get back on track today.';
+      out.sentence = 'You did not log your ' + slotList(missedYest) + ' yesterday. One miss happens. Let us get back on track today.';
       out.short = out.sentence;
     } else {
       out.level = 'ok';
@@ -161,8 +185,9 @@
       out.short = out.sentence;
     }
 
+    if (out.level === 'high') out.evidence.push({ title: fmtDate(out.lastDate), text: out.last.sys + '/' + out.last.dia + ' (your usual is about ' + base + '; this reading is ' + out.band.label + ')' });
     var hi = [];
-    for (var j = n - 1; j >= 0 && hi.length < Math.min(streak, 4); j--) hi.unshift(dates[j]);
+    for (var j = n - 1; j >= 0 && out.level !== 'high' && hi.length < Math.min(streak, 4); j--) hi.unshift(dates[j]);
     hi.forEach(function (dt) { out.evidence.push({ title: fmtDate(dt), text: byDate[dt].sys + '/' + byDate[dt].dia + ' (your usual is about ' + base + ')' }); });
     ['morning', 'afternoon', 'evening', 'night'].forEach(function (sl) {
       var ds = missed.filter(function (m) { return m.slot === sl; }).map(function (m) { return m.date; });
@@ -180,7 +205,7 @@
     return best;
   }
 
-  function isEmergencyReading(sys, dia) { return sys >= 180 || dia >= 120; }
+  function isEmergencyReading(sys, dia) { return sys >= 180 || dia >= 110; }
 
   var EMERGENCY = ['chest pain', 'chest dey pain', 'chest dey hurt', 'pain in my chest', 'pain in chest',
     'cannot breathe', "can't breathe", 'cant breathe', 'no fit breathe', 'difficulty breathing', 'hard to breathe',
@@ -214,6 +239,6 @@
 
 
   var api = { buildDays: buildDays, analyze: analyze, analyzeReal: analyzeReal, slotForNow: slotForNow, addDays: addDays, fmtDate: fmtDate,
-    isEmergencyReading: isEmergencyReading, detectEmergency: detectEmergency, parseCommand: parseCommand, HIGH_MARGIN: HIGH_MARGIN };
+    isEmergencyReading: isEmergencyReading, detectEmergency: detectEmergency, parseCommand: parseCommand, HIGH_MARGIN: HIGH_MARGIN, bpBand: bpBand, slotList: slotList };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.OrbitData = api;
 })(typeof window !== 'undefined' ? window : this);
