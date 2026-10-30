@@ -8,7 +8,7 @@ export class MetaError extends Error {
   constructor(message, status = 500) { super(message); this.name = 'MetaError'; this.status = status; }
 }
 
-export const MODEL_FALLBACKS = ['meta-models/muse-spark-open', 'meta/muse-spark-open', 'muse-spark-open'];
+export const MODEL_FALLBACKS = ['meta-models/muse-spark-open-1026', 'meta-models/muse-spark-open', 'meta/muse-spark-open', 'muse-spark-open'];
 const SCHEME_CACHE = new Map(); // base -> 'Api-Key' | 'Bearer' (last one that worked)
 let modelCache = { id: null, at: 0, base: '' };
 
