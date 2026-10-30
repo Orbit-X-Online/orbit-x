@@ -36,3 +36,18 @@ r = await call('/api/health', { headers: { Origin: 'https://orbit-x.online' } })
 r = await call('/api/health', { headers: { Origin: 'https://evil.test' } }); assert.equal(r.headers.get('Access-Control-Allow-Origin'), null);
 
 console.log('ALL SMOKE TESTS PASSED');
+
+// Baseten: must sign in with "Api-Key", not "Bearer"; falls back to the other scheme on 403.
+{
+  const benv = { MODEL_API_KEY: 'bk', MODEL_BASE_URL: 'https://inference.baseten.co/v1', ASSETS: env.ASSETS };
+  const calls = [];
+  globalThis.fetch = async (url, init) => { calls.push({ url, auth: init.headers.Authorization }); return new Response(JSON.stringify({ choices: [{ message: { content: 'hello' } }] })); };
+  let rr = await worker.fetch(new Request('https://t.test/api/assistant', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }) }), benv);
+  assert.equal(rr.status, 200);
+  assert.ok(calls.length > 0 && calls.every((c) => c.auth === 'Api-Key bk'), 'Baseten calls use Api-Key');
+  const seen = [];
+  globalThis.fetch = async (url, init) => { seen.push(init.headers.Authorization); return new Response('{"error":"please check the api-key you provided"}', { status: 403 }); };
+  rr = await worker.fetch(new Request('https://t.test/api/ai/status?test=1'), { ...benv, MODEL_API_KEY: 'zz' });
+  const sj = await rr.json(); assert.equal(sj.test.ok, false); assert.equal(sj.test.error, 'key_rejected'); assert.ok(seen.includes('Api-Key zz') && seen.includes('Bearer zz'), 'both sign-in methods tried');
+  console.log('BASETEN AUTH TESTS PASSED');
+}
