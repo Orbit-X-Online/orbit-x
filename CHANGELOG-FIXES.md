@@ -1,4 +1,4 @@
-# CHANGELOG-FIXES
+# CHANGELOG-FIXE
 
 ## Defects found and fixed
 
