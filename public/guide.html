@@ -72,10 +72,10 @@
 </div>
 <h2>Developer tools, step by step</h2>
 <div class="info">
-<div class="c"><b>1. Open the sandbox</b>On a doctor or organisation account, open Developer tools. A pretend patient is used. No real people.</div>
+<div class="c"><b>1. Open Developer tools</b>Sign up as a doctor, clinic or organisation, then open Developer tools.</div>
 <div class="c"><b>2. Make an API key</b>Tap <b>Create key</b>. Choose scopes. Copy it once. It is shown one time.</div>
-<div class="c"><b>3. Send a test record</b>Use <b>Import a FHIR record</b> with the sample bundle. Facts appear in Health Workspace.</div>
-<div class="c"><b>4. Try an emergency handoff</b>Create a handoff. Watch it move through accepted, generated, sent, received, acknowledged. Delivery is simulated and labelled so.</div>
+<div class="c"><b>3. Send a test record</b>Paste your own FHIR record into <b>Import a FHIR record</b>. Facts appear in Health Workspace.</div>
+<div class="c"><b>4. Try an emergency handoff</b>Create a handoff. Watch it move through accepted, generated, sent, received, acknowledged. No real hospital or responder is contacted from these tools.</div>
 <div class="c"><b>5. Read the docs</b><a href="/docs.html">API docs</a> list every endpoint with examples.</div>
 </div>
 </div>
@@ -122,7 +122,7 @@
 <h2>Where do I add documents?</h2>
 <div class="card big">
 <p>Open <b>My records</b> (the Health Workspace), then the <b>Documents</b> tab.</p>
-<p>• <b>Paste</b> the words from a lab report or hospital paper into the box, or choose a <b>.txt</b> file. Then tap <b>Analyse</b>.<br>• Or tap <b>Load the synthetic samples</b> to try it with pretend papers.</p>
+<p>• <b>Paste</b> the words from a lab report or hospital paper into the box, or choose a <b>.txt</b> file. Then tap <b>Analyse</b>.</p>
 <p>Orbit finds the numbers, shows exactly which words they came from, and compares reports over time. It only works with text for now (no photos or PDFs yet).</p>
 </div>
 
@@ -132,8 +132,6 @@
 <p>Orbit-X is a hackathon project and not a medical device. In an emergency, call 112.</p>
 </div>
 
-<h2>Just looking? (demo)</h2>
-<p class="big">On the first page, the box called <b>Just want to look around?</b> has a one-minute story and a pretend patient. Nothing in it is real, and nobody is contacted.</p>
 <p><a class="btn" href="/">Back to the start</a></p>
 </div>
 
@@ -164,3 +162,4 @@ var h=(location.hash||'').slice(1);show(SC[h]?h:'patient');
 </script>
 </body>
   </html>
+  
