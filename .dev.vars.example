@@ -9,3 +9,16 @@ WHATSAPP_VERIFY_TOKEN=    # any random string you choose; same value in the Meta
 # MODEL_REASONING=low     # optional: minimal|low|medium|high|xhigh (only if the model accepts it)
 # AI_MODE=mock            # optional: force the labelled rule-based mock instead of a live model
 # PUSH_EXTRA_HOSTS=       # optional: comma-separated extra push-service hostnames to accept
+
+# --- Voice calls over mobile data (Cloudflare Realtime TURN; free tier). Create the key in the Cloudflare dashboard: Realtime > TURN Server > Create ---
+# TURN_KEY_ID=            # the "TURN Token ID" shown for the key
+# TURN_API_TOKEN=         # the "API Token" shown once when the key is created
+# (alternative: any other TURN service) TURN_URLS=turn:host:3478,turns:host:443?transport=tcp  TURN_USERNAME=  TURN_CREDENTIAL=
+
+# --- Offline automatic alerts: server-sent SMS / phone call when nobody answers (pick one provider) ---
+# TWILIO_SID=             # Twilio Account SID
+# TWILIO_TOKEN=           # Twilio Auth Token
+# TWILIO_FROM=            # your Twilio number, e.g. +1555...
+# AT_USERNAME=            # Africa's Talking username ("sandbox" for testing)
+# AT_API_KEY=             # Africa's Talking API key
+# AT_FROM=                # optional approved sender ID
