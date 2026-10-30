@@ -43,3 +43,12 @@ Durable Object class name `AlertHub` and migration `v1`; existing endpoints and 
 | 27 | Guide: animated demos and picture steps for patients, caregivers, doctors and hospital staff, including Developer tools. | `public/guide.html` |
 
 Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio hardware, and the live Baseten key. They need your phone, your secrets and your hardware.
+
+## Round 3 (clean-up, no pre-filled data, History)
+| # | Change | Files |
+|---|---|---|
+| 28 | **No pre-filled or fake data anywhere.** Removed: the first-page demo box and "pretend patient", "Try a demo cuff", "Load the synthetic documents", the one-tap developer demo, the "pretend emergency app" link, the pre-filled sample FHIR record, and the hard-coded "Dr Sandbox" requester (now typed by the user). Nothing is written to an account unless the person adds it. | `public/index.html`, `workspace.html`, `developer.html`, `guide.html` |
+| 29 | **History is a tidy drop-down panel**: blood-pressure readings, tablets taken, tablets not logged (7 days), notes for the care team, and alerts, each a collapsible section with a count. Built only from the person's own saved records. | `public/index.html` |
+| 30 | **Readability**: brighter secondary text, larger small text, bigger buttons and labels, two-column tables become stacked cards on phones, Family alert log is a drop-down. | `public/index.html`, `public/ox.css` |
+| 31 | `npm run check` now covers every front-end script; `.dev.vars.example` lists the TURN and SMS variables. | `package.json`, `.dev.vars.example` |
+
