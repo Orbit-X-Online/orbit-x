@@ -11,7 +11,7 @@
 <div class="wrap">
   <div class="hdr">
     <div><b>Orbit-X</b> <span class="sub" id="who"></span><div class="sub">Health information you can understand, trace and share</div></div>
-    <div class="links"><span id="aib"></span><a href="/developer.html" id="devlink">Developer tools (API)</a><a href="/?guardian=1">Family &amp; alerts</a></div>
+    <div class="links"><span id="aib"></span><a href="/developer.html" id="devlink">Developer tools (API)</a><a href="/?guardian=1">Family &amp; alerts</a><a href="/guide.html">Guide</a></div>
   </div>
   <div class="tabs" role="tablist" id="tabs"></div>
   <div id="view" aria-live="polite"><div class="empty"><span class="spin"></span>Loading your workspace</div></div>
@@ -32,14 +32,15 @@ function drawTabs(){
   document.getElementById('tabs').innerHTML = TABS.map(function(t){ return '<button class="tab" role="tab" aria-selected="' + (t[0] === tab) + '" data-t="' + t[0] + '">' + t[1] + '</button>'; }).join('');
   document.querySelectorAll('.tab').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-t'); try { history.replaceState(null, '', '#' + tab); } catch(e){} render(); window.scrollTo(0, 0); }; });
 }
+function paintBadge(ai){ var el = document.getElementById('aib'); if (!el) return; el.innerHTML = OX.aiBadge(ai); OX.bindBadge(); if (ai && ai.mode === 'live') OX.checkAI(function(){ el.innerHTML = OX.aiBadge(ai); OX.bindBadge(); }); }
 function load(){
   return OX.w('wstate', null, 'GET').then(function(j){
     if (j._status === 401 || j._status === 404) { try { localStorage.removeItem(OX.SKEY); } catch(e){} location.href = '/'; return; }
     if (!j.ok) { document.getElementById('view').innerHTML = '<div class="empty">Could not load. Check your connection and reload.</div>'; return; }
-    S = j; document.getElementById('who').textContent = '· ' + j.patient; document.getElementById('aib').innerHTML = OX.aiBadge(j.ai); render();
+    S = j; document.getElementById('who').textContent = '· ' + j.patient; paintBadge(j.ai); render();
   });
 }
-function take(j){ if (j && j.ok && j.facts) { S = j; document.getElementById('aib').innerHTML = OX.aiBadge(j.ai); render(); return true; } return false; }
+function take(j){ if (j && j.ok && j.facts) { S = j; paintBadge(j.ai); render(); return true; } return false; }
 function render(){ if (!S) return; drawTabs(); var v = document.getElementById('view'); v.innerHTML = VIEWS[tab](); BIND[tab] && BIND[tab](); }
 
 /* ---------- helpers ---------- */
@@ -129,7 +130,7 @@ function bindAddDoc(){
     });
   };
 }
-(function(){ var f = document.createElement('button'); f.id = 'fab'; f.textContent = '+ Add document';
+(function(){ var f = document.createElement('button'); f.id = 'fab'; f.textContent = '+'; f.setAttribute('aria-label', 'Add document'); f.title = 'Add document';
   f.style.cssText = 'position:fixed;right:14px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:15;background:#2563EB;color:#fff;border:0;border-radius:999px;padding:14px 18px;font-size:15px;font-weight:600;box-shadow:0 6px 18px #000a;font-family:inherit;cursor:pointer';
   f.onclick = function(){ openAddDoc(); }; document.body.appendChild(f); })();
 
@@ -239,14 +240,17 @@ VIEWS.docs = function(){
   var h = '<h1>Documents</h1>';
   if (!S.docs.length) h += onboardingCard();
   S.docs.forEach(function(d){
-    var ex = d.extraction || {}, ai = ex.mode === 'meta-spark';
-    h += '<div class="card"><div class="row" style="justify-content:space-between"><b>' + esc(d.name) + '</b><span>' + (d.meta && d.meta.docDate ? '<span class="chip">' + esc(d.meta.docDate) + '</span>' : '') + '<span class="chip ' + (d.kind === 'connector' ? 'sim' : 'doc') + '">' + esc(d.kind === 'connector' ? 'connector' : ((d.meta && d.meta.docType) || 'document').replace('_', ' ')) + '</span></span></div>' +
-      (d.kind === 'connector' ? '<div class="small">Imported through Orbit Connect. ' + d.factCount + ' facts. Each fact keeps its FHIR resource id and import time.</div>' :
-      '<div class="small">' + d.factCount + ' facts · read by ' + (ai ? '<span class="chip ok">Meta Muse Spark Open</span>' + esc(ex.model || '') + ' · ' + ex.ms + ' ms' : ex.mode === 'mock' ? '<span class="chip warn">MOCK AI, not a Meta model</span>' : '<span class="chip info">rule-based parser (no AI)</span>') + '</div>' +
-      (ex.aiError ? '<div class="banner">The AI step failed (' + esc(ex.aiError) + '). Orbit fell back to the rule-based parser, so nothing was lost.</div>' : '') +
-      (ex.supplemented ? '<div class="small">' + ex.supplemented + ' fact(s) the model missed were added by the rule parser and are marked as such.</div>' : '') +
-      (ex.rejected && ex.rejected.length ? '<details class="small"><summary>' + ex.rejected.length + ' model output(s) rejected by the validators</summary>' + ex.rejected.map(function(r){ return '<div>' + esc(r.name) + ': ' + esc(r.reason.replace(/_/g, ' ')) + '</div>'; }).join('') + '</details>' : '')) +
-      '<div class="row" style="margin-top:6px">' + (d.kind !== 'connector' ? '<button class="btn g s" data-view="' + esc(d.id) + '">View source</button>' : '') + '<button class="btn r s" data-del="' + esc(d.id) + '">Delete</button></div></div>';
+    var ex = d.extraction || {}, ai = ex.mode === 'meta-spark', isConn = d.kind === 'connector';
+    h += '<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><b style="flex:1 1 200px">' + esc(d.name) + '</b><span>' + (d.meta && d.meta.docDate ? '<span class="chip">' + esc(d.meta.docDate) + '</span>' : '') + '<span class="chip ' + (isConn ? 'sim' : 'doc') + '">' + esc(isConn ? 'connector' : ((d.meta && d.meta.docType) || 'document').replace(/_/g, ' ')) + '</span></span></div>';
+    if (isConn) h += '<div class="small">Imported through Orbit Connect. ' + d.factCount + ' facts. Each fact keeps its FHIR resource id and import time.</div>';
+    else {
+      h += '<div class="small">' + d.factCount + ' fact' + (d.factCount === 1 ? '' : 's') + ' · read by ' + (ai ? '<span class="chip ok">Meta Muse Spark Open</span>' : ex.mode === 'mock' ? '<span class="chip warn">MOCK AI, not a Meta model</span>' : '<span class="chip info">built-in reader</span>') + (ai && ex.ms ? ' <span class="small">' + Math.round(ex.ms / 100) / 10 + ' s</span>' : '') + '</div>';
+      if (ex.aiError) h += '<div class="banner soft">' + esc(OX.friendlyAiError(ex.aiError)) + ' Orbit used its built-in reader, so nothing was lost. <button class="btn g s" data-retry="' + esc(d.id) + '">Read again with AI</button><details class="more"><summary>Technical detail</summary><div class="small">' + esc(String(ex.aiError).slice(0, 200)) + '</div></details></div>';
+      if (!ex.aiError && !d.factCount) h += '<div class="banner">Orbit could not find any results in this text. If it came from a photo or a scan, check the text under View source, or paste the text yourself.</div>';
+      if (ex.supplemented) h += '<div class="small">' + ex.supplemented + ' fact(s) the model missed were added by the built-in reader and are marked as such.</div>';
+      if (ex.rejected && ex.rejected.length) h += '<details class="small more"><summary>' + ex.rejected.length + ' model output(s) rejected by the checks</summary>' + ex.rejected.map(function(r){ return '<div>' + esc(r.name) + ': ' + esc(String(r.reason || '').replace(/_/g, ' ')) + '</div>'; }).join('') + '</details>';
+    }
+    h += '<div class="row" style="margin-top:8px">' + (d.factCount ? '<button class="btn s" data-explain="' + esc(d.id) + '">Explain in plain words</button>' : '') + (!isConn ? '<button class="btn g s" data-view="' + esc(d.id) + '">View source</button>' : '') + '<button class="btn r s" data-del="' + esc(d.id) + '">Delete</button></div></div>';
   });
   h += '<h2>Add a document</h2><div class="card"><p class="small">Upload a PDF, a photo of a report, a Word file or a text file, or paste text.</p><button class="btn" id="addbtn">Upload or paste a document</button></div>';
   if (S.docs.length) h += '<div class="row" style="margin-top:14px"><button class="btn g s" id="loadsamples">Load the synthetic samples</button><button class="btn r s" id="wipe">Remove everything in this workspace</button></div>';
@@ -255,10 +259,33 @@ VIEWS.docs = function(){
 BIND.docs = function(){
   var ls = document.getElementById('loadsamples'); if (ls) ls.onclick = loadSamples;
   document.querySelectorAll('[data-view]').forEach(function(b){ b.onclick = function(){ viewDoc(b.getAttribute('data-view')); }; });
+  document.querySelectorAll('[data-explain]').forEach(function(b){ b.onclick = function(){ explainDoc(b.getAttribute('data-explain')); }; });
+  document.querySelectorAll('[data-retry]').forEach(function(b){ b.onclick = function(){ b.disabled = true; b.textContent = 'Reading...'; OX.w('docretry', { id: b.getAttribute('data-retry') }).then(function(j){ if (!take(j)) { b.disabled = false; b.textContent = 'Read again with AI'; alert(j && j.error === 'ai_still_unavailable' ? 'The AI is still not available. Tap the AI badge at the top to see why.' : 'Could not read it again.'); } }); }; });
   document.querySelectorAll('[data-del]').forEach(function(b){ b.onclick = function(){ if (confirm('Delete this source and the facts read from it?')) OX.w('docdel', { id: b.getAttribute('data-del') }).then(take); }; });
   var wp = document.getElementById('wipe'); if (wp) wp.onclick = function(){ if (confirm('Remove all documents, facts, imports and handoffs from this workspace?')) OX.w('wipe', {}).then(take); };
   var ab = document.getElementById('addbtn'); if (ab) ab.onclick = openAddDoc; var up = document.getElementById('upl'); if (up) up.onclick = openAddDoc;
 };
+
+/* ---------- plain-language explanation of one document ---------- */
+function explainDoc(id){
+  OX.openSheet('<h2 style="margin-top:0">Explained in plain words</h2><div class="empty"><span class="spin"></span>Preparing a simple explanation. This can take up to 30 seconds.</div>');
+  OX.w('docexplain', { id: id }).then(function(j){
+    var box = document.getElementById('sheet'); if (!box) return;
+    if (!j || !j.ok) { OX.openSheet('<h2 style="margin-top:0">Explained in plain words</h2><div class="banner red">Could not prepare the explanation (' + esc((j && j.error) || 'error') + ').</div>'); return; }
+    var h = '<h2 style="margin-top:0">' + esc(j.name) + '</h2>' +
+      '<div class="banner soft">General explanations of terms, not medical advice. Orbit cannot tell you what a result means for your health. Your clinician can.</div>' +
+      (j.aiError ? '<div class="small">Explained with Orbit\'s built-in word list (' + esc(OX.friendlyAiError(j.aiError)) + ')</div>' : j.mode === 'live' ? '<div class="small">Worded by ' + esc(j.model || 'Meta Muse Spark Open') + ', checked by code.</div>' : '') +
+      '<p>' + esc(j.summary) + '</p>';
+    if (j.items && j.items.length) {
+      h += '<h3>What your document says</h3><div class="card flat" style="padding:4px 10px"><table><tbody>' + j.items.map(function(f){ return '<tr><td><b>' + esc(f.name) + '</b>' + (f.dose ? '<div class="small">' + esc(f.dose) + '</div>' : '') + '</td><td>' + (f.value !== null && f.value !== undefined ? esc(fmt(f.value)) + ' ' + esc(f.unit || '') : '') + '</td><td>' + (f.flag ? '<span class="chip ' + (f.flag === 'H' || f.flag === 'L' ? 'warn' : 'info') + '">flagged ' + esc(f.flag === 'H' ? 'high' : f.flag === 'L' ? 'low' : f.flag) + ' in the source</span>' : '') + (f.refRange ? '<div class="small">source range ' + esc(f.refRange) + '</div>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    }
+    if (j.terms && j.terms.length) h += '<h3>What the words mean</h3><dl class="terms">' + j.terms.map(function(t){ return '<dt>' + esc(t.name) + '</dt><dd>' + esc(t.meaning) + '</dd>'; }).join('') + '</dl>';
+    h += '<h3>Questions you could ask your clinician</h3><ul class="qs">' + j.questions.map(function(q){ return '<li>' + esc(q) + '</li>'; }).join('') + '</ul>' +
+      '<div class="row"><button class="btn g s" id="exsay">&#128266; Read aloud</button></div>';
+    OX.openSheet(h);
+    var sb = document.getElementById('exsay'); if (sb) sb.onclick = function(){ var was = voiceOn; voiceOn = true; sayText(j.summary + ' ' + (j.terms || []).slice(0, 6).map(function(t){ return t.name + '. ' + t.meaning; }).join(' ') + ' This is not medical advice.'); voiceOn = was; };
+  });
+}
 function viewDoc(id){ getText(id).then(function(t){ var d = S.docs.filter(function(x){ return x.id === id; })[0]; OX.openSheet('<h2 style="margin-top:0">' + esc(d ? d.name : 'Document') + '</h2><pre>' + esc(t || 'No text stored.') + '</pre>'); }); }
 
 /* ---------- timeline ---------- */
