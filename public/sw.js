@@ -9,8 +9,8 @@ function mine(){
   });
 }
 /* Offline shell: the app opens with no internet. Pages are fetched fresh when online (so updates arrive) and kept for when the signal drops. */
-var SHELL = 'orbitx-shell-v2';
-var FILES = ['/', '/index.html', '/ox.css', '/data.js', '/call.js', '/ox.js', '/manifest.webmanifest', '/icon-192.png'];
+var SHELL = 'orbitx-shell-v3';
+var FILES = ['/', '/index.html', '/ox.css', '/data.js', '/call.js', '/radio.js', '/ox.js', '/docread.js', '/workspace.html', '/guide.html', '/manifest.webmanifest', '/icon-192.png'];
 self.addEventListener('install', function(e){
   e.waitUntil(caches.open(SHELL).then(function(c){ return Promise.all(FILES.map(function(f){ return c.add(f).catch(function(){}); })); }).then(function(){ return self.skipWaiting(); }));
 });
