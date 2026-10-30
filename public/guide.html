@@ -16,13 +16,78 @@
 .who{border-left:4px solid #38BDF8;padding:4px 12px;margin:10px 0}
 
 :focus-visible{outline:3px solid #38BDF8;outline-offset:2px}
+
+.tabsx{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}
+.tabsx button{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:9px 14px;font-size:14px;cursor:pointer;font-family:inherit}
+.tabsx button[aria-selected=true]{background:#2563EB;border-color:#2563EB}
+.pane{display:none}.pane.on{display:block}
+.demo{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px;margin:12px 0}
+.demo svg{width:100%;height:auto;display:block}
+.cap{min-height:64px;font-size:16px;line-height:1.45;margin:8px 2px}
+.bar{height:5px;background:#16224a;border-radius:4px;overflow:hidden;margin:6px 0}.bar i{display:block;height:100%;width:0;background:#38BDF8}
+.info{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin:12px 0}
+.info .c{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:12px;overflow-wrap:anywhere}
+.info .c svg{width:44px;height:44px}
+.info .c b{display:block;margin:6px 0 2px;font-size:15px}
 </style>
 </head>
 <body>
 <div class="w">
 <h1>How Orbit-X works</h1>
-<p class="big"><b>Orbit-X is a helper that tells your family when you need help.</b> It also remembers your blood pressure and your tablets. It is not a doctor. It never tells you what medicine to take.</p>
+<p class="big">Pick who you are. Each part has a short <b>animated demo</b> and picture steps. Nothing here uses real patients.</p>
+<div class="tabsx" role="tablist" id="gt"></div>
 
+<div class="pane" id="p-patient">
+<div class="demo"><svg viewBox="0 0 360 200" id="sv-patient" role="img" aria-label="Animated demo for patients"></svg>
+<div class="cap" id="cap-patient" aria-live="polite"></div><div class="bar"><i id="bar-patient"></i></div>
+<button class="btn s" data-play="patient">Pause</button> <button class="btn g s" data-restart="patient">Replay</button></div>
+<div class="info">
+<div class="c"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="#0A1630" stroke="#38BDF8"/><path d="M14 24l6 6 11-14" stroke="#4ADE80" stroke-width="3" fill="none"/></svg><b>1. Add a document</b>Tap the blue + button. Choose a PDF, a photo or paste text.</div>
+<div class="c"><svg viewBox="0 0 44 44"><rect x="8" y="6" width="28" height="32" rx="4" fill="#0A1630" stroke="#38BDF8"/><path d="M14 16h16M14 22h16M14 28h10" stroke="#5EEAD4" stroke-width="2"/></svg><b>2. Read the facts</b>Orbit lists every result and shows the exact words it came from.</div>
+<div class="c"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="#0A1630" stroke="#A78BFA"/><text x="22" y="29" text-anchor="middle" font-size="22" fill="#A78BFA">?</text></svg><b>3. Explain in plain words</b>On a document, tap <b>Explain in plain words</b>. You get what each test is and questions for your doctor.</div>
+<div class="c"><svg viewBox="0 0 44 44"><path d="M6 30l10-12 8 8 14-16" stroke="#FBBF24" stroke-width="3" fill="none"/></svg><b>4. Compare reports</b>See what changed between two reports. Code does the maths, not the AI.</div>
+<div class="c"><svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="20" fill="#2a0a0a" stroke="#F87171"/><path d="M22 10v14M22 30v3" stroke="#F87171" stroke-width="3"/></svg><b>5. Need help now?</b>Tap <b>I need help now</b>. Family is called in order. With no internet, the app prepares a text to send from your SIM.</div>
+</div></div>
+
+<div class="pane" id="p-caregiver">
+<div class="demo"><svg viewBox="0 0 360 200" id="sv-caregiver" role="img" aria-label="Animated demo for caregivers"></svg>
+<div class="cap" id="cap-caregiver" aria-live="polite"></div><div class="bar"><i id="bar-caregiver"></i></div>
+<button class="btn s" data-play="caregiver">Pause</button> <button class="btn g s" data-restart="caregiver">Replay</button></div>
+<div class="info">
+<div class="c"><b>1. Join</b>Open the invite link. Tap Join. Tap <b>Turn on phone alerts</b>.</div>
+<div class="c"><b>2. Alert arrives</b>Your phone rings with a notification, even when the app is closed. An SMS is sent too if the server has an SMS provider.</div>
+<div class="c"><b>3. Answer</b>Tap the green button. A voice call starts. If the network blocks it, Orbit retries through a relay. You can always use the <b>Call</b> buttons.</div>
+<div class="c"><b>4. Mark handled</b>When help is on the way, tap <b>Mark handled</b>. Everyone is told.</div>
+</div></div>
+
+<div class="pane" id="p-clinic">
+<div class="demo"><svg viewBox="0 0 360 200" id="sv-clinic" role="img" aria-label="Animated demo for doctors and hospital staff"></svg>
+<div class="cap" id="cap-clinic" aria-live="polite"></div><div class="bar"><i id="bar-clinic"></i></div>
+<button class="btn s" data-play="clinic">Pause</button> <button class="btn g s" data-restart="clinic">Replay</button></div>
+<h2>Documents, for doctors and staff</h2>
+<div class="info">
+<div class="c"><b>Read</b>Every fact keeps its source quote. Tap a blue chip to see it.</div>
+<div class="c"><b>Check</b>Low-confidence facts are marked <i>unverified</i>. Conflicts between reports are listed, never auto-resolved.</div>
+<div class="c"><b>Brief</b>Appointment Brief makes a short summary you can edit and share by an expiring link.</div>
+</div>
+<h2>Developer tools, step by step</h2>
+<div class="info">
+<div class="c"><b>1. Open the sandbox</b>On a doctor or organisation account, open Developer tools. A pretend patient is used. No real people.</div>
+<div class="c"><b>2. Make an API key</b>Tap <b>Create key</b>. Choose scopes. Copy it once. It is shown one time.</div>
+<div class="c"><b>3. Send a test record</b>Use <b>Import a FHIR record</b> with the sample bundle. Facts appear in Health Workspace.</div>
+<div class="c"><b>4. Try an emergency handoff</b>Create a handoff. Watch it move through accepted, generated, sent, received, acknowledged. Delivery is simulated and labelled so.</div>
+<div class="c"><b>5. Read the docs</b><a href="/docs.html">API docs</a> list every endpoint with examples.</div>
+</div>
+</div>
+
+<h2>Stuck? Offline help</h2>
+<div class="info">
+<div class="c"><b>No internet</b>Tap <b>I need help now</b>. Orbit queues the alert, shows <b>Text everyone</b> and <b>Call 112</b>. Texts use your SIM, not data.</div>
+<div class="c"><b>Bluetooth button</b>In Settings you can pair a Bluetooth help button (Chrome on Android). Pressing it starts the same alert.</div>
+<div class="c"><b>Radio (LoRa)</b>With a Meshtastic radio paired in Settings, the help text is also sent over radio to nearby radios. It needs that hardware.</div>
+</div>
+<hr style="border:0;border-top:1px solid #16224a;margin:20px 0">
+<h2>The basics</h2>
 <h2>Who is who?</h2>
 <div class="who big"><b>Me</b> (the person who needs looking after). I use the main app.</div>
 <div class="who big"><b>My caregiver</b> (a child, a friend, a neighbour). Their phone gets an alert when I need help.</div>
@@ -71,6 +136,31 @@
 <p class="big">On the first page, the box called <b>Just want to look around?</b> has a one-minute story and a pretend patient. Nothing in it is real, and nobody is contacted.</p>
 <p><a class="btn" href="/">Back to the start</a></p>
 </div>
+
+<script>
+(function(){
+var T=[['patient','I am a patient'],['caregiver','I am a caregiver'],['clinic','Doctor, clinic or hospital']];
+var SC={
+patient:[["Tap + and add a lab report. A photo works too.","M40 30h110v70H40z|#38BDF8;M60 55h70M60 70h50|#5EEAD4"],["Orbit reads it and lists each result with its source words.","M40 30h110v70H40z|#38BDF8;M60 50h40M60 65h60M60 80h30|#4ADE80"],["Tap Explain in plain words. Each test is described simply, with questions to ask your doctor.","M40 30h110v70H40z|#A78BFA;M170 60h140M170 80h110|#A78BFA"],["Orbit never gives medical advice. It helps you understand and prepare.","M180 40l30 50h-60z|#FBBF24"]],
+caregiver:[["An alert arrives. Your phone rings.","M150 40a30 30 0 1 0 60 0a30 30 0 1 0 -60 0|#F87171"],["Tap the green button to answer.","M150 110h60|#4ADE80"],["A voice call starts. If it fails, Orbit tries a relay route.","M60 100h240|#38BDF8"],["Mark it handled. Everyone is told.","M150 60l20 25 40-50|#4ADE80"]],
+clinic:[["Open Health Workspace. Read facts with their source text.","M40 30h110v70H40z|#38BDF8;M60 55h70|#5EEAD4"],["Check conflicts and low-confidence facts.","M180 40l30 50h-60z|#FBBF24"],["Open Developer tools. Make a key and import a FHIR record.","M60 140h240|#A78BFA;M60 120h160|#A78BFA"],["Create an emergency handoff and follow it to acknowledged.","M60 150h60M140 150h60M220 150h60|#4ADE80"]]
+};
+var timers={},idx={},playing={};
+function draw(k,i){var s=SC[k][i],svg=document.getElementById('sv-'+k),h='<rect width="360" height="200" fill="#0A1630"/>';
+ s[1].split(';').forEach(function(p){var a=p.split('|');h+='<path d="'+a[0]+'" fill="none" stroke="'+a[1]+'" stroke-width="3" stroke-linecap="round" style="stroke-dasharray:600;stroke-dashoffset:600;animation:dr 1.2s forwards"/>';});
+ svg.innerHTML='<style>@keyframes dr{to{stroke-dashoffset:0}}</style>'+h+'<text x="14" y="190" fill="#8DA0C8" font-size="12">Step '+(i+1)+' of '+SC[k].length+'</text>';
+ document.getElementById('cap-'+k).textContent=s[0];document.getElementById('bar-'+k).style.width=((i+1)/SC[k].length*100)+'%';}
+function tick(k){draw(k,idx[k]);clearTimeout(timers[k]);if(!playing[k])return;timers[k]=setTimeout(function(){idx[k]=(idx[k]+1)%SC[k].length;tick(k);},4200);}
+function show(k){document.querySelectorAll('.pane').forEach(function(p){p.classList.toggle('on',p.id==='p-'+k);});
+ document.querySelectorAll('#gt button').forEach(function(b){b.setAttribute('aria-selected',b.dataset.k===k);});
+ Object.keys(SC).forEach(function(x){playing[x]=false;clearTimeout(timers[x]);});idx[k]=0;playing[k]=true;tick(k);
+ document.querySelector('[data-play="'+k+'"]').textContent='Pause';try{history.replaceState(null,'','#'+k);}catch(e){}}
+var g=document.getElementById('gt');g.innerHTML=T.map(function(t){return '<button role="tab" data-k="'+t[0]+'" aria-selected="false">'+t[1]+'</button>';}).join('');
+g.onclick=function(e){var k=e.target.dataset&&e.target.dataset.k;if(k)show(k);};
+document.querySelectorAll('[data-play]').forEach(function(b){b.onclick=function(){var k=b.dataset.play;playing[k]=!playing[k];b.textContent=playing[k]?'Pause':'Play';tick(k);};});
+document.querySelectorAll('[data-restart]').forEach(function(b){b.onclick=function(){var k=b.dataset.restart;idx[k]=0;playing[k]=true;document.querySelector('[data-play="'+k+'"]').textContent='Pause';tick(k);};});
+var h=(location.hash||'').slice(1);show(SC[h]?h:'patient');
+})();
+</script>
 </body>
   </html>
-  
