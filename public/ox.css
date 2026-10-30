@@ -63,3 +63,44 @@ svg text{font-family:inherit}
 @keyframes vtalk{from{transform:scaleY(1)}to{transform:scaleY(4.5)}}
 
 :focus-visible{outline:3px solid #38BDF8;outline-offset:2px}
+
+/* ---------- v2 layout hardening: nothing may overflow, clip or overlap on a phone ---------- */
+html{-webkit-text-size-adjust:100%}
+body{overflow-wrap:anywhere;word-break:normal;padding-bottom:env(safe-area-inset-bottom,0px)}
+.wrap{padding-bottom:calc(110px + env(safe-area-inset-bottom,0px));padding-left:max(14px,env(safe-area-inset-left,0px));padding-right:max(14px,env(safe-area-inset-right,0px))}
+.card,.stat,.banner,.ev,.sheet,.chip,.btn,summary,td,th,label,h1,h2,h3,p,div{min-width:0}
+.card b,.card .small,.banner,.ev,td,th{overflow-wrap:anywhere}
+.chip{white-space:normal;max-width:100%;line-height:1.35}
+.hdr{align-items:flex-start}.hdr>div:first-child{min-width:0;flex:1 1 220px}
+.links{align-items:center;row-gap:6px}
+.badge{max-width:100%;white-space:normal;line-height:1.3}
+.btn{max-width:100%;white-space:normal;text-align:center;line-height:1.25;min-height:40px}
+.btn.s{min-height:34px}
+.row>*{min-width:0}
+.card .row{row-gap:4px}
+.tabs{padding-top:calc(8px + env(safe-area-inset-top,0px))}
+table{table-layout:auto}.card>table,.card table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}
+th,td{white-space:normal}
+pre{max-width:100%}
+textarea{font-size:14px;line-height:1.45}
+input,textarea,select{font-size:16px}
+.sheet{padding-bottom:calc(30px + env(safe-area-inset-bottom,0px));overflow-wrap:anywhere}
+.modal{align-items:flex-end}
+.tgl{align-items:flex-start;line-height:1.4}.tgl input{margin-top:3px;flex:none;width:20px;height:20px}
+.err:empty{display:none}
+/* Add-document button: compact round button that never covers a card's own buttons */
+#fab{width:54px;height:54px;padding:0!important;border-radius:50%!important;font-size:28px!important;line-height:1;display:flex;align-items:center;justify-content:center;right:14px!important;bottom:calc(14px + env(safe-area-inset-bottom,0px))!important;opacity:.92}
+#fab.hide{display:none}
+@media(min-width:760px){#fab{width:auto;height:auto;border-radius:999px!important;padding:12px 18px!important;font-size:15px!important}}
+/* Plain-language explainer, friendly notices, guide */
+.banner.soft{background:#0b1a33;border-color:#2b5a9c;color:#cfe6ff}
+.terms dt{font-weight:650;margin-top:10px}.terms dd{margin:2px 0 0;color:#cdd9f2}
+.qs li{margin:6px 0}
+.step{display:flex;gap:12px;align-items:flex-start;margin:12px 0}
+.step .n{flex:none;width:30px;height:30px;border-radius:50%;background:#2563EB;color:#fff;display:grid;place-items:center;font-weight:700}
+.step .t{flex:1;min-width:0}
+details.more summary{cursor:pointer;color:#9bdcff;font-size:12.5px;margin-top:6px}
+.who-grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.demo-stage{border:1px solid var(--line);border-radius:16px;background:var(--card2);padding:12px;min-height:270px}
+.demo-bar{height:5px;background:#16224a;border-radius:99px;overflow:hidden;margin:8px 0}.demo-bar i{display:block;height:100%;width:0;background:var(--cy);transition:width .3s linear}
+@media (prefers-reduced-motion:reduce){.demo-bar i{transition:none}}
