@@ -30,3 +30,16 @@
 
 ## Not changed on purpose
 Durable Object class name `AlertHub` and migration `v1`; existing endpoints and responses (new fields are additive); AI guard rules; FHIR validators; Orbit Connect.
+
+## Round 2 (Baseten, calls, offline alerts, guide)
+| # | Fix | Files |
+|---|---|---|
+| 21 | **Baseten 403 "please check the api-key you provided"**: Baseten needs `Authorization: Api-Key KEY`, the app sent `Bearer`. Now the right scheme is chosen from the base URL, and the other one is tried once if the provider says 401/403. | `src/meta.js` |
+| 22 | Assistant, explain and rule-drafting calls sent the literal model name `auto`. The model is now resolved inside the client (Muse Spark Open on this key, else known slugs such as `meta-models/muse-spark-open`). | `src/meta.js` |
+| 23 | The green "live" badge only checked that a key existed. It now runs a real test call (`/api/ai/status?test=1`); tap the badge to see why it failed. | `src/worker.js`, `public/ox.js` |
+| 24 | Voice calls failed on mobile data (STUN only). TURN relay servers added, automatic relay retry, optional Cloudflare TURN secrets. | `src/worker.js`, `public/call.js` |
+| 25 | Offline help: Text-everyone and Call buttons, queued alerts, optional Bluetooth help button and Meshtastic (LoRa) radio bridge, optional Twilio / Africa's Talking SMS and voice calls from the server. | `public/radio.js`, `public/index.html`, `public/sw.js`, `src/worker.js` |
+| 26 | Document cards: friendly AI-failure text with retry, "Explain in plain words" for each document, compact add button that no longer covers content, no duplicate "(simulated)". | `public/workspace.html`, `src/ai.js`, `src/connect.js`, `public/ox.css` |
+| 27 | Guide: animated demos and picture steps for patients, caregivers, doctors and hospital staff, including Developer tools. | `public/guide.html` |
+
+Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio hardware, and the live Baseten key. They need your phone, your secrets and your hardware.
