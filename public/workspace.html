@@ -25,7 +25,6 @@ if (sess.accountType === 'individual') { var dl = document.getElementById('devli
 var esc = OX.esc, S = null, tab = 'overview', docText = {}, askLog = [], busy = '';
 var TABS = [['overview','Overview'],['graph','Evidence Graph'],['memory','Health Memory'],['docs','Documents'],['timeline','Timeline'],['compare','Compare Reports'],['ask','Ask My Records'],['brief','Appointment Brief'],['sharing','Sharing & Permissions']];
 var QUESTIONS = ['What changed between these reports?','What is the most recent documented HbA1c?','Which medications are listed in my latest discharge summary?','Are any dates or values inconsistent between these documents?','Prepare a concise summary I can share with my clinician.'];
-var SAMPLES = [['Lab report, March 2026','lab-report-2026-03.txt'],['Lab report, September 2026','lab-report-2026-09.txt'],['Discharge summary, September 2026','discharge-summary-2026-09.txt']];
 
 document.getElementById('who').textContent = '· ' + (sess.name || '');
 function drawTabs(){
@@ -103,7 +102,7 @@ function sev(k){ return k.severity === 'high' ? 'high' : k.severity === 'medium'
 
 /* ---------- add a document (sheet with Choose file / Take photo / paste) ---------- */
 function addDocForm(){
-  return '<h2 style="margin-top:0">Add a document</h2><div class="banner">Synthetic or your own documents. Reading happens on your phone. Do not add real records to this public demo.</div>' +
+  return '<h2 style="margin-top:0">Add a document</h2><div class="banner soft">Add your own documents. Text is read on your phone first. Only the text needed to find facts is sent to the AI reader.</div>' +
     '<div class="row"><button class="btn" id="pickf">Choose a file (PDF, Word, text, photo)</button><button class="btn g" id="pickp">Take a photo</button></div>' +
     '<input type="file" id="df" accept=".pdf,.docx,.txt,.text,.md,.csv,application/pdf,image/*,text/plain" style="display:none"><input type="file" id="dp" accept="image/*" capture="environment" style="display:none">' +
     '<label class="l" for="dn">Name</label><input id="dn" maxlength="80" placeholder="e.g. Lab report, June"><label class="l" for="dt">Or paste the text of the document</label><textarea id="dt" placeholder="Paste text here"></textarea>' +
@@ -136,9 +135,9 @@ function bindAddDoc(){
 
 /* ---------- overview ---------- */
 function onboardingCard(){
-  return '<div class="card"><h2 style="margin-top:0">Start in one tap</h2><p>Orbit-X reads your documents, keeps every fact tied to the exact words it came from, compares reports over time, and tells you what is unknown. Try it with a <b>synthetic</b> patient (Amara Okafor): two lab reports and one discharge summary, all made up.</p>' +
-    '<div class="banner">Synthetic data only. Please do not upload real medical records to this public demo.</div>' +
-    '<button class="btn" id="upl">Upload my own document</button><button class="btn g" id="loadsamples">Load the 3 synthetic documents</button><span id="loadmsg" class="small"></span></div>';
+  return '<div class="card"><h2 style="margin-top:0">Add your first document</h2><p>Orbit-X reads your documents, keeps every fact tied to the exact words it came from, compares reports over time, and tells you what is unknown.</p>' +
+    '<div class="banner soft">Nothing is pre-filled. Everything you see here comes from documents you add.</div>' +
+    '<button class="btn" id="upl">Upload my own document</button></div>';
 }
 function easySteps(){
   var d1 = S.docs.length > 0, d2 = askLog.length > 0;
@@ -165,26 +164,11 @@ VIEWS.overview = function(){
   return h;
 };
 BIND.overview = function(){
-  var ls = document.getElementById('loadsamples'); if (ls) ls.onclick = loadSamples;
   var e1 = document.getElementById('es1'); if (e1) e1.onclick = openAddDoc; var up1 = document.getElementById('upl'); if (up1) up1.onclick = openAddDoc;
   document.querySelectorAll('[data-go]').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-go'); render(); }; });
   document.querySelectorAll('[data-open]').forEach(function(el){ el.onclick = function(){ evidence(el.getAttribute('data-open')); }; });
   document.querySelectorAll('[data-q]').forEach(function(b){ b.onclick = function(){ tab = 'ask'; render(); runAsk(QUESTIONS[+b.getAttribute('data-q')]); }; });
 };
-function loadSamples(){
-  var btn = document.getElementById('loadsamples'), msg = document.getElementById('loadmsg'); if (btn) btn.disabled = true;
-  var i = 0;
-  function next(){
-    if (i >= SAMPLES.length) { load(); return; }
-    var s = SAMPLES[i]; if (msg) msg.innerHTML = '<span class="spin"></span>Reading ' + esc(s[0]) + ' (' + (i + 1) + ' of 3)';
-    fetch('/samples/' + s[1]).then(function(r){ return r.text(); }).then(function(t){ return OX.w('docadd', { name: s[0], text: t }); }).then(function(j){
-      if (j._status === 409 && j.error === 'duplicate_document') { i++; next(); return; }
-      if (!take(j)) { if (msg) msg.innerHTML = '<span class="err">Could not read ' + esc(s[0]) + ' (' + esc(j.error || 'error') + ')</span>'; if (btn) btn.disabled = false; return; }
-      i++; if (i < SAMPLES.length) { tab = 'overview'; } next();
-    });
-  }
-  next();
-}
 
 /* ---------- evidence graph ---------- */
 VIEWS.graph = function(){
@@ -253,11 +237,10 @@ VIEWS.docs = function(){
     h += '<div class="row" style="margin-top:8px">' + (d.factCount ? '<button class="btn s" data-explain="' + esc(d.id) + '">Explain in plain words</button>' : '') + (!isConn ? '<button class="btn g s" data-view="' + esc(d.id) + '">View source</button>' : '') + '<button class="btn r s" data-del="' + esc(d.id) + '">Delete</button></div></div>';
   });
   h += '<h2>Add a document</h2><div class="card"><p class="small">Upload a PDF, a photo of a report, a Word file or a text file, or paste text.</p><button class="btn" id="addbtn">Upload or paste a document</button></div>';
-  if (S.docs.length) h += '<div class="row" style="margin-top:14px"><button class="btn g s" id="loadsamples">Load the synthetic samples</button><button class="btn r s" id="wipe">Remove everything in this workspace</button></div>';
+  if (S.docs.length) h += '<div class="row" style="margin-top:14px"><button class="btn r s" id="wipe">Remove everything in this workspace</button></div>';
   return h;
 };
 BIND.docs = function(){
-  var ls = document.getElementById('loadsamples'); if (ls) ls.onclick = loadSamples;
   document.querySelectorAll('[data-view]').forEach(function(b){ b.onclick = function(){ viewDoc(b.getAttribute('data-view')); }; });
   document.querySelectorAll('[data-explain]').forEach(function(b){ b.onclick = function(){ explainDoc(b.getAttribute('data-explain')); }; });
   document.querySelectorAll('[data-retry]').forEach(function(b){ b.onclick = function(){ b.disabled = true; b.textContent = 'Reading...'; OX.w('docretry', { id: b.getAttribute('data-retry') }).then(function(j){ if (!take(j)) { b.disabled = false; b.textContent = 'Read again with AI'; alert(j && j.error === 'ai_still_unavailable' ? 'The AI is still not available. Tap the AI badge at the top to see why.' : 'Could not read it again.'); } }); }; });
@@ -423,7 +406,7 @@ BIND.sharing = function(){
 
 /* ---------- boot ---------- */
 var h0 = (location.hash || '').slice(1); if (TABS.some(function(t){ return t[0] === h0; })) tab = h0;
-drawTabs(); load().then(function(){ if (new URLSearchParams(location.search).get('sample') === '1' && S && !S.docs.length) { var b = document.getElementById('loadsamples'); if (b) b.scrollIntoView(); } });
+drawTabs(); load();
 })();
 var VIEWS;
 </script>
