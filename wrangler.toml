@@ -9,7 +9,7 @@ run_worker_first = ["/api/*"]
 
 [vars]
 MODEL_BASE_URL = "https://inference.baseten.co/v1"
-MODEL_TEXT = "auto"
+MODEL_TEXT = "meta-models/muse-spark-open-1026"
 ESCALATE_MS = "20000"
 ALLOWED_ORIGINS = "https://orbit-x.alecedoh1994.workers.dev"
 # Secrets (set with `npx wrangler secret put NAME`, never here): MODEL_API_KEY, RECEIPT_SECRET, VAPID_SUBJECT (not secret; may go here), WHATSAPP_*
