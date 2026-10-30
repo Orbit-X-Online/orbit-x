@@ -41,7 +41,7 @@ header b{color:var(--txt);font-size:16px;letter-spacing:.5px}
 .demo input{width:100%;accent-color:#38BDF8}
 .demo .l{display:flex;justify-content:space-between;margin-bottom:4px}
 .demo button{margin-top:6px;background:none;border:1px solid var(--line);color:#7DD3FC;border-radius:8px;padding:5px 9px;font-size:12px;cursor:pointer}
-.overlay{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:440px;background:var(--bg);padding:16px;overflow:auto;display:none;z-index:5;-webkit-overflow-scrolling:touch}
+.overlay{position:fixed;top:0;bottom:0;left:0;right:0;margin:0 auto;width:100%;max-width:440px;background:var(--bg);padding:16px 16px calc(90px + env(safe-area-inset-bottom,0px));overflow:auto;overflow-wrap:anywhere;display:none;z-index:5;-webkit-overflow-scrolling:touch}
 .overlay.on{display:block}
 .overlay h2{font-size:16px;text-align:center;margin:6px 0 12px;font-weight:500}
 .quote{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:14px;margin-bottom:12px}
@@ -94,6 +94,7 @@ a.btn{text-decoration:none;text-align:center}
 <div class="app" id="app"></div>
 <script src="data.js"></script>
 <script src="call.js"></script>
+<script src="radio.js"></script>
 <script>
 (function(){
 'use strict';
@@ -395,15 +396,25 @@ function renderEmergency(){
   $('emtl').innerHTML += '<div style="margin-top:8px"><button class="link" id="emrc">Share proof receipt</button></div>';
   $('emrc').onclick = function(){ hApi('share', {}).then(function(j){ if (j && j.shareId) { var u = location.origin + '/receipt.html?p=' + sess.pid + '&s=' + j.shareId; try { navigator.clipboard.writeText(u).then(function(){ $('emrc').textContent = 'Receipt link copied'; }, function(){ prompt('Copy this link', u); }); } catch(e){ prompt('Copy this link', u); } } }); };
   var ec = $('emcalls');
-  if (ec) ec.innerHTML = (st.caregivers || []).filter(function(c){ return c.phone && c.role !== 'clinician'; }).map(function(c){ return '<a class="btn green" href="tel:' + esc(c.phone) + '">Call ' + esc(c.name) + ' now</a><a class="btn ghost" href="sms:' + esc(c.phone) + '?body=' + encodeURIComponent('Orbit-X: I need help. Please call me now.') + '">Text ' + esc(c.name) + '</a>'; }).join('');
+  if (ec) {
+    var cgl = (st.caregivers || []).filter(function(c){ return c.phone && c.role !== 'clinician'; });
+    var allTxt = OXRadio.helpText(st.profile.name, a.why, emLoc);
+    ec.innerHTML = (cgl.length > 1 ? '<a class="btn" href="' + esc(OXRadio.smsHref(cgl.map(function(c){ return c.phone; }), allTxt)) + '">Text everyone now</a>' : '') +
+      cgl.map(function(c){ return '<a class="btn green" href="tel:' + esc(c.phone) + '">Call ' + esc(c.name) + ' now</a><a class="btn ghost" href="' + esc(OXRadio.smsHref([c.phone], allTxt)) + '">Text ' + esc(c.name) + '</a>'; }).join('') +
+      (OXRadio.radioReady() ? '<button class="btn ghost" id="emradio">Send over radio again</button>' : '');
+    var rb = $('emradio'); if (rb) rb.onclick = function(){ OXRadio.sendRadio(allTxt.slice(0, 190)).then(function(ok){ rb.textContent = ok ? 'Sent over radio' : 'Radio send failed'; }); };
+    if (!emLocAsked) { emLocAsked = true; OXRadio.locate(function(l){ if (l) { emLoc = l; renderEmergency(); } }); }
+  }
   var ban = $('emban'); ban.style.display = 'none';
   syncPatientCall(a);
   $('emok').style.display = (a.status === 'ringing' || a.status === 'answered' || a.status === 'unanswered') ? '' : 'none';
   if (!fresh && !o.classList.contains('on')) return;
   if (a.status !== lastSpoken.status || a.id !== lastSpoken.id) { lastSpoken = { id: a.id, status: a.status }; if (a.status !== 'cancelled') say(msg); }
 }
-var lastShownAlert = '', lastSpoken = {};
+var lastShownAlert = '', lastSpoken = {}, emLoc = '', emLocAsked = false;
 function startHelp(why, sys, dia){
+  emLocAsked = false; emLoc = '';
+  try { OXRadio.broadcast((st && st.profile && st.profile.name) || (cacheGet() || {}).name, why).then(function(r){ if (r && r.radio) { var t = $('emtl'); if (t) t.innerHTML += '<div>' + clock(Date.now()) + '  Help text sent over radio</div>'; } }); } catch(e){}
   var o = $('emer'); o.classList.add('on'); $('emtxt').textContent = 'Alerting your family...'; $('emtl').innerHTML = '';
   hQ('sos', { why: why, sys: sys, dia: dia }).then(function(j){
     if (j && j.queued) { offlineHelp(why); return; }
@@ -491,10 +502,10 @@ function offlineHelp(why){
   $('emtl').innerHTML = '<div>' + clock(Date.now()) + ' Help pressed with no internet. Saved on this phone</div>';
   var base = 'Orbit-X EMERGENCY: ' + name + ' needs help now (' + why + ') at ' + clock(Date.now()) + '. Please call straight away.';
   function paint(loc){
-    var body = encodeURIComponent(base + (loc ? ' My location: ' + loc : '')), nums = list.map(function(x){ return x.phone; }).join(',');
-    $('emcalls').innerHTML = '<a class="btn red" href="tel:112">Call 112</a>' + (nums ? '<a class="btn" href="sms:' + esc(nums) + '?body=' + body + '">Text everyone now</a>' : '') +
-      list.map(function(x){ return '<a class="btn ghost" href="tel:' + esc(x.phone) + '">Call ' + esc(x.name) + '</a><a class="btn ghost" href="sms:' + esc(x.phone) + '?body=' + body + '">Text ' + esc(x.name) + '</a>'; }).join('') +
-      (list.length ? '' : '<div class="small">Add a family phone number in Family so I can text them when there is no internet.</div>') + (loc ? '<div class="small">Your location is included in the text.</div>' : '');
+    var txt = base + (loc ? ' My location: ' + loc : ''), phones = list.map(function(x){ return x.phone; });
+    $('emcalls').innerHTML = '<a class="btn red" href="tel:112">Call 112</a>' + (phones.length ? '<a class="btn" href="' + esc(OXRadio.smsHref(phones, txt)) + '">Text everyone now</a>' : '') +
+      list.map(function(x){ return '<a class="btn ghost" href="tel:' + esc(x.phone) + '">Call ' + esc(x.name) + '</a><a class="btn ghost" href="' + esc(OXRadio.smsHref([x.phone], txt)) + '">Text ' + esc(x.name) + '</a>'; }).join('') +
+      (list.length ? '' : '<div class="small">Add a family phone number in Family so I can text them when there is no internet.</div>') + (loc ? '<div class="small">Your location is included in the text.</div>' : '') + (OXRadio.radioReady() ? '<div class="small">The help text was also sent over your radio.</div>' : '');
   }
   paint('');
   try { if (navigator.geolocation) navigator.geolocation.getCurrentPosition(function(p){ paint('https://maps.google.com/?q=' + p.coords.latitude.toFixed(5) + ',' + p.coords.longitude.toFixed(5)); }, function(){}, { timeout: 8000, maximumAge: 120000 }); } catch(e){}
@@ -773,6 +784,7 @@ function showSettings(){
     '<label class="l">Recovery key</label><div class="small">If you lose this phone, this key restores your account on a new one. Keep it private.</div><button class="btn ghost" id="rk">Show my recovery key</button><div class="code" id="rkv" style="display:none;font-size:13px"></div>' +
     '<label class="l">Fall guard</label><div class="small">If your phone falls and then lies still, Orbit asks "Did you fall?" If you do not answer in 15 seconds, your family is alerted. Works while Orbit-X is open on this phone with the screen on.</div><label class="check"><input type="checkbox" id="fg"' + (fallOn() ? ' checked' : '') + '> Turn on fall guard</label><div class="err" id="fge"></div><button class="btn ghost" id="fgt">Test it now</button>' +
     '<label class="l">No internet? Orbit-X keeps working</label><div class="small">Readings and tablets are saved on this phone and sent when signal returns. If you press help with no internet, I save the alert, show Call 112 and text buttons (with your location), and send the alert automatically the moment signal is back.</div>' +
+    OXRadio.settingsHtml() +
     '<label class="l">Bluetooth blood-pressure cuff</label><div class="small">Pair a cuff that uses the standard Bluetooth blood-pressure service (Chrome on Android). Each reading comes straight in, works with no internet, and you confirm it before it is saved.</div><div class="err" id="bte"></div><button class="btn ghost" id="btc">Connect a cuff</button><button class="btn ghost" id="bts">Try a demo cuff</button><div class="small" id="btm"></div>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
     (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private. <a href="/developer.html" style="color:#7DD3FC">Try the API demo in a safe sandbox</a>.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
@@ -782,6 +794,7 @@ function showSettings(){
   $('alb').onclick = function(){ if (st.profile.alertsOn) { var t0 = Date.now(); $('ale').textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ $('ale').textContent = diagText(j); if (j && j.ok && j.diag && j.diag[0] && j.diag[0].state === 'accepted') watchDisplayed(t0, function(m){ $('ale').textContent = m; }); }); return; } enableAlerts(function(ok, m){ $('ale').textContent = ok ? 'Phone alerts are on.' : m; if (ok) $('alb').textContent = 'Phone alerts are ON. Send a test'; }, true); };
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
+  OXRadio.bindSettings(function(){ startHelp('Help button pressed'); });
   $('btc').onclick = connectCuff; $('bts').onclick = function(){ gotCuff({ sys: 148, dia: 92, pulse: 76 }, 'simulated'); };
   if ($('kn')) $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
   o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
