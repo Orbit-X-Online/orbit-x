@@ -102,19 +102,23 @@ function sev(k){ return k.severity === 'high' ? 'high' : k.severity === 'medium'
 
 /* ---------- add a document (sheet with Choose file / Take photo / paste) ---------- */
 function addDocForm(){
-  return '<h2 style="margin-top:0">Add a document</h2><div class="banner soft">Add your own documents. Text is read on your phone first. Only the text needed to find facts is sent to the AI reader.</div>' +
+  return '<h2 style="margin-top:0">Add a document</h2><div class="banner soft">Add your own documents. PDFs, Word and text files are read on your phone, and only the text is sent to the AI reader. Photos are sent to the AI only if the box below is ticked.</div>' +
     '<div class="row"><button class="btn" id="pickf">Choose a file (PDF, Word, text, photo)</button><button class="btn g" id="pickp">Take a photo</button></div>' +
     '<input type="file" id="df" accept=".pdf,.docx,.txt,.text,.md,.csv,application/pdf,image/*,text/plain" style="display:none"><input type="file" id="dp" accept="image/*" capture="environment" style="display:none">' +
+    '<label class="chk"><input type="checkbox" id="aiph"> <span>Let the AI read my photos. This is more accurate than reading on the phone. The picture is sent once to the AI and is not stored. Untick to read photos on this phone only.</span></label>' +
     '<label class="l" for="dn">Name</label><input id="dn" maxlength="80" placeholder="e.g. Lab report, June"><label class="l" for="dt">Or paste the text of the document</label><textarea id="dt" placeholder="Paste text here"></textarea>' +
     '<div class="err" id="der"></div><button class="btn" id="dadd">Analyse</button><span id="dmsg" class="small"></span>';
 }
 function openAddDoc(){ OX.openSheet(addDocForm()); bindAddDoc(); }
 function bindAddDoc(){
   var g = function(i){ return document.getElementById(i); };
+  var KEY = 'orbitx.aiphoto'; try { g('aiph').checked = localStorage.getItem(KEY) !== '0'; } catch (e) { g('aiph').checked = true; }
+  g('aiph').onchange = function(){ try { localStorage.setItem(KEY, g('aiph').checked ? '1' : '0'); } catch (e) { /* private mode */ } };
+  var aiRead = function(dataUrl){ return OX.w('docphoto', { image: dataUrl }).then(function(j){ if (j && j.ok && j.text) { aiRead.unclear = j.unclear || 0; return j.text; } throw new Error((j && j.error) || 'failed'); }); };
   function pick(inp){ var f = inp.files[0]; if (!f) return; g('der').textContent = ''; g('dadd').disabled = true; g('dmsg').innerHTML = '<span class="spin"></span>Opening ' + esc(f.name) + '...';
-    OXRead.read(f, function(m){ g('dmsg').innerHTML = '<span class="spin"></span>' + esc(m); }).then(function(r){
+    OXRead.read(f, function(m){ g('dmsg').innerHTML = '<span class="spin"></span>' + esc(m); }, { ai: g('aiph').checked ? aiRead : null }).then(function(r){
       g('dt').value = r.text; if (!g('dn').value) g('dn').value = f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 80);
-      g('dmsg').textContent = 'File read (' + r.text.length + ' characters).' + (r.truncated ? ' Long file: only the first 40,000 characters are used.' : '') + ' Check it, then tap Analyse.'; g('dadd').disabled = false;
+      g('dmsg').textContent = (r.via === 'ai' ? 'Photo read by the AI (' + r.text.length + ' characters).' + (aiRead.unclear ? ' ' + aiRead.unclear + ' unclear spot(s) are marked [unclear]: please fix them.' : '') + ' Please check every number against your paper.' : r.via === 'phone' ? 'Photo read on this phone (' + r.text.length + ' characters).' + (r.note ? ' The AI could not read it, so this phone did.' : '') + ' Photo reading can make mistakes: please check every number against your paper.' : 'File read (' + r.text.length + ' characters).') + (r.truncated ? ' Long file: only the first 40,000 characters are used.' : '') + ' Fix anything wrong, then tap Analyse.'; g('dadd').disabled = false;
     }, function(e){ g('dmsg').textContent = ''; g('der').textContent = (e && e.message) || 'Could not read that file.'; g('dadd').disabled = false; inp.value = ''; }); }
   g('pickf').onclick = function(){ g('df').click(); }; g('pickp').onclick = function(){ g('dp').click(); };
   g('df').onchange = function(){ pick(g('df')); }; g('dp').onchange = function(){ pick(g('dp')); };
@@ -173,7 +177,7 @@ BIND.overview = function(){
 /* ---------- evidence graph ---------- */
 VIEWS.graph = function(){
   if (!S.docs.length) return '<h1>Evidence Graph</h1><div class="empty">Add documents to see how every insight traces back to its source.</div>';
-  return '<h1>Evidence Graph</h1><p class="small">Every finding links to the facts it came from, and every fact links to the exact source it was read from. Tap any box.</p><div class="small">Swipe sideways on a phone to see all columns.</div><div class="card" style="padding:6px;overflow:auto"><div id="gsvg"></div></div>' +
+  return '<h1>Evidence Graph</h1><p class="small">Every finding links to the facts it came from, and every fact links to the exact source it was read from. Tap any box.</p>' + (S.comparisons.some(function(c){ return c.magnitude !== 'unchanged'; }) || S.conflicts.length ? '<div class="small">Swipe sideways on a phone to see all columns.</div>' : '<div class="banner soft">Findings appear when Orbit can compare two reports, for example the same test on two dates, or when two reports disagree. Add another report to see them. For now you can see which report each fact was read from.</div>') + '<div class="card" style="padding:6px;overflow:auto"><div id="gsvg"></div></div>' +
     '<div class="small"><span class="chip doc">source</span><span class="chip fact">extracted fact</span><span class="chip warn">finding (calculated by code)</span><span class="chip conflict">conflict</span><span class="chip sim">handoff</span></div>';
 };
 BIND.graph = function(){
@@ -185,14 +189,18 @@ BIND.graph = function(){
   var hoItems = S.handoffs.length ? (S.handoffs[0].summary ? S.handoffs[0].summary.items.map(function(i){ return i.factId; }) : []) : [];
   hoItems.forEach(function(i){ if (S.facts.some(function(f){ return f.id === i; })) fset[i] = 1; });
   var facts = S.facts.filter(function(f){ return fset[f.id]; });
+  // With a single report there are no findings yet. Still show where each fact came from: flagged results first, then the rest, up to 12 boxes.
+  if (facts.length < 12) { var rest = S.facts.filter(function(f){ return !fset[f.id] && f.kind !== 'encounter' && S.docs.some(function(d){ return d.id === f.docId; }); }).sort(function(a, b){ return (b.flag ? 1 : 0) - (a.flag ? 1 : 0); }).slice(0, 12 - facts.length); facts = facts.concat(rest); }
   var dset = {}; facts.forEach(function(f){ dset[f.docId] = 1; }); findings.forEach(function(f){ (f.docs || []).forEach(function(d){ dset[d] = 1; }); });
   var docs = S.docs.filter(function(d){ return dset[d.id]; });
   var cols = [docs, facts, findings, S.handoffs.length ? [S.handoffs[0]] : []];
-  var rows = Math.max(docs.length, facts.length, findings.length, 1), H = rows * 34 + 50, W = 880, X = [10, 235, 520, 735], BW = [190, 255, 190, 135], pos = {};
+  var hasF = findings.length > 0, hasH = cols[3].length > 0;
+  var rows = Math.max(docs.length, facts.length, findings.length, 1), H = rows * 34 + 50, pos = {};
+  var W = hasH ? 880 : hasF ? 720 : 356, X = hasH ? [10, 235, 520, 735] : hasF ? [10, 235, 520, 735] : [4, 146], BW = hasH ? [190, 255, 190, 135] : hasF ? [190, 255, 190, 135] : [130, 208];
   function put(list, c, kindFn){ var gap = (H - 40) / Math.max(list.length, 1); list.forEach(function(n, i){ pos[kindFn(n)] = { x: X[c], y: 30 + i * gap + gap / 2 - 13, w: BW[c] }; }); }
   put(docs, 0, function(n){ return 'd:' + n.id; }); put(facts, 1, function(n){ return 'f:' + n.id; }); put(findings, 2, function(n){ return 'k:' + n.id; }); if (cols[3].length) put(cols[3], 3, function(n){ return 'h:' + n.id; });
-  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="min-width:680px" role="img" aria-label="Evidence graph">';
-  ['Sources', 'Extracted facts', 'Findings', S.handoffs.length ? 'Handoff' : ''].forEach(function(t, i){ svg += '<text x="' + X[i] + '" y="16" fill="#8DA0C8" font-size="12">' + t + '</text>'; });
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="min-width:' + (hasF || hasH ? 680 : 0) + 'px" role="img" aria-label="Evidence graph">';
+  ['Sources', 'Extracted facts', hasF ? 'Findings' : '', hasH ? 'Handoff' : ''].forEach(function(t, i){ if (t) svg += '<text x="' + X[i] + '" y="16" fill="#8DA0C8" font-size="12">' + t + '</text>'; });
   function edge(a, b, col){ var p = pos[a], q = pos[b]; if (!p || !q) return; var x1 = p.x + p.w, y1 = p.y + 13, x2 = q.x, y2 = q.y + 13, mx = (x1 + x2) / 2; svg += '<path d="M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2 + '" fill="none" stroke="' + col + '" stroke-opacity=".55" stroke-width="1.4"/>'; }
   facts.forEach(function(f){ edge('d:' + f.docId, 'f:' + f.id, '#2b5a9c'); });
   findings.forEach(function(k){ k.facts.forEach(function(i){ edge('f:' + i, 'k:' + k.id, k.kind === 'conf' ? '#F87171' : '#FBBF24'); }); });
