@@ -19,13 +19,15 @@ header b{color:var(--txt);font-size:16px;letter-spacing:.5px}
 .status{display:flex;align-items:center;gap:6px;color:#7DD3FC}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--teal)}
 .app>*{flex-shrink:0}
-.stage{position:relative;height:300px;margin-top:4px;flex:none;overflow:visible}
-#face{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:260px;height:260px}
+.stage{position:relative;height:236px;margin-top:2px;flex:none;overflow:visible}
+#face{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:214px;height:214px}
 .chip{position:absolute;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:13px;color:#9BDCFF;transition:opacity .4s,transform .4s}
 .chip b{display:block;font-size:16px;color:var(--txt);font-weight:600}
-#c1{left:0;top:18px}#c2{right:0;bottom:22px}#c2 b{color:var(--pink)}
+#c1{left:0;top:6px}#c2{right:0;bottom:4px}#c2 b{color:var(--pink)}
+.rtag{display:inline-block;margin-top:4px;font-size:12px;font-weight:700;border-radius:999px;padding:2px 9px;border:1px solid var(--line);color:#BFE3FF}
+.rtag.ok{color:#86EFAC;border-color:#1b6b3a;background:#0b2417}.rtag.watch,.rtag.warn{color:#FCD34D;border-color:#7a5a12;background:#241b06}.rtag.bad{color:#FCA5A5;border-color:#7f2a2a;background:#2a0d0d}.rtag.low{color:#93C5FD;border-color:#2b5a9c;background:#0b1a33}
 .hide{opacity:0;transform:scale(.9);pointer-events:none}
-.caption{min-height:70px;text-align:center;font-size:17px;line-height:1.4;padding:4px 8px}
+.caption{min-height:56px;text-align:center;font-size:16px;line-height:1.42;padding:2px 6px}
 .caption.proof{cursor:pointer;text-decoration:underline;text-decoration-color:var(--line);text-underline-offset:5px}
 .hint{text-align:center;font-size:13.5px;color:var(--mut);min-height:16px}
 .row{display:flex;gap:8px;margin:10px 0}
@@ -96,7 +98,7 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 .hrow:last-child{border-bottom:0}
 .hrow .hv{font-size:20px}
 .tag{flex:none;font-size:12.5px;font-weight:600;border-radius:999px;padding:3px 10px;border:1px solid var(--line);color:#BFE3FF;white-space:nowrap}
-.tag.ok{color:#86EFAC;border-color:#1b6b3a;background:#0b2417}.tag.warn{color:#FCD34D;border-color:#7a5a12;background:#241b06}.tag.bad{color:#FCA5A5;border-color:#7f2a2a;background:#2a0d0d}
+.tag.info{color:#93C5FD;border-color:#2b5a9c;background:#0b1a33}.tag.ok{color:#86EFAC;border-color:#1b6b3a;background:#0b2417}.tag.warn{color:#FCD34D;border-color:#7a5a12;background:#241b06}.tag.bad{color:#FCA5A5;border-color:#7f2a2a;background:#2a0d0d}
 @media (prefers-reduced-motion:reduce){details.acc>summary::after{transition:none}}
 
 .slotrow{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px}
@@ -344,9 +346,9 @@ function patientApp(){
   if (!params.get('guardian')) { location.replace(sess && sess.accountType === 'provider' ? '/developer.html' : '/workspace.html'); return; }
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><a href="/workspace.html" style="color:#7DD3FC;font-size:13px;text-decoration:none">My records</a><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
-  '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
+  '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b><span class="rtag" id="c1t" style="display:none"></span></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
   '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div><div class="banner" id="offb" style="display:none;border-color:#1e3a8a;background:#0b1530;color:#bfdbfe"></div>' +
-  '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">I took my tablet</button><button id="hist" aria-haspopup="dialog">History</button></div>' +
+  '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">Log tablet</button><button id="hist" aria-haspopup="dialog">History</button></div>' +
   '<div class="inputbar"><input id="txt" placeholder="Type to Orbit" autocomplete="off" enterkeyhint="send"><button id="send">Send</button><button id="mic" aria-label="Talk to Orbit">&#127908;</button></div>' +
   '<div class="row" style="margin-top:12px"><button id="fam">Family</button><button id="set">Settings</button></div>' +
   '<button class="sos" id="sos">I need help now</button>' +
@@ -387,6 +389,7 @@ function firstLoad(){
 function refreshCards(){
   var a = analysis();
   $('c1v').textContent = a.last ? a.last.sys + '/' + a.last.dia : 'None yet';
+  var tg = $('c1t'); if (a.last) { var bb = D.bpBand(a.last.sys, a.last.dia); tg.textContent = bb.name; tg.className = 'rtag ' + bb.tone; tg.style.display = ''; } else tg.style.display = 'none';
   var c2 = $('c2');
   if (st.profile.slots.length) { $('c2v').textContent = dosesLine(a); c2.classList.remove('hide'); } else c2.classList.add('hide');
   c2.querySelector('b').style.color = a.missed.length ? '' : '#86efac';
@@ -584,7 +587,7 @@ function saveBP(sys, dia, src){
     refreshCards();
     if (j.emergency) { renderEmergency(); schedulePatient(); return; }
     var a = analysis(), b = D.bpBand(sys, dia);
-    say('Saved ' + sys + ' over ' + dia + '. ' + (b.code !== 'ok' ? 'That is ' + b.label + '. One reading is not a diagnosis. If it stays there, please tell your doctor.' : a.baseline && sys >= a.baseline + D.HIGH_MARGIN ? 'That is higher than your usual. I will keep watching with you.' : a.baseline ? 'That is close to your usual.' : a.sentence));
+    say('Saved ' + sys + ' over ' + dia + '. ' + (b.code !== 'ok' || b.low ? b.note : a.baseline && sys >= a.baseline + D.HIGH_MARGIN ? 'That is higher than your usual. I will keep watching with you.' : a.baseline ? 'That is close to your usual.' : a.sentence));
   });
 }
 function saveDose(hint){
@@ -669,20 +672,19 @@ function showEvidence(){
 
 /* ---------- history: tidy drop-down sections built only from the person's own saved records ---------- */
 function fmtLong(ymd){ var p = String(ymd).split('-'); if (p.length !== 3) return esc(ymd); var M = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (+p[2]) + ' ' + M[+p[1] - 1] + ' ' + p[0]; }
-function bpBand(sys, dia){ if (sys >= 180 || dia >= 120) return ['Very high', 'bad']; if (sys >= 140 || dia >= 90) return ['At or above 140/90', 'warn']; return ['Below 140/90', 'ok']; }
 function acc(title, count, body, open){ return '<details class="acc"' + (open ? ' open' : '') + '><summary><span>' + esc(title) + '</span><span class="cnt">' + count + '</span></summary><div class="accb">' + body + '</div></details>'; }
 function showHistory(){
   var o = $('hio'), a = analysis();
   var empty = function(t){ return '<div class="small" style="padding:6px 0">' + esc(t) + '</div>'; };
   var rs = (st.readings || []).slice().sort(function(x, y){ return (y.t || 0) - (x.t || 0); });
-  var bp = rs.length ? rs.map(function(r){ var b = bpBand(r.sys, r.dia); return '<div class="hrow"><div><b class="hv">' + r.sys + '/' + r.dia + '</b><span class="small"> mmHg</span><div class="small">' + fmtLong(r.date) + (r.t ? ' &middot; ' + clock(r.t) : '') + (r.src === 'bluetooth' ? ' &middot; cuff' : '') + '</div></div><span class="tag ' + b[1] + '">' + b[0] + '</span></div>'; }).join('') : empty('No readings yet. Tap Log BP to add your first one.');
+  var bp = rs.length ? rs.map(function(r){ var b = D.bpBand(r.sys, r.dia); return '<div class="hrow"><div><b class="hv">' + r.sys + '/' + r.dia + '</b><span class="small"> mmHg</span><div class="small">' + fmtLong(r.date) + (r.t ? ' &middot; ' + clock(r.t) : '') + (r.src === 'bluetooth' ? ' &middot; cuff' : '') + '</div></div><span class="tag ' + (b.tone === 'watch' ? 'warn' : b.tone === 'low' ? 'info' : b.tone) + '">' + esc(b.name) + '</span></div>'; }).join('') : empty('No readings yet. Tap Log BP to add your first one.');
   var byDay = {}; (st.doses || []).forEach(function(d){ (byDay[d.date] = byDay[d.date] || []).push({ slot: d.slot, qty: d.qty || 1 }); });
   var days = Object.keys(byDay).sort().reverse();
   var tabs = days.length ? days.map(function(dt){ return '<div class="hrow"><div><b>' + fmtLong(dt) + '</b><div class="small">' + byDay[dt].map(function(x){ return esc(slotName(x.slot)) + ': ' + tabletsText(x.qty); }).join(' &middot; ') + '</div></div><span class="tag ok">Logged</span></div>'; }).join('') : empty(st.profile.slots.length ? 'No tablets logged yet.' : 'You have not set any medicine times. You can add them in Settings.');
   var miss = a.missed.length ? a.missed.slice().reverse().map(function(m){ return '<div class="hrow"><div><b>' + fmtLong(m.date) + '</b><div class="small">' + esc(slotName(m.slot)) + ' tablet not logged</div></div><span class="tag warn">Not logged</span></div>'; }).join('') : empty(st.profile.slots.length ? 'Nothing missed in the last 7 days.' : 'No medicine times set.');
   var sy = (st.symptoms || []).slice().reverse();
   var notes = sy.length ? sy.map(function(n){ return '<div class="hrow"><div><b>' + esc(n.text) + '</b><div class="small">' + (n.t ? fmtLong(new Date(n.t).getFullYear() + '-' + (new Date(n.t).getMonth() + 1) + '-' + new Date(n.t).getDate()) + ' &middot; ' + clock(n.t) : '') + '</div></div></div>'; }).join('') : empty('Nothing noted. If you tell Orbit how you feel, it is kept here for your care team.');
-  var EVL = { emergency: 'Emergency alert', escalation: 'Escalated to next person', unanswered: 'No-answer notice', reminder: 'Tablet reminder', missed_dose: 'Tablet-not-logged heads-up', test: 'Test', ready: 'Alerts turned on', cancel_notice: 'Cancel notice', handled_notice: 'Handled notice', invite: 'Invite', sms: 'Text message', phone_call: 'Phone call' };
+  var EVL = { emergency: 'Emergency alert', escalation: 'Escalated to next person', unanswered: 'No-answer notice', reminder: 'Tablet reminder', missed_dose: 'Tablet-not-logged heads-up', high_bp: 'High blood pressure alert', test: 'Test', ready: 'Alerts turned on', cancel_notice: 'Cancel notice', handled_notice: 'Handled notice', invite: 'Invite', sms: 'Text message', phone_call: 'Phone call' };
   var evs = (st.events || []).slice().reverse();
   var alerts = evs.length ? evs.map(function(e){ return '<div class="hrow"><div><b>' + esc(EVL[e.kind] || e.kind) + '</b><div class="small">' + clock(e.t) + '</div></div></div>'; }).join('') : empty('No alerts have been sent.');
   var cur = st.alert && st.alert.status ? '<div class="hrow"><div><b>Latest help request</b><div class="small">' + esc(String(st.alert.status).replace(/_/g, ' ')) + (st.alert.startedAt ? ' &middot; ' + fmtLong(new Date(st.alert.startedAt).getFullYear() + '-' + (new Date(st.alert.startedAt).getMonth() + 1) + '-' + new Date(st.alert.startedAt).getDate()) + ', ' + clock(st.alert.startedAt) : '') + '</div></div></div>' : '';
@@ -699,8 +701,8 @@ function showFamily(){
   var list = st.caregivers.length ? st.caregivers.map(function(c){
     return '<div class="cg"><b>' + (c.role === 'clinician' ? 'Dr ' : c.order + '. ') + esc(c.name) + '</b><div class="st ' + (c.joined ? 'ok' : '') + '">' + (c.role === 'clinician' ? (c.joined ? 'Doctor. Linked. Writes your alert rules. Does not get rung' : (c.status === 'expired' ? 'Doctor. Invite expired. Tap New code' : 'Doctor. Waiting to join')) : (c.joined ? 'Linked. Will be called' + (c.order === 1 ? ' first' : ' if the one before does not answer') + (c.alertsOn ? '. Phone alerts ON' : '. Phone alerts not on yet (they must tap Arm this phone)') : (c.status === 'expired' ? 'Invite expired after 7 days. Tap New code' : 'Invited. Waiting for them to open the link'))) + '</div>' + (c.joined ? '<div class="small">' + esc(pushLine(c.push)) + '</div>' : '') + (c.joined ? '' : '<div class="acts"><button data-inv="' + esc(c.id) + '">' + (c.status === 'expired' ? 'New code' : 'Show invite') + '</button></div>') + '</div>';
   }).join('') : '<div class="small" style="margin-top:10px">No one yet. Add someone who should be alerted if you need help, like a child or a neighbour.</div>';
-  var EVL = { emergency: 'Emergency alert', escalation: 'Escalated to next person', unanswered: 'No-answer notice', reminder: 'Tablet reminder', missed_dose: 'Tablet-not-logged heads-up', test: 'Test', ready: 'Alerts turned on', cancel_notice: 'Cancel notice', handled_notice: 'Handled notice', invite: 'Invite', sms: 'Text message', phone_call: 'Phone call' };
-  var EVS = { accepted: 'accepted by push service', gone: 'phone subscription expired', rejected: 'refused by push service', throttled: 'throttled', service_error: 'push service error', network_error: 'network error', no_subscription: 'no phone alerts on', window_passed: 'too late, not sent', joined: 'joined', sent: 'sent', not_configured: 'text messages are not set up on the server', bad_number: 'phone number not valid' };
+  var EVL = { emergency: 'Emergency alert', escalation: 'Escalated to next person', unanswered: 'No-answer notice', reminder: 'Tablet reminder', missed_dose: 'Tablet-not-logged heads-up', high_bp: 'High blood pressure alert', test: 'Test', ready: 'Alerts turned on', cancel_notice: 'Cancel notice', handled_notice: 'Handled notice', invite: 'Invite', sms: 'Text message', phone_call: 'Phone call' };
+  var EVS = { accepted: 'accepted by push service', gone: 'phone subscription expired', rejected: 'refused by push service', throttled: 'throttled', service_error: 'push service error', network_error: 'network error', no_subscription: 'no phone alerts on', window_passed: 'too late, not sent', joined: 'joined', sent: 'sent', not_configured: 'text messages are not set up on the server', sms_not_configured: 'text messages are not set up on the server', bad_number: 'phone number not valid' };
   var evs = (st.events || []).slice(-8).reverse().map(function(e){ return '<div class="ev"><small>' + clock(e.t) + '</small><span>' + esc(EVL[e.kind] || e.kind) + ' to ' + esc(String(e.to || '').replace(/^caregiver:|^clinician:/, '') || 'phone') + ': ' + esc(EVS[e.state] || e.state) + (e.http ? ' (code ' + e.http + ')' : '') + '</span></div>'; }).join('');
   list += evs ? '<details class="acc"><summary><span>Recent alert activity</span><span class="cnt">' + (st.events || []).slice(-8).length + '</span></summary><div class="accb"><div class="small" style="margin-bottom:6px">What the server tried. "Accepted" means the push service took it. It does not prove a phone showed it.</div>' + evs + '</div></details>' : '';
   o.innerHTML = '<h2>Family and caregivers</h2><div class="small">When you press help or Orbit sees a dangerous reading, the first person rings like a phone call. If they do not answer in 20 seconds, the next one rings. A text message goes to the phone of each person at the same time, so they are told even with no internet.</div>' + list + (st.caregivers.some(function(c){ return c.joined; }) ? '<div class="small" style="margin-top:10px">Once someone has joined, they stay linked. This keeps your safety net on at all times.</div>' : '') +
@@ -921,7 +923,7 @@ function cgRender(){
     : '<div class="err center">' + esc(alertMsg || 'Phone alerts are not on yet.') + '</div><button class="btn" id="al">Turn on phone alerts</button>';
   var pn = st.careNumbers && st.careNumbers.patient;
   var calls = pn ? '<a class="btn green" href="tel:' + esc(pn) + '">Call ' + esc(who) + '</a>' : '';
-  var nts = (st.notices || []).filter(function(x){ return x.kind === 'missed_dose'; }).slice(-3).reverse().map(function(x){ return '<div class="ev"><small>' + clock(x.t) + '</small><span>' + esc(x.text) + '</span></div>'; }).join('');
+  var nts = (st.notices || []).filter(function(x){ return x.kind === 'missed_dose' || x.kind === 'high_bp'; }).slice(-3).reverse().map(function(x){ return '<div class="ev"><small>' + clock(x.t) + '</small><span>' + esc(x.text) + '</span></div>'; }).join('');
   el.innerHTML = note + summary + (nts ? '<div class="small" style="margin-top:10px">Tablet reminders</div>' + nts : '') + calls + status + '<div class="small center" style="margin-top:14px">If this page is open you will also hear a ring.</div>';
   var tp = $('tp'); if (tp) tp.onclick = function(){ var t0 = Date.now(), out = $('tpr'); out.textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ out.textContent = diagText(j); if (j && j.ok && j.diag && j.diag[0] && j.diag[0].state === 'accepted') watchDisplayed(t0, function(m){ out.textContent = m; }); }); };
   var al = $('al'); if (al) al.onclick = function(){ enableAlerts(function(ok, m){ alertMsg = ok ? '' : m; cgRender(); }, true); };
