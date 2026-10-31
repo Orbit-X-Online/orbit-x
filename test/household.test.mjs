@@ -95,6 +95,11 @@ console.log('ALL HOUSEHOLD TESTS PASSED (' + n + ')'); Date.now = realNow;
   const { loadData } = await import('./load-data.mjs'); const D = loadData();
   assert.equal(D.isEmergencyReading(180, 90), true); assert.equal(D.isEmergencyReading(150, 110), true);
   assert.equal(D.isEmergencyReading(179, 109), false); assert.equal(D.isEmergencyReading(150, 95), false);
+  const nm = (s, d) => D.bpBand(s, d).name;
+  assert.equal(nm(118, 76), 'Normal'); assert.equal(nm(129, 84), 'Normal'); assert.equal(nm(135, 80), 'Slightly raised'); assert.equal(nm(124, 87), 'Slightly raised');
+  assert.equal(nm(140, 80), 'High (grade 1)'); assert.equal(nm(125, 90), 'High (grade 1)'); assert.equal(nm(165, 85), 'High (grade 2)'); assert.equal(nm(150, 100), 'High (grade 2)');
+  assert.equal(nm(180, 90), 'Very high'); assert.equal(nm(150, 110), 'Very high'); assert.equal(nm(88, 70), 'Low'); assert.equal(nm(110, 58), 'Low');
+  assert.equal(D.bpBand(88, 70).code, 'ok'); // a low reading never triggers the "high" logic
   assert.equal(D.bpBand(150, 95).code, 'high1'); assert.equal(D.bpBand(165, 90).code, 'high2'); assert.equal(D.bpBand(130, 85).code, 'ok');
   const r = (d, s, di) => ({ date: d, sys: s, dia: di });
   const a = D.analyzeReal([r('2026-10-26', 120, 80), r('2026-10-27', 120, 80), r('2026-10-28', 150, 95)], [], ['morning', 'evening'], '2026-10-28', '2026-10-26');
