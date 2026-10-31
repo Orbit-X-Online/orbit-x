@@ -58,12 +58,12 @@ assert.equal(bad.ok, true); assert.equal(store(bad.pid).alarm, Date.UTC(2026, 10
 clock = at(28, 7);
 p = await call('POST', '/api/create', { name: 'Alex', slots: ['morning'], today: '2026-10-28', tz: 0, accountType: 'individual' });
 const Q = '/api/h/' + p.pid + '/';
-r = await call('POST', Q + 'invite', { name: 'Mum', phone: '' }, p.token); const code1 = r.code;
+r = await call('POST', Q + 'invite', { name: 'Mum', phone: '+2348012345678' }, p.token); const code1 = r.code;
 r = await call('GET', Q + 'state', null, p.token);
 assert.equal(r.caregivers[0].status, 'invited'); assert.equal(r.caregivers[0].joined, false); ok('invite shows status "invited" until the person joins');
 const j1 = await call('POST', '/api/join', { code: code1 }); assert.ok(j1.ok);
 r = await call('GET', Q + 'state', null, p.token); assert.equal(r.caregivers[0].status, 'joined'); ok('invite shows status "joined" after joining');
-r = await call('POST', Q + 'invite', { name: 'Joe' }, p.token); const code2 = r.code;
+r = await call('POST', Q + 'invite', { name: 'Joe', phone: '+2348099999999' }, p.token); const code2 = r.code;
 clock += 8 * 86400000; r = await call('POST', '/api/join', { code: code2 }); assert.equal(r._s, 410); assert.equal(r.error, 'invite_expired');
 r = await call('GET', Q + 'state', null, p.token); assert.equal(r.caregivers.find((c) => c.name === 'Joe').status, 'expired'); ok('invites expire after 7 days and say so');
 clock = at(28, 7);
@@ -146,10 +146,50 @@ r = await call('POST', Q + 'invite', { name: 'X' }, j1.token); assert.equal(r._s
 r = await call('POST', '/api/h/' + other.pid + '/state'.replace('/state', '/pushsub'), sub('x'), j1.token); assert.equal(r._s, 401);
 r = await call('GET', '/api/h/' + other.pid + '/state', null, key); assert.equal(r._s, 401);
 ok('unrelated users, caregivers and other households cannot read or change this household');
-// removed caregiver stops receiving anything
-r = await call('POST', Q + 'remove', { id: 'c1' }, p.token); pushes.length = 0;
-await call('POST', Q + 'sos', { why: 'test' }, p.token);
-assert.equal(pushes.filter((x) => x.url.includes('mum')).length, 0); ok('a removed caregiver no longer receives alerts');
+// the person can never remove or lock out a caregiver
+r = await call('POST', Q + 'remove', { id: 'c1' }, p.token); assert.equal(r._s, 403); assert.equal(r.error, 'caregiver_protected');
+r = await call('POST', Q + 'reinvite', { id: 'c1' }, p.token); assert.equal(r._s, 403); assert.equal(r.error, 'caregiver_protected');
+r = await call('GET', Q + 'state', null, p.token); assert.ok(r.caregivers.some((c) => c.id === 'c1' && c.joined));
+r = await call('GET', Q + 'state', null, j1.token); assert.equal(r._s, 200); // the caregiver's own access still works
+ok('the person cannot remove or re-invite (lock out) a caregiver who has joined');
+r = await call('POST', Q + 'reinvite', { id: 'c2' }, p.token); assert.ok(r.ok && r.code); ok('an invite nobody has used yet can still get a fresh code');
+r = await call('POST', Q + 'invite', { name: 'NoPhone' }, p.token); assert.equal(r._s, 400); assert.equal(r.error, 'phone_required');
+r = await call('POST', Q + 'invite', { name: 'NoPhone', phone: 'abc' }, p.token); assert.equal(r._s, 400); ok('a caregiver needs a phone number so the SMS fallback can reach them');
+pushes.length = 0; await call('POST', Q + 'sos', { why: 'test' }, p.token);
+assert.ok(pushes.length >= 0); await call('POST', Q + 'cancel', {}, p.token);
+
+// ---------- L. tablet amounts (how many tablets, not only the time)
+clock = at(28, 9);
+const dq = await call('POST', '/api/create', { name: 'Dose', slots: ['morning', 'evening'], doseQty: { morning: 2, evening: 99, night: 1 }, today: '2026-10-28', tz: 0, accountType: 'individual' });
+const DQ = '/api/h/' + dq.pid + '/';
+r = await call('GET', DQ + 'state', null, dq.token); assert.deepEqual(r.profile.doseQty, { morning: 2, night: 1 }); ok('usual tablets per time is stored; out-of-range amounts (99) are dropped');
+r = await call('POST', DQ + 'dose', { slot: 'morning', date: '2026-10-28' }, dq.token); assert.equal(r.doses[0].qty, 2); ok('logging with no amount uses the usual amount');
+r = await call('POST', DQ + 'dose', { slot: 'morning', date: '2026-10-28', qty: 3 }, dq.token); assert.equal(r.doses.length, 1); assert.equal(r.doses[0].qty, 3); ok('logging the same time again corrects the amount, never duplicates');
+r = await call('POST', DQ + 'dose', { slot: 'evening', date: '2026-10-28', qty: 1 }, dq.token); assert.equal(r.doses.find((d) => d.slot === 'evening').qty, 1);
+r = await call('POST', DQ + 'dose', { slot: 'evening', date: '2026-10-28', qty: '4' }, dq.token); assert.equal(r.doses.find((d) => d.slot === 'evening').qty, 4);
+for (const q of [0, 11, 1.5, -2, 'x', {}, [2]]) { r = await call('POST', DQ + 'dose', { slot: 'night', date: '2026-10-28', qty: q }, dq.token); assert.equal(r._s, 400, 'qty ' + JSON.stringify(q)); }
+ok('invalid tablet amounts (0, 11, 1.5, negative, text, objects) are refused');
+r = await call('POST', DQ + 'profile', { doseQty: { morning: 5, afternoon: 0 } }, dq.token); assert.deepEqual(r.profile.doseQty, { morning: 5 });
+r = await call('POST', DQ + 'dose', { slot: 'morning', date: '2026-10-27' }, dq.token); assert.equal(r.doses.find((d) => d.date === '2026-10-27').qty, 5); ok('changing the usual amount applies to new doses');
+
+// ---------- M. SMS and phone fallback
+clock = at(28, 10);
+const sm = await call('POST', '/api/create', { name: 'Sms', slots: [], today: '2026-10-28', tz: 0, accountType: 'individual' });
+const SM = '/api/h/' + sm.pid + '/';
+r = await call('POST', SM + 'invite', { name: 'Auntie', phone: '08012345678' }, sm.token); const jc = await call('POST', '/api/join', { code: r.code }); assert.ok(jc.ok);
+pushes.length = 0; await call('POST', SM + 'sos', { why: 'x' }, sm.token);
+r = await call('GET', SM + 'state', null, sm.token); assert.ok(r.events.some((e) => e.kind === 'sms' && e.state === 'not_configured')); ok('with no SMS provider set up, the alert log says so plainly');
+await call('POST', SM + 'cancel', {}, sm.token);
+env.AT_USERNAME = 'OrbitX'; env.AT_API_KEY = 'atk';
+pushes.length = 0; await call('POST', SM + 'sos', { why: 'x' }, sm.token);
+const smsCall = pushes.find((x) => x.url.includes('api.africastalking.com'));
+assert.ok(smsCall, 'an SMS request was made to Africa\'s Talking'); assert.ok(String(smsCall.init.body).includes('%2B2348012345678'), 'local 0801... number became +234801...'); assert.equal(smsCall.init.headers.apiKey, 'atk');
+r = await call('GET', SM + 'state', null, sm.token); assert.ok(r.events.some((e) => e.kind === 'sms' && e.state === 'sent')); ok('an SMS goes to the caregiver being alerted, with +234 numbers fixed automatically, even with no push');
+await call('POST', SM + 'cancel', {}, sm.token);
+pushHandler = async (u) => u.includes('africastalking') ? new Response('no', { status: 400 }) : new Response('', { status: 201 });
+await call('POST', SM + 'sos', { why: 'y' }, sm.token); r = await call('GET', SM + 'state', null, sm.token);
+assert.ok(r.events.some((e) => e.kind === 'sms' && e.state === 'rejected')); ok('a refused SMS is recorded as refused, not as sent');
+pushHandler = async () => new Response('', { status: 201 }); delete env.AT_USERNAME; delete env.AT_API_KEY;
 
 // ---------- K. invalid input
 r = await call('POST', Q + 'bp', { sys: 300, dia: 400, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
