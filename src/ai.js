@@ -17,7 +17,7 @@ function parseJson(text) {
   }
   return null;
 }
-function reason(e) { if (!(e instanceof MetaError)) return 'unexpected_error'; if (e.status === 504) return 'timeout'; if (e.status === 429) return 'rate_limited'; if (e.status === 404) return 'model_not_found'; if (e.status === 500) return 'not_configured'; if (e.status === 403) return 'key_rejected'; return 'provider_unavailable'; }
+function reason(e) { if (!(e instanceof MetaError)) return 'unexpected_error'; if (e.status === 504) return 'timeout'; if (e.status === 402) return 'no_credits'; if (e.status === 429) return 'rate_limited'; if (e.status === 404) return 'model_not_found'; if (e.status === 500) return 'not_configured'; if (e.status === 403) return 'key_rejected'; return 'provider_unavailable'; }
 
 async function callJson(env, system, user, opts = {}) {
   const t0 = Date.now();
