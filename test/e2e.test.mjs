@@ -62,6 +62,19 @@ r = await call('POST', W + 'docexplain', { id: doc.id }, pt.token); assert.ok(r.
 model = () => chat({ sections: [{ kind: 'unknown', text: 'The documents do not say.', cites: [] }] });
 r = await call('POST', W + 'ask', { q: 'What was my creatinine?' }, pt.token); assert.ok(r.ok); assert.ok(r.statements.length >= 1); ok('questions about your records are answered');
 
+// ---- photo of a paper report: Baseten vision copies the words
+const PNG = 'data:image/jpeg;base64,' + 'A'.repeat(400);
+let seen = null;
+model = (b) => { seen = b; return chat('LAB REPORT\nDate: 2026-10-20\nCreatinine  1.4 mg/dL  (0.7-1.3)  H\nBlood pressure 148/92 mmHg'); };
+r = await call('POST', W + 'docphoto', { image: PNG }, pt.token); assert.ok(r.ok, JSON.stringify(r)); assert.match(r.text, /Creatinine/);
+const um = seen.messages[1].content; assert.ok(Array.isArray(um) && um.some((x) => x.type === 'image_url' && x.image_url.url === PNG), 'image sent in the standard image_url format'); ok('Baseten vision reads a photo of a paper report and returns its text');
+r = await call('POST', W + 'docphoto', { image: 'not an image' }, pt.token); assert.equal(r._s, 400); ok('a non-image upload is refused');
+r = await call('POST', W + 'docphoto', { image: PNG }, mum.token); assert.equal(r._s, 403); ok('only the patient can send photos for reading');
+model = () => ({ status: 400, body: '{"error":"image input is not supported for this model"}' });
+r = await call('POST', W + 'docphoto', { image: PNG }, pt.token); assert.equal(r.ok, false); assert.equal(r.error, 'vision_unsupported'); ok('if the endpoint cannot take images the app is told, and falls back to reading on the phone');
+model = () => chat('NO_TEXT'); r = await call('POST', W + 'docphoto', { image: PNG }, pt.token); assert.equal(r.error, 'no_text_found'); ok('a photo with no text is reported clearly');
+forgetModel();
+
 // ---- Baseten down: report still saved by the rule-based reader, nothing crashes
 forgetModel(); model = () => ({ status: 402, body: '{"error":"payment required"}' });
 r = await call('POST', W + 'docadd', { name: 'Second report', text: 'LAB REPORT\nDate: 2026-10-25\nPotassium 4.4 mmol/L (3.5-5.1)\nBlood pressure 138/88 mmHg\n' }, pt.token);
