@@ -2,9 +2,9 @@
 // Every household is its own tenant: nothing here can read another household's storage.
 import { ANALYTES, normName, compareFacts, findConflicts, buildTimeline, evidenceStatements, citeUniverse, answerQuestion, buildBrief, extractRules, finishFact, convertToCanon, daysBetween, isDate, fnv, fmtNum, quoteInText } from './intel.js';
 import { validateBundle, validateResource, resourceToFacts, factsToBundle } from './fhir.js';
-import { extractWithAI, explainWithAI, suggestMappings, explainDocWithAI, aiMode, providerName } from './ai.js';
+import { extractWithAI, explainWithAI, suggestMappings, explainDocWithAI, readPhotoWithAI, aiMode, providerName } from './ai.js';
 
-export const WORKSPACE_ACTIONS = new Set(['wstate', 'docadd', 'docdel', 'docget', 'ask', 'brief', 'briefshare', 'briefrevoke', 'decide', 'suggest', 'mapconfirm', 'consent', 'auditlog', 'wipe', 'briefpublic', 'docexplain', 'docretry']);
+export const WORKSPACE_ACTIONS = new Set(['wstate', 'docadd', 'docdel', 'docget', 'ask', 'brief', 'briefshare', 'briefrevoke', 'decide', 'suggest', 'mapconfirm', 'consent', 'auditlog', 'wipe', 'briefpublic', 'docexplain', 'docretry', 'docphoto']);
 export const V1_ACTIONS = new Set(['v1records', 'v1validate', 'v1connectors', 'v1events', 'v1handoffcreate', 'v1handoffget', 'v1handoffreceive', 'v1handoffack', 'v1verify', 'v1audit']);
 export const SCOPES = ['records:write', 'records:read', 'events:write', 'events:read', 'handoff:create', 'handoff:receive', 'audit:read'];
 export const LEGACY_SCOPES = ['events:write', 'events:read'];
@@ -168,6 +168,16 @@ async function docexplain(ctx, D) {
   const items = facts.slice(0, 40).map((f) => ({ id: f.id, name: f.name, value: f.value, unit: f.unit, dose: f.dose, flag: f.flag, refRange: f.refRange, date: f.date, quote: f.quote }));
   await logAudit(ctx, D, 'patient', 'document.explain', 'ok', d.name + ' [' + ex.mode + ']');
   return J({ ok: true, id, name: d.name, mode: ex.mode, model: ex.model, aiError: ex.aiError || null, summary: ex.summary, terms: ex.terms, questions: ex.questions, items });
+}
+// Photo of a paper report: the AI copies the words, the person checks them, and only then are they analysed.
+async function docphoto(ctx, D) {
+  const img = String(ctx.body.image || '');
+  if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(img) || img.length < 200) return J({ ok: false, error: 'bad_image' }, 400);
+  if (img.length > 1600000) return J({ ok: false, error: 'image_too_large' }, 413);
+  const r = await readPhotoWithAI(ctx.env, img);
+  await logAudit(ctx, D, 'patient', 'document.photo', r.ok ? 'ok' : 'failed', r.ok ? 'read by ' + (r.model || 'AI') + ' (' + r.text.length + ' characters)' : r.error);
+  if (!r.ok) return J({ ok: false, error: r.error, detail: r.detail || null }, r.error === 'bad_image' ? 400 : 200);
+  return J({ ok: true, text: r.text, model: r.model, ms: r.ms, unclear: r.unclear });
 }
 // Run the AI reading again for a document that fell back to the rule-based parser.
 async function docretry(ctx, D) {
@@ -511,6 +521,7 @@ export async function handleConnect(ctx) {
       case 'docget': return docget(ctx, D);
       case 'docexplain': return docexplain(ctx, D);
       case 'docretry': return docretry(ctx, D);
+      case 'docphoto': return docphoto(ctx, D);
       case 'ask': return ask(ctx, D);
       case 'brief': return brief(ctx, D);
       case 'briefshare': return briefshare(ctx, D);
