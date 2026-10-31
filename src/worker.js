@@ -1269,7 +1269,7 @@ async function handleHousehold(req, env, url, cors) {
     const get = req.method === 'GET' && ['wstate', 'docget', 'auditlog'].includes(wm[2]);
     if (!get && req.method !== 'POST') return json({ error: 'Not found' }, 404, cors);
     const text = req.method === 'POST' ? await req.text() : undefined;
-    if (text && text.length > 90000) return json({ error: 'too_large' }, 413, cors);
+    if (text && text.length > (wm[2] === 'docphoto' ? 1700000 : 90000)) return json({ error: 'too_large' }, 413, cors);
     return relay(await forward(hub(env, 'h:' + wm[1]), '/h/' + wm[2] + url.search, req, text), cors);
   }
   const pm = /^\/api\/push\/msg\/([a-z0-9]{8})$/.exec(p);
