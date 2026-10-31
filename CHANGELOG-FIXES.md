@@ -52,3 +52,12 @@ Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio ha
 | 30 | **Readability**: brighter secondary text, larger small text, bigger buttons and labels, two-column tables become stacked cards on phones, Family alert log is a drop-down. | `public/index.html`, `public/ox.css` |
 | 31 | `npm run check` now covers every front-end script; `.dev.vars.example` lists the TURN and SMS variables. | `package.json`, `.dev.vars.example` |
 
+## Round 4 (tablet amounts, caregiver lock, SMS backup, Baseten)
+| # | Change | Files |
+|---|---|---|
+| 32 | **Tablet amounts.** A dose now records how many tablets (1 to 10), not only the time. Usual amount per time is set in sign-up and Settings with a neat stepper; the dose sheet pre-fills it and lets the person change it each time; logging again corrects the amount; History shows "morning: 2 tablets". Invalid amounts are refused by the server. | `src/worker.js`, `public/index.html` |
+| 33 | **The person cannot remove or lock out a caregiver.** `remove` is refused for everyone on the patient side; `reinvite` is refused once the caregiver has joined (only an unused invite can get a new code). The Remove button and "New invite" for linked caregivers are gone. (Account deletion remains, as the person's data right.) | `src/worker.js`, `public/index.html` |
+| 34 | **SMS backup is dependable.** A caregiver phone number is now required. Nigerian numbers written 0801... are sent as +234801.... If SMS is not set up, or is refused, the alert log says so plainly instead of failing silently. SMS goes out at the same moment as the push for each caregiver being alerted and for "no one answered". | `src/worker.js`, `public/index.html` |
+| 35 | **Baseten / Muse Spark Open.** The model "reasons" before answering, so tiny token budgets returned empty text and looked like an error. Minimum budget raised, one automatic retry with more room, `<think>` text stripped. A key limited to one model is no longer reported as "key rejected" just because the model list is refused. Payment problems show as "no credits". Default model name is `meta-models/muse-spark-open-1026`. | `src/meta.js`, `src/ai.js`, `wrangler.toml` |
+| 36 | Tests: 45 notification/security checks (tablet amounts, caregiver protection, SMS), plus Baseten restricted-key and reasoning tests. | `test/` |
+
