@@ -50,6 +50,8 @@ clock = Date.UTC(2026, 9, 31, 12, 30, 0);
 let ny = await call('POST', '/api/create', { name: 'Nia', slots: ['morning'], today: '2026-10-31', tz: -240, tzName: 'America/New_York', accountType: 'individual' });
 assert.equal(store(ny.pid).alarm, Date.UTC(2026, 9, 31, 15, 0)); // 11:00 EDT heads-up time on the same day
 clock = Date.UTC(2026, 10, 1, 0, 0, 0); await alarmNow(ny.pid);
+assert.equal(store(ny.pid).alarm, Date.UTC(2026, 10, 1, 2, 0)); // 22:00 EDT last-chance check
+clock = Date.UTC(2026, 10, 1, 2, 5, 0); await alarmNow(ny.pid);
 assert.equal(store(ny.pid).alarm, Date.UTC(2026, 10, 1, 13, 0)); ok('daylight-saving change: next reminder lands on 08:00 local (EST), not an hour off');
 let bad = await call('POST', '/api/create', { name: 'Zed', slots: ['morning'], today: '2026-11-01', tz: 0, tzName: 'Not/AZone', accountType: 'individual' });
 assert.equal(bad.ok, true); assert.equal(store(bad.pid).alarm, Date.UTC(2026, 10, 1, 8, 0)); ok('invalid time-zone name is ignored safely (falls back to the fixed offset)');
@@ -190,6 +192,27 @@ pushHandler = async (u) => u.includes('africastalking') ? new Response('no', { s
 await call('POST', SM + 'sos', { why: 'y' }, sm.token); r = await call('GET', SM + 'state', null, sm.token);
 assert.ok(r.events.some((e) => e.kind === 'sms' && e.state === 'rejected')); ok('a refused SMS is recorded as refused, not as sent');
 pushHandler = async () => new Response('', { status: 201 }); delete env.AT_USERNAME; delete env.AT_API_KEY;
+
+// ---------- J2. high BP and missed tablets text the caregiver automatically
+env.AT_USERNAME = 'OrbitX'; env.AT_API_KEY = 'atk';
+clock = at(30, 6); 
+const hb = await call('POST', '/api/create', { name: 'Tolu', slots: ['morning'], today: '2026-10-30', tz: 0, accountType: 'individual' });
+const HB = '/api/h/' + hb.pid + '/';
+r = await call('POST', HB + 'invite', { name: 'Sis', phone: '08055550000' }, hb.token); assert.ok((await call('POST', '/api/join', { code: r.code })).ok);
+const smsTexts = () => pushes.filter((x) => x.url.includes('africastalking')).map((x) => decodeURIComponent(String(x.init.body).replace(/\+/g, ' ')));
+pushes.length = 0; await call('POST', HB + 'bp', { sys: 124, dia: 80, date: '2026-10-30' }, hb.token); assert.equal(smsTexts().length, 0); ok('a normal reading sends no text');
+await call('POST', HB + 'bp', { sys: 148, dia: 94, date: '2026-10-30' }, hb.token);
+assert.equal(smsTexts().length, 1); assert.match(smsTexts()[0], /148\/94.*high \(grade 1\)/i); ok('a 140/90+ reading texts the caregiver automatically with the number');
+await call('POST', HB + 'bp', { sys: 152, dia: 96, date: '2026-10-30' }, hb.token); assert.equal(smsTexts().length, 1); ok('repeat high readings within 3 hours do not spam the caregiver');
+clock = at(30, 6) + 4 * 3600000; await call('POST', HB + 'bp', { sys: 150, dia: 95, date: '2026-10-30' }, hb.token); assert.equal(smsTexts().length, 2); ok('a later high reading texts again');
+pushes.length = 0; clock = at(30, 11, 5); await alarmNow(hb.pid);
+assert.ok(smsTexts().some((t) => /not logged the morning tablet/.test(t))); ok('a missed tablet texts the caregiver at the heads-up time');
+pushes.length = 0; clock = at(30, 22, 5); await alarmNow(hb.pid);
+assert.ok(smsTexts().some((t) => /nearly over.*morning tablet/.test(t))); ok('a last-chance text goes out at 22:00 if the tablet is still not logged');
+pushes.length = 0; await alarmNow(hb.pid); assert.equal(smsTexts().length, 0); ok('the last-chance text is sent only once per day');
+clock = at(31, 6); await call('POST', HB + 'dose', { slot: 'morning', date: '2026-10-31', qty: 1 }, hb.token); pushes.length = 0; clock = at(31, 22, 5); await alarmNow(hb.pid);
+assert.equal(smsTexts().length, 0); ok('no missed-tablet texts when the tablet was logged');
+delete env.AT_USERNAME; delete env.AT_API_KEY;
 
 // ---------- K. invalid input
 r = await call('POST', Q + 'bp', { sys: 300, dia: 400, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
