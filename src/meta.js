@@ -55,7 +55,7 @@ export async function resolveModel(env) {
   try {
     const ids = await listModels(env);
     pick = ids.find((x) => /muse[-_ ]?spark[-_ ]?open/i.test(x)) || ids.find((x) => /muse[-_ ]?spark/i.test(x)) || ids.find((x) => /muse/i.test(x)) || null;
-  } catch (e) { if (e instanceof MetaError && e.status === 401) throw e; /* some gateways do not expose /models: use the known slug */ }
+  } catch (e) { /* some gateways, and keys limited to one model (hackathon keys), refuse /models: use the known slug and let the chat call decide */ }
   pick = pick || (isBaseten(env) ? MODEL_FALLBACKS[0] : 'muse-spark-1.3');
   modelCache = { id: pick, at: Date.now(), base: b };
   return pick;
@@ -72,10 +72,11 @@ function textOf(msg) {
 
 export async function metaChat(env, { messages, model, temperature = 0.3, maxTokens, timeoutMs }) {
   if (!keyOf(env)) throw new MetaError('MODEL_API_KEY is not set', 500);
-  const tried = []; let candidates = [model || null];
+  const tried = []; let candidates = [model || null], retried = false;
+  let maxTok = Math.max(Number(maxTokens) || Number(env.MODEL_MAX_TOKENS) || 4000, 800); // Muse Spark Open always reasons first; a tiny budget leaves no room for the answer
   for (let i = 0; i < candidates.length; i++) {
     const m = candidates[i] || await resolveModel(env); tried.push(m);
-    const body = { model: m, messages, temperature, max_tokens: maxTokens || Number(env.MODEL_MAX_TOKENS) || 3000 };
+    const body = { model: m, messages, temperature, max_tokens: maxTok };
     if (env.MODEL_REASONING) body.reasoning_effort = env.MODEL_REASONING; // opt-in only
     const res = await authed(env, '/chat/completions', { method: 'POST', body: JSON.stringify(body) }, timeoutMs || Number(env.MODEL_TIMEOUT_MS) || 45000);
     if (!res.ok) {
@@ -85,12 +86,13 @@ export async function metaChat(env, { messages, model, temperature = 0.3, maxTok
         if (candidates.length === 1) candidates = candidates.concat((isBaseten(env) ? MODEL_FALLBACKS : ['muse-spark-1.3']).filter((x) => x !== m)); // try the other known slugs
         forgetModel(); if (i < candidates.length - 1) continue;
       }
-      const status = res.status === 429 ? 429 : res.status === 401 || res.status === 403 ? 401 : 502;
+      const status = res.status === 429 ? 429 : res.status === 402 ? 402 : res.status === 401 || res.status === 403 ? 401 : 502;
       throw new MetaError('Model API ' + res.status + ': ' + detail, status);
     }
     const data = await res.json().catch(() => null);
     const choice = data && data.choices && data.choices[0];
     const text = textOf(choice && choice.message);
+    if (!text && choice && choice.finish_reason === 'length' && !retried) { retried = true; maxTok = Math.min(maxTok * 2 + 1000, 8000); i--; continue; } // thinking used the whole budget: ask again with more room
     if (!text) throw new MetaError(choice && choice.finish_reason === 'length' ? 'Model ran out of room before answering' : 'Empty model reply', 502);
     modelCache = { id: m, at: Date.now(), base: baseUrl(env) };
     return text;
@@ -104,14 +106,15 @@ export async function probeAI(env) {
   const provider = isBaseten(env) ? 'Baseten' : baseUrl(env).replace(/^https?:\/\//, '').split('/')[0];
   if (!keyOf(env)) return { ok: false, error: 'not_configured', provider, hint: 'MODEL_API_KEY is not set on the server. Run: npx wrangler secret put MODEL_API_KEY' };
   try {
-    const out = await metaChat(env, { temperature: 0, maxTokens: 60, timeoutMs: 25000, messages: [{ role: 'user', content: 'Reply with the single word OK.' }] });
+    const out = await metaChat(env, { temperature: 0, maxTokens: 400, timeoutMs: 40000, messages: [{ role: 'user', content: 'Reply with the single word OK.' }] });
     return { ok: true, provider, model: modelCache.id, authScheme: SCHEME_CACHE.get(baseUrl(env)) || null, ms: Date.now() - t0, sample: out.slice(0, 40) };
   } catch (e) {
     const s = e && e.status;
-    const code = s === 401 ? 'key_rejected' : s === 429 ? 'rate_limited' : s === 504 ? 'timeout' : s === 404 ? 'model_not_found' : 'provider_unavailable';
+    const code = s === 401 ? 'key_rejected' : s === 402 ? 'no_credits' : s === 429 ? 'rate_limited' : s === 504 ? 'timeout' : s === 404 ? 'model_not_found' : 'provider_unavailable';
     const hints = { key_rejected: 'The provider refused the key with both sign-in methods. Create a new API key in Baseten (Settings > API keys), then run: npx wrangler secret put MODEL_API_KEY. Also check the Muse Spark Open model is enabled on the Model APIs page.',
       model_not_found: 'Enable Muse Spark Open on the Baseten Model APIs page, or set MODEL_TEXT in wrangler.toml to the exact model slug shown there.',
-      rate_limited: 'Too many requests or no credits left. Check your Baseten credits.', timeout: 'The model was slow. Try again.', provider_unavailable: 'The provider could not be reached from the server.' };
+      no_credits: 'The provider says the account has no credit or a payment problem. Check billing and credits on the provider site.',
+      rate_limited: 'Too many requests. Wait a minute and try again.', timeout: 'The model was slow. Try again.', provider_unavailable: 'The provider could not be reached from the server.' };
     return { ok: false, error: code, provider, status: s || 0, hint: hints[code], detail: String(e && e.message || '').slice(0, 200), ms: Date.now() - t0 };
   }
 }
@@ -123,6 +126,7 @@ export function friendlyAiError(code) {
     not_configured: 'The AI key is not set on the server yet.',
     key_rejected: 'The AI provider did not accept the key. The server owner should re-check MODEL_API_KEY.',
     model_not_found: 'The AI model name was not found on this provider.',
+    no_credits: 'The AI provider account has no credit. The server owner should check billing.',
     rate_limited: 'The AI provider is busy. Try again in a minute.',
     timeout: 'The AI took too long to answer.',
     provider_unavailable: 'The AI provider could not be reached.',
