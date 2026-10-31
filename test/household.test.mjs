@@ -36,7 +36,7 @@ r = await call('POST', '/api/h/' + org.pid + '/apikey', { label: 'x' }, org.toke
 
 // --- caregivers + doctor
 r = await call('POST', P + 'invite', { name: 'Mum', phone: '+2348012345678' }, p.token); assert.ok(r.ok && r.code); const cgCode = r.code;
-r = await call('POST', P + 'invite', { name: 'Joeboy', phone: '' }, p.token); const cg2Code = r.code;
+r = await call('POST', P + 'invite', { name: 'Joeboy', phone: '08098765432' }, p.token); const cg2Code = r.code;
 r = await call('POST', P + 'invite', { name: 'Dr Ade', role: 'clinician' }, p.token); assert.ok(r.ok); ok('invites created (caregiver x2, doctor)');
 let j1 = await call('POST', '/api/join', { code: cgCode.toUpperCase() }); assert.ok(j1.ok && j1.role === 'caregiver'); ok('caregiver joins (code in any case)');
 r = await call('POST', '/api/join', { code: cgCode }); assert.equal(r._s, 404); ok('invite is single-use');
