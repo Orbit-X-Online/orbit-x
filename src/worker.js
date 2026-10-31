@@ -77,12 +77,12 @@ function cleanPhone(s) {
 }
 function isEmergencyReading(sys, dia) { return sys >= HIGH_BP_SYS || dia >= HIGH_BP_DIA; }
 // WHO hypertension line (140/90) and ISH grade 2 (160/100). Readings from 140/90 up, short of an emergency, tell the caregivers.
-function bpTier(sys, dia) { return sys >= 160 || dia >= 100 ? 'High (grade 2)' : sys >= 140 || dia >= 90 ? 'High (grade 1)' : ''; }
-const HIGH_BP_GAP_MS = 3 * 3600000, FINAL_WARN_HOUR = 22; // at most one high-BP text per 3 h; last-chance dose text at 22:00 local
+function bpTier(sys, dia) { return sys >= 160 || dia >= 100 ? 'High (grade 2)' : sys >= 140 || dia >= 90 ? 'High (grade 1)' : sys < 90 || dia < 60 ? 'Low' : ''; }
+const HIGH_BP_GAP_MS = 30 * 60000, FINAL_WARN_HOUR = 22; // at most one blood-pressure text per 30 min unless the reading gets worse or changes band; last-chance dose text at 22:00 local
 function queueHighBp(h, sys, dia, now) {
   const tier = bpTier(sys, dia); if (!tier) return;
-  if (h.lastHighBpAt && now - h.lastHighBpAt < HIGH_BP_GAP_MS) return; // do not text the family for every repeat measurement
-  h.lastHighBpAt = now; h.outbox = h.outbox || [];
+  if (h.lastHighBpAt && now - h.lastHighBpAt < HIGH_BP_GAP_MS && h.lastBpTier === tier) return; // do not text the family for every repeat measurement in the same band
+  h.lastHighBpAt = now; h.lastBpTier = tier; h.outbox = h.outbox || [];
   h.outbox.push({ kind: 'high_bp', sys, dia, tier, t: now });
 }
 function validDate(s, now) {
@@ -623,11 +623,11 @@ export class AlertHub {
       if (o.kind !== 'high_bp' || !(h.caregivers || []).length) continue;
       const name = h.name || 'Someone', rd = o.sys + '/' + o.dia;
       h.notices = h.notices || [];
-      h.notices.push({ id: 'b' + now, t: now, kind: 'high_bp', text: name + ' measured ' + rd + ' (' + o.tier.toLowerCase() + ').' });
+      h.notices.push({ id: 'b' + now, t: now, kind: 'high_bp', text: name + ' measured ' + rd + ', ' + o.tier.toLowerCase() + '.' });
       if (h.notices.length > 30) h.notices = h.notices.slice(-30);
       const ehs = this.subsFor(h, (x) => x.role === 'caregiver');
-      await this.deliver(h, ehs, { title: 'Orbit-X: high blood pressure', body: name + ' measured ' + rd + '. Please check on them.', tag: 'orbit-bp', urgent: true }, now, 'high_bp', 'caregivers');
-      await this.smsCaregivers(h, 'ORBIT-X: ' + name + ' measured blood pressure ' + rd + ', ' + o.tier.toLowerCase() + '. Please check on them. If they feel unwell, call 112.', now, 'high_bp');
+      await this.deliver(h, ehs, { title: 'Orbit-X: ' + (o.tier === 'Low' ? 'low' : 'high') + ' blood pressure', body: name + ' measured ' + rd + ', ' + o.tier.toLowerCase() + '. Please check on them.', tag: 'orbit-bp', urgent: true }, now, 'high_bp', 'caregivers');
+      await this.smsCaregivers(h, 'ORBIT-X: ' + name + ' measured blood pressure ' + rd + ', ' + o.tier.toLowerCase() + '. Please check on them. If they feel faint or unwell, call 112.', now, 'high_bp');
     }
   }
 
@@ -743,6 +743,7 @@ export class AlertHub {
       profile: { name: h.name, slots: h.slots, doseQty: h.doseQty || {}, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, tzName: h.tzName || '', alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)), push: pushDiag(h, (x) => x.role === who.role && (x.id || null) === (who.id || null)), nextReminderAt: h.alarmAt || null },
       caregivers: who.role === 'patient' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, order: c.order, joined: !!c.tokenHash, status: c.tokenHash ? 'joined' : (c.invitedAt && now - c.invitedAt > INVITE_TTL_MS ? 'expired' : 'invited'), invitedAt: c.invitedAt || null, joinedAt: c.joinedAt || null, role: c.role || 'caregiver', phone: c.phone || '', alertsOn: (h.pushSubs || []).some((x) => x.id === c.id), push: pushDiag(h, (x) => x.id === c.id) })) : undefined,
       events: who.role === 'patient' ? (h.events || []).slice(-20) : undefined,
+      team: who.role === 'caregiver' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, role: c.role || 'caregiver', order: c.order, joined: !!c.tokenHash, you: c.id === who.id })) : undefined,
       careNumbers: who.role === 'caregiver' ? { patient: h.phone || '' } : undefined,
       rules: (h.rules || []).map((r) => ({ id: r.id, name: r.name, severity: r.severity, author: r.author, readback: r.readback, createdAt: r.createdAt })),
       notices: (h.notices || []).slice(-20),
@@ -989,8 +990,17 @@ export class AlertHub {
         extra.code = inviteCode(h.pid, secret); extra.caregiverId = c.id;
         break;
       }
-      case 'remove': { // by design nobody on the patient side can remove a caregiver or clinician: the person cannot switch off their own safety net
-        fail(403, 'caregiver_protected');
+      case 'remove': { // the person cannot switch off their own safety net, but a linked caregiver can remove another caregiver or clinician
+        if (who.role !== 'caregiver') { fail(403, 'caregiver_protected'); break; }
+        const c = h.caregivers.find((x) => x.id === body.id);
+        if (!c) { fail(404, 'no_caregiver'); break; }
+        if (c.id === who.id) { fail(400, 'cannot_remove_self'); break; }
+        if (activeAlert(h.alert)) { fail(409, 'alert_active'); break; } // never change the ring order in the middle of an alert
+        const by = (h.caregivers.find((x) => x.id === who.id) || {}).name || 'A caregiver';
+        h.caregivers = h.caregivers.filter((x) => x.id !== c.id);
+        h.pushSubs = (h.pushSubs || []).filter((x) => x.id !== c.id);
+        h.caregivers.filter((x) => (x.role || 'caregiver') === 'caregiver').sort((a, b) => a.order - b.order).forEach((x, i) => { x.order = i + 1; });
+        this.ev(h, now, 'removed', 'removed', by + ' removed ' + c.name);
         break;
       }
       case 'profile': {
