@@ -375,14 +375,14 @@ function alertView(a, who, now, escalateMs) {
 }
 
 
-/* ------------------------------ real SMS (optional paid provider) ------------------------------
-   Web Push needs internet on the caregiver's phone. SMS travels over the mobile network, so it reaches a
-   caregiver who has no data. Set TWILIO_SID, TWILIO_TOKEN and TWILIO_FROM (or AT_USERNAME, AT_API_KEY for Africa's Talking SMS).
-   Server-placed phone calls are switched off on purpose; live voice calls happen inside the app (WebRTC + TURN). */
+/* ------------------------------ real SMS and phone calls (optional paid providers) ------------------------------
+   Web Push needs internet on the caregiver's phone. SMS and voice calls travel over the mobile network, so they reach a
+   caregiver who has no data. Set TWILIO_SID, TWILIO_TOKEN and TWILIO_FROM (or AT_USERNAME, AT_API_KEY for Africa's Talking SMS). */
+function toE164(n) { const t = String(n || '').replace(/[\s\-()]/g, ''); if (t.startsWith('+')) return t; if (/^0\d{10}$/.test(t)) return '+234' + t.slice(1); return '+' + t; } // 0801... becomes +234801...
 function smsConfigured(env) { return Boolean((env.TWILIO_SID && env.TWILIO_TOKEN && env.TWILIO_FROM) || (env.AT_USERNAME && env.AT_API_KEY)); }
 async function sendSms(env, to, body) {
   const num = cleanPhone(to); if (!num) return { state: 'bad_number' };
-  const withPlus = num.startsWith('+') ? num : '+' + num;
+  const withPlus = toE164(num);
   try {
     if (env.TWILIO_SID && env.TWILIO_TOKEN && env.TWILIO_FROM) {
       const r = await fetch('https://api.twilio.com/2010-04-01/Accounts/' + encodeURIComponent(env.TWILIO_SID) + '/Messages.json', { method: 'POST',
@@ -399,8 +399,23 @@ async function sendSms(env, to, body) {
   } catch (e) { return { state: 'network_error' }; }
   return { state: 'not_configured' };
 }
+async function placeVoiceCall(env, to, say) {
+  if (!(env.TWILIO_SID && env.TWILIO_TOKEN && env.TWILIO_FROM)) return { state: 'not_configured' };
+  const num = cleanPhone(to); if (!num) return { state: 'bad_number' };
+  const twiml = '<Response><Pause length="1"/><Say voice="alice">' + String(say).replace(/[<>&]/g, ' ') + '</Say><Pause length="1"/><Say voice="alice">' + String(say).replace(/[<>&]/g, ' ') + '</Say></Response>';
+  try {
+    const r = await fetch('https://api.twilio.com/2010-04-01/Accounts/' + encodeURIComponent(env.TWILIO_SID) + '/Calls.json', { method: 'POST',
+      headers: { Authorization: 'Basic ' + btoa(env.TWILIO_SID + ':' + env.TWILIO_TOKEN), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ To: toE164(num), From: env.TWILIO_FROM, Twiml: twiml }).toString() });
+    return { state: r.ok ? 'sent' : 'rejected', http: r.status };
+  } catch (e) { return { state: 'network_error' }; }
+}
+
 /* ------------------------------ the household Durable Object ------------------------------ */
 const DOSE_SLOTS = ['morning', 'afternoon', 'evening', 'night'];
+const MAX_DOSE_QTY = 10; // most tablets one dose can record
+function cleanQty(v) { const n = typeof v === 'string' && /^\d{1,2}$/.test(v) ? Number(v) : v; return Number.isInteger(n) && n >= 1 && n <= MAX_DOSE_QTY ? n : null; }
+function cleanDoseQty(o) { const out = {}; if (o && typeof o === 'object') for (const sl of DOSE_SLOTS) { const q = cleanQty(o[sl]); if (q) out[sl] = q; } return out; }
 function cleanSlots(a) { return Array.isArray(a) ? DOSE_SLOTS.filter((x) => a.includes(x)) : []; }
 
 // Summary of the newest push attempt for the subscriptions matching pred. No endpoint, no keys, no message text.
@@ -563,24 +578,25 @@ export class AlertHub {
   }
 
 
-  // SMS to whoever is being alerted. Runs once per alert state (same dedupe mark as the push).
+  // SMS + phone call to whoever is being alerted. Runs once per alert state (same dedupe mark as the push).
   async external(h, a, now) {
-    if (!smsConfigured(this.env)) return;
     const name = h.name || 'Someone', t = target(a);
+    if (!smsConfigured(this.env)) { if ((a.status === 'ringing' && t) || a.status === 'unanswered') this.ev(h, now, 'sms', 'not_configured', t ? t.id : 'caregivers'); return; } // visible in the alert log so the owner knows SMS is off
     const phoneOf = (id) => { const c = h.caregivers.find((x) => x.id === id); return c ? c.phone : ''; };
     const jobs = [];
     if (a.status === 'ringing' && t) {
       const ph = phoneOf(t.id);
       if (ph) {
         jobs.push(['sms', ph, 'ORBIT-X ALERT: ' + name + ' needs help now. Please call them straight away' + (h.phone ? ' on ' + h.phone : '') + '. In an emergency call 112.', t.id]);
+        jobs.push(['call', ph, 'Orbit X alert. ' + name + ' has asked for help. Please call them now. If it is an emergency, call one one two.', t.id]);
       }
     } else if (a.status === 'unanswered') {
       for (const c of h.caregivers) if (c.phone && c.role !== 'clinician') jobs.push(['sms', c.phone, 'ORBIT-X: no one has answered ' + name + "'s alert. Please call " + name + ' now. If it is an emergency call 112.', c.id]);
       if (h.phone) jobs.push(['sms', h.phone, 'ORBIT-X: no caregiver answered your alert. Please call 112 now.', 'patient']);
     }
     for (const j of jobs.slice(0, 8)) {
-      const r = await sendSms(this.env, j[1], j[2]);
-      this.ev(h, now, 'sms', r.state, j[3], r.http);
+      const r = j[0] === 'sms' ? await sendSms(this.env, j[1], j[2]) : await placeVoiceCall(this.env, j[1], j[2]);
+      this.ev(h, now, j[0] === 'sms' ? 'sms' : 'phone_call', r.state, j[3], r.http);
     }
   }
 
@@ -680,7 +696,7 @@ export class AlertHub {
     return {
       ok: true, now, role: who.role, pid: h.pid,
       me: who.role === 'caregiver' || who.role === 'clinician' ? { id: who.id, name: (h.caregivers.find((c) => c.id === who.id) || {}).name, role: who.role } : null,
-      profile: { name: h.name, slots: h.slots, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, tzName: h.tzName || '', alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)), push: pushDiag(h, (x) => x.role === who.role && (x.id || null) === (who.id || null)), nextReminderAt: h.alarmAt || null },
+      profile: { name: h.name, slots: h.slots, doseQty: h.doseQty || {}, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, tzName: h.tzName || '', alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)), push: pushDiag(h, (x) => x.role === who.role && (x.id || null) === (who.id || null)), nextReminderAt: h.alarmAt || null },
       caregivers: who.role === 'patient' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, order: c.order, joined: !!c.tokenHash, status: c.tokenHash ? 'joined' : (c.invitedAt && now - c.invitedAt > INVITE_TTL_MS ? 'expired' : 'invited'), invitedAt: c.invitedAt || null, joinedAt: c.joinedAt || null, role: c.role || 'caregiver', phone: c.phone || '', alertsOn: (h.pushSubs || []).some((x) => x.id === c.id), push: pushDiag(h, (x) => x.id === c.id) })) : undefined,
       events: who.role === 'patient' ? (h.events || []).slice(-20) : undefined,
       careNumbers: who.role === 'caregiver' ? { patient: h.phone || '' } : undefined,
@@ -742,7 +758,7 @@ export class AlertHub {
       if (!name) return bad(400, 'name_required');
       const slots = Array.isArray(body.slots) ? cleanSlots(body.slots) : [];
       const token = rand(40);
-      h = { v: 1, pid: String(body.pid || ''), name, slots, phone: cleanPhone(body.phone), createdAt: now, createdDate: validDate(body.today, now) ? body.today : new Date(now).toISOString().slice(0, 10),
+      h = { v: 1, pid: String(body.pid || ''), name, slots, doseQty: cleanDoseQty(body.doseQty), phone: cleanPhone(body.phone), createdAt: now, createdDate: validDate(body.today, now) ? body.today : new Date(now).toISOString().slice(0, 10),
         tokenHash: await sha(token), caregivers: [], readings: [], doses: [], alert: null, nextCid: 1,
         accountType: body.accountType === 'provider' ? 'provider' : 'individual', org: cleanName(body.org, 60), tz: Number.isInteger(body.tz) && Math.abs(body.tz) <= 840 ? body.tz : 0, tzName: validTzName(body.tzName), tabletAlerts: true, events: [], pushStatus: {} };
       await this.state.storage.put('h', h);
@@ -827,8 +843,12 @@ export class AlertHub {
       case 'dose': {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         if (!DOSE_SLOTS.includes(body.slot) || !validDate(body.date, now)) { fail(400, 'bad_dose'); break; }
-        if (!h.doses.some((d) => d.date === body.date && d.slot === body.slot)) {
-          h.doses.push({ t: now, date: body.date, slot: body.slot });
+        const qty = body.qty === undefined || body.qty === null ? (cleanQty((h.doseQty || {})[body.slot]) || 1) : cleanQty(body.qty);
+        if (!qty) { fail(400, 'bad_dose'); break; }
+        const had = h.doses.find((d) => d.date === body.date && d.slot === body.slot);
+        if (had) { if (body.qty !== undefined && body.qty !== null) had.qty = qty; } // logging again can correct the amount
+        else {
+          h.doses.push({ t: now, date: body.date, slot: body.slot, qty });
           if (h.doses.length > 400) h.doses = h.doses.slice(-400);
         }
         break;
@@ -863,10 +883,7 @@ export class AlertHub {
           try {
             const r = await fetch('https://rtc.live.cloudflare.com/v1/turn/keys/' + encodeURIComponent(this.env.TURN_KEY_ID) + '/credentials/generate-ice-servers', {
               method: 'POST', headers: { Authorization: 'Bearer ' + this.env.TURN_API_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 7200 }) });
-            if (r.ok) { const j = await r.json(); const list = Array.isArray(j.iceServers) ? j.iceServers : (j.iceServers ? [j.iceServers] : []); // Cloudflare returns an array; older replies an object
-              const clean = list.map((x) => ({ ...x, urls: [].concat(x.urls || []).filter((u) => !/:53(\?|$)/.test(u)) })).filter((x) => x.urls.length && x.username && x.credential); // port 53 is blocked by browsers
-              if (clean.length) { servers = servers.concat(clean); relay = 'cloudflare'; } else console.error('turn: unexpected reply'); }
-            else console.error('turn http', r.status);
+            if (r.ok) { const j = await r.json(); if (Array.isArray(j.iceServers)) { servers = servers.concat(j.iceServers); relay = 'cloudflare'; } }
           } catch (e) { console.error('turn error:', e && e.message); }
         }
         if (this.env.TURN_URLS && this.env.TURN_USERNAME && this.env.TURN_CREDENTIAL) {
@@ -907,6 +924,7 @@ export class AlertHub {
         const name = cleanName(body.name);
         if (!name) { fail(400, 'name_required'); break; }
         const irole = body.role === 'clinician' ? 'clinician' : 'caregiver';
+        if (irole === 'caregiver' && !cleanPhone(body.phone)) { fail(400, 'phone_required'); break; } // the SMS and call fallback needs a number
         if (h.caregivers.filter((x) => (x.role || 'caregiver') === irole).length >= (irole === 'clinician' ? 3 : MAX_CAREGIVERS)) { fail(409, 'too_many'); break; }
         const secret = rand(6);
         const c = { id: 'c' + h.nextCid++, name, phone: cleanPhone(body.phone), role: irole, order: irole === 'caregiver' ? h.caregivers.filter((x) => (x.role || 'caregiver') === 'caregiver').length + 1 : 0, secretHash: await sha(secret), tokenHash: null, joinedAt: null, invitedAt: now };
@@ -918,19 +936,16 @@ export class AlertHub {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         const c = h.caregivers.find((x) => x.id === body.id);
         if (!c) { fail(404, 'no_caregiver'); break; }
+        // A caregiver who has joined can never be locked out by the person. Only an invite nobody has used yet can get a fresh code.
+        if (c.tokenHash) { fail(403, 'caregiver_protected'); break; }
         const secret = rand(6);
         c.secretHash = await sha(secret); c.tokenHash = null; c.joinedAt = null; c.invitedAt = now;
         h.pushSubs = (h.pushSubs || []).filter((x) => x.id !== c.id); // the old phone no longer belongs to this person
         extra.code = inviteCode(h.pid, secret); extra.caregiverId = c.id;
         break;
       }
-      case 'remove': {
-        if (!isPatient) { fail(403, 'patient_only'); break; }
-        const i = h.caregivers.findIndex((x) => x.id === body.id);
-        if (i < 0) { fail(404, 'no_caregiver'); break; }
-        const gone = h.caregivers[i].id; h.caregivers.splice(i, 1);
-        h.pushSubs = (h.pushSubs || []).filter((x) => x.id !== gone); // a removed caregiver must stop receiving alerts
-        h.caregivers.filter((x) => (x.role || 'caregiver') === 'caregiver').forEach((c, k) => { c.order = k + 1; });
+      case 'remove': { // by design nobody on the patient side can remove a caregiver or clinician: the person cannot switch off their own safety net
+        fail(403, 'caregiver_protected');
         break;
       }
       case 'profile': {
@@ -938,6 +953,7 @@ export class AlertHub {
         if (body.name !== undefined) { const n = cleanName(body.name); if (!n) { fail(400, 'name_required'); break; } h.name = n; }
         if (body.phone !== undefined) h.phone = cleanPhone(body.phone);
         if (Array.isArray(body.slots)) h.slots = cleanSlots(body.slots);
+        if (body.doseQty !== undefined) h.doseQty = cleanDoseQty(body.doseQty);
         if (Number.isInteger(body.tz) && Math.abs(body.tz) <= 840) h.tz = body.tz;
         if (body.tzName !== undefined) h.tzName = validTzName(body.tzName);
         if (typeof body.tabletAlerts === 'boolean') h.tabletAlerts = body.tabletAlerts;
