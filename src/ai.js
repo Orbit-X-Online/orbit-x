@@ -146,3 +146,32 @@ export async function explainDocWithAI(env, doc, facts) {
   if (!out.questions.length) out.questions = ['What do these results mean for me?', 'Is anything here something we should follow up on?', 'When should I have these checked again?'];
   return out;
 }
+
+/* ------------------------------------------------------------------ photo of a paper report -> text
+   Muse Spark Open is a vision-language model. This step ONLY copies the words in the photo. It does not interpret anything.
+   The person sees the copied text and checks it against the paper before it is analysed, and every later fact must quote it. */
+const PHOTO_SYSTEM = `You are a careful transcriber of photos of medical documents. Copy ALL the text you can see, line by line, exactly as written. Keep every number, unit, date, name and reference range exactly as printed. Keep table rows on one line, with cells separated by two spaces.
+Do NOT interpret, summarise, correct, translate, calculate or add anything. If a word or number cannot be read with certainty, write [unclear] in its place. If the picture contains no document text, reply with exactly NO_TEXT.
+Output only the copied text. No introduction, no markdown.`;
+export async function readPhotoWithAI(env, dataUrl) {
+  if (aiMode(env) === 'mock') return { ok: false, error: 'mock_no_vision' };
+  if (aiMode(env) !== 'live') return { ok: false, error: 'not_configured' };
+  const t0 = Date.now();
+  try {
+    const model = await resolveModel(env);
+    const out = await metaChat(env, { model, temperature: 0, maxTokens: 4000, timeoutMs: 60000, messages: [
+      { role: 'system', content: PHOTO_SYSTEM },
+      { role: 'user', content: [{ type: 'text', text: 'Copy the text in this photo.' }, { type: 'image_url', image_url: { url: dataUrl } }] },
+    ] });
+    let text = String(out || '').replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').replace(/\r\n/g, '\n').trim();
+    if (/^NO_TEXT\b/i.test(text)) text = '';
+    text = text.slice(0, 40000);
+    if (text.length < 20) return { ok: false, error: 'no_text_found', model, ms: Date.now() - t0 };
+    return { ok: true, text, model, ms: Date.now() - t0, unclear: (text.match(/\[unclear\]/gi) || []).length };
+  } catch (e) {
+    const m = String(e && e.message || '');
+    const st = e && e.status;
+    const vision = st !== 402 && st !== 401 && st !== 429 && st !== 504 && /image|vision|multimodal|multi-modal|modalit|content.*(string|type)|image_url/i.test(m);
+    return { ok: false, error: vision ? 'vision_unsupported' : reason(e), detail: m.slice(0, 160), ms: Date.now() - t0 };
+  }
+}
