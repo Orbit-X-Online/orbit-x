@@ -76,6 +76,15 @@ function cleanPhone(s) {
   return /^\+?[0-9]{7,15}$/.test(t) ? t : '';
 }
 function isEmergencyReading(sys, dia) { return sys >= HIGH_BP_SYS || dia >= HIGH_BP_DIA; }
+// WHO hypertension line (140/90) and ISH grade 2 (160/100). Readings from 140/90 up, short of an emergency, tell the caregivers.
+function bpTier(sys, dia) { return sys >= 160 || dia >= 100 ? 'High (grade 2)' : sys >= 140 || dia >= 90 ? 'High (grade 1)' : ''; }
+const HIGH_BP_GAP_MS = 3 * 3600000, FINAL_WARN_HOUR = 22; // at most one high-BP text per 3 h; last-chance dose text at 22:00 local
+function queueHighBp(h, sys, dia, now) {
+  const tier = bpTier(sys, dia); if (!tier) return;
+  if (h.lastHighBpAt && now - h.lastHighBpAt < HIGH_BP_GAP_MS) return; // do not text the family for every repeat measurement
+  h.lastHighBpAt = now; h.outbox = h.outbox || [];
+  h.outbox.push({ kind: 'high_bp', sys, dia, tier, t: now });
+}
 function validDate(s, now) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const t = Date.parse(s + 'T00:00:00Z');
@@ -98,7 +107,7 @@ const MISSED_HOUR = { morning: 11, afternoon: 16, evening: 21, night: 23 };  // 
 const PUSH_KIND = { // TTL = how long the push service may hold the message while the phone is off/offline
   emergency: { ttl: 120, urgency: 'high' }, escalation: { ttl: 120, urgency: 'high' }, unanswered: { ttl: 300, urgency: 'high' },
   cancel_notice: { ttl: 300, urgency: 'normal' }, handled_notice: { ttl: 300, urgency: 'normal' }, answered_notice: { ttl: 300, urgency: 'high' },
-  reminder: { ttl: 3600, urgency: 'normal' }, missed_dose: { ttl: 7200, urgency: 'normal' },
+  reminder: { ttl: 3600, urgency: 'normal' }, missed_dose: { ttl: 7200, urgency: 'normal' }, high_bp: { ttl: 3600, urgency: 'high' },
   test: { ttl: 60, urgency: 'high' }, ready: { ttl: 60, urgency: 'normal' },
 };
 const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /^android\.googleapis\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)push\.apple\.com$/, /(^|\.)notify\.windows\.com$/];
@@ -600,6 +609,28 @@ export class AlertHub {
     }
   }
 
+  // Text every caregiver who has a phone number. Every attempt is written to the alert log.
+  async smsCaregivers(h, text, now, kind) {
+    const list = (h.caregivers || []).filter((c) => c.phone && c.role !== 'clinician');
+    if (!list.length) return;
+    if (!smsConfigured(this.env)) { this.ev(h, now, kind, 'sms_not_configured', 'caregivers'); return; }
+    for (const c of list.slice(0, 6)) { const r = await sendSms(this.env, c.phone, text); this.ev(h, now, 'sms', r.state, c.id, r.http); }
+  }
+
+  async flushOutbox(h, now) {
+    const box = h.outbox || []; h.outbox = [];
+    for (const o of box.slice(0, 3)) {
+      if (o.kind !== 'high_bp' || !(h.caregivers || []).length) continue;
+      const name = h.name || 'Someone', rd = o.sys + '/' + o.dia;
+      h.notices = h.notices || [];
+      h.notices.push({ id: 'b' + now, t: now, kind: 'high_bp', text: name + ' measured ' + rd + ' (' + o.tier.toLowerCase() + ').' });
+      if (h.notices.length > 30) h.notices = h.notices.slice(-30);
+      const ehs = this.subsFor(h, (x) => x.role === 'caregiver');
+      await this.deliver(h, ehs, { title: 'Orbit-X: high blood pressure', body: name + ' measured ' + rd + '. Please check on them.', tag: 'orbit-bp', urgent: true }, now, 'high_bp', 'caregivers');
+      await this.smsCaregivers(h, 'ORBIT-X: ' + name + ' measured blood pressure ' + rd + ', ' + o.tier.toLowerCase() + '. Please check on them. If they feel unwell, call 112.', now, 'high_bp');
+    }
+  }
+
   // Looks at the alert and the tablet schedule, tells the right phones, and sets the next wake-up time.
   async afterChange(h, now) {
     try {
@@ -621,6 +652,7 @@ export class AlertHub {
           if (pe.length) await this.deliver(h, pe, { title: 'Orbit-X: ' + who2 + ' answered', body: 'Open Orbit-X to talk to ' + who2 + ' now.', tag: 'orbit-alert', urgent: true }, now, 'answered_notice', 'patient');
         }
       }
+      try { await this.flushOutbox(h, now); } catch (e) { console.error('outbox error:', e && e.message); }
       await this.doseCheck(h, now);
       await this.schedule(h, now);
     } catch (e) { console.error('afterChange error:', e && e.message); }
@@ -655,9 +687,21 @@ export class AlertHub {
               if (h.notices.length > 30) h.notices = h.notices.slice(-30);
               const ehs = this.subsFor(h, (x) => x.role === 'caregiver');
               await this.deliver(h, ehs, { title: 'Orbit-X: tablet not logged', body: name + ' has not logged the ' + slot + ' tablet yet. A call or message may help.', tag: 'orbit-dose-' + slot }, now, 'missed_dose', 'caregivers');
+              await this.smsCaregivers(h, 'ORBIT-X: ' + name + ' has not logged the ' + slot + ' tablet yet. Please call or check on them so it is not missed today.', now, 'missed_dose');
             } else this.ev(h, now, 'missed_dose', 'window_passed', 'caregivers');
           }
         }
+      }
+    }
+    // Last chance: at 22:00 local, if a tablet whose heads-up already went out is still not logged, text once more before the day ends.
+    if (h.tabletAlerts !== false && joinedChain(h).length) {
+      const fk = 'f|' + lp.date, fAt = localTime(lp.date, FINAL_WARN_HOUR, tz, tzn);
+      const open = slots.filter((sl) => { const m = localTime(lp.date, MISSED_HOUR[sl], tz, tzn); return !logged.has(lp.date + '|' + sl) && now >= m && m > h.createdAt; });
+      if (now >= fAt && now < fAt + 2 * 3600000 && open.length && !h.sent[fk]) {
+        h.sent[fk] = 1;
+        const ehs = this.subsFor(h, (x) => x.role === 'caregiver');
+        await this.deliver(h, ehs, { title: 'Orbit-X: last chance today', body: name + ' still has not logged the ' + open.join(' and ') + ' tablet. Today ends soon.', tag: 'orbit-dose-last' }, now, 'missed_dose', 'caregivers');
+        await this.smsCaregivers(h, 'ORBIT-X: today is nearly over and ' + name + ' has still not logged the ' + open.join(' and ') + ' tablet. Please call them now.', now, 'missed_dose');
       }
     }
     Object.keys(h.sent).forEach((k) => { const d = k.split('|')[1]; if (d && d < dayShift(lp.date, -3)) delete h.sent[k]; });
@@ -670,7 +714,7 @@ export class AlertHub {
     if (a && a.status === 'ringing') times.push(a.ringStart + this.escalateMs + 300);
     if ((h.slots || []).length) {
       const tz = h.tz || 0, tzn = h.tzName || '', lp = localParts(now, tz, tzn);
-      for (const off of [0, 1, 2]) for (const slot of h.slots) for (const hr of [REMIND_HOUR[slot], MISSED_HOUR[slot]]) { const t = localTime(dayShift(lp.date, off), hr, tz, tzn); if (t > now + 1000) times.push(t); }
+      for (const off of [0, 1, 2]) for (const slot of h.slots) for (const hr of [REMIND_HOUR[slot], MISSED_HOUR[slot], FINAL_WARN_HOUR]) { const t = localTime(dayShift(lp.date, off), hr, tz, tzn); if (t > now + 1000) times.push(t); }
     }
     if (!times.length) { if (h.alarmAt) { h.alarmAt = 0; try { await this.state.storage.deleteAlarm(); } catch (e) { /* none */ } } return; }
     const next = Math.max(now + 1000, Math.min(...times));
@@ -836,6 +880,7 @@ export class AlertHub {
         if (h.readings.length > 400) h.readings = h.readings.slice(-400);
         const emergency = isEmergencyReading(sys, dia);
         if (emergency) startAlert(h, { sys, dia, why: 'High reading' }, now);
+        else queueHighBp(h, sys, dia, now);
         this.runRules(h, now);
         extra.emergency = emergency;
         break;
@@ -1073,6 +1118,7 @@ export class AlertHub {
           h.readings.push({ t: now, date, sys, dia });
           if (h.readings.length > 400) h.readings = h.readings.slice(-400);
           if (isEmergencyReading(sys, dia)) startAlert(h, { sys, dia, why: 'High reading' }, now);
+          else queueHighBp(h, sys, dia, now);
           this.runRules(h, now);
         } else if (type === 'symptom') {
           const text = cleanName(body.text, 200);
