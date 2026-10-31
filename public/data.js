@@ -97,15 +97,20 @@
   function listDates(arr) { return arr.map(fmtDate).join(', '); }
   function slotWord(slot) { return ['morning', 'afternoon', 'evening', 'night'].indexOf(slot) > -1 ? slot : 'evening'; }
 
-  /* Reading bands. WHO (2021): hypertension is 140/90 or higher, confirmed on two different days.
-     WHO publishes no emergency number (its guideline excludes hypertensive crisis). 180/110 or higher is the
-     "severe" line used by national guidelines, so that is where the fixed emergency rule starts.
-     A band describes ONE reading. It is never a diagnosis. */
+  /* Reading bands. The line that matters is WHO (2021): hypertension is 140/90 or higher, confirmed on two
+     different days. The finer steps follow the ISH 2020 global guideline, which is built for use in Africa and
+     Asia as well as Europe: normal below 130/85, high-normal 130-139 / 85-89, grade 1 at 140/90, grade 2 at 160/100.
+     WHO publishes no emergency number, so 180/110 or higher, the "severe" line used by national guidelines, is
+     where the fixed emergency rule starts. Below 90/60 is flagged as low. The HIGHER of the two numbers decides.
+     A band describes ONE reading. It is never a diagnosis.
+     code/label keep their old meaning for the insight engine; name/tone/note are for the screens. */
   function bpBand(sys, dia) {
-    if (sys >= 180 || dia >= 110) return { code: 'severe', label: 'very high (180/110 or more)' };
-    if (sys >= 160 || dia >= 100) return { code: 'high2', label: 'high (160/100 or more)' };
-    if (sys >= 140 || dia >= 90) return { code: 'high1', label: 'at or above 140/90' };
-    return { code: 'ok', label: 'below 140/90' };
+    if (sys >= 180 || dia >= 110) return { code: 'severe', label: 'very high (180/110 or more)', name: 'Very high', tone: 'bad', note: 'Very high. If you have chest pain, trouble breathing, weakness, confusion or a severe headache, call 112 now.' };
+    if (sys >= 160 || dia >= 100) return { code: 'high2', label: 'high (160/100 or more)', name: 'High (grade 2)', tone: 'bad', note: 'High. Please tell your doctor soon.' };
+    if (sys >= 140 || dia >= 90) return { code: 'high1', label: 'at or above 140/90', name: 'High (grade 1)', tone: 'warn', note: 'High. One reading is not a diagnosis. If it stays there, please tell your doctor.' };
+    if (sys < 90 || dia < 60) return { code: 'ok', label: 'below 140/90', name: 'Low', tone: 'low', low: true, note: 'Lower than the usual range. If you feel faint, dizzy or unwell, tell your doctor or call 112.' };
+    if (sys >= 130 || dia >= 85) return { code: 'ok', label: 'below 140/90', name: 'Slightly raised', tone: 'watch', note: 'A little above normal, but below the high line.' };
+    return { code: 'ok', label: 'below 140/90', name: 'Normal', tone: 'ok', note: 'In the normal range.' };
   }
   function slotList(list) {
     var seen = [], out = [];
