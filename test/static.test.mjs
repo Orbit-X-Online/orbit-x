@@ -23,4 +23,6 @@ const idx = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
 assert.match(idx, /does not prove|Step 1 of 2/); assert.match(idx, /tzName/); ok('index page distinguishes push acceptance from device display and sends the time-zone name');
 for (const f of pages) { const s = fs.readFileSync(path.join(dir, f), 'utf8'); assert.ok(!/(sk-[A-Za-z0-9]{20,}|BEGIN (RSA |EC )?PRIVATE KEY|Bearer [A-Za-z0-9]{30,})/.test(s), f + ' looks like it contains a secret'); }
 ok('no secret-looking strings in front-end files');
+assert.ok(!fs.existsSync(new URL('../index.html', import.meta.url)), 'a stray index.html sits in the project root. The app page must live ONLY at public/index.html');
+assert.match(idx, /Trend and why Orbit said this/); assert.match(idx, /data-rm/); assert.match(idx, /class="cg2"/); ok('public/index.html is the current version (History trend graph, caregiver Remove, new Family cards)');
 console.log('ALL STATIC FRONT-END TESTS PASSED (' + n + ')');
