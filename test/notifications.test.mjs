@@ -204,7 +204,9 @@ pushes.length = 0; await call('POST', HB + 'bp', { sys: 124, dia: 80, date: '202
 await call('POST', HB + 'bp', { sys: 148, dia: 94, date: '2026-10-30' }, hb.token);
 assert.equal(smsTexts().length, 1); assert.match(smsTexts()[0], /148\/94.*high \(grade 1\)/i); ok('a 140/90+ reading texts the caregiver automatically with the number');
 await call('POST', HB + 'bp', { sys: 152, dia: 96, date: '2026-10-30' }, hb.token); assert.equal(smsTexts().length, 1); ok('repeat high readings within 3 hours do not spam the caregiver');
-clock = at(30, 6) + 4 * 3600000; await call('POST', HB + 'bp', { sys: 150, dia: 95, date: '2026-10-30' }, hb.token); assert.equal(smsTexts().length, 2); ok('a later high reading texts again');
+await call('POST', HB + 'bp', { sys: 85, dia: 55, date: '2026-10-30' }, hb.token);
+assert.equal(smsTexts().length, 2); assert.match(smsTexts()[1], /85\/55, low/); ok('a LOW reading (below 90/60) texts the caregiver too, even right after a high one');
+clock = at(30, 6) + 4 * 3600000; await call('POST', HB + 'bp', { sys: 150, dia: 95, date: '2026-10-30' }, hb.token); assert.equal(smsTexts().length, 3); ok('a later high reading texts again');
 pushes.length = 0; clock = at(30, 11, 5); await alarmNow(hb.pid);
 assert.ok(smsTexts().some((t) => /not logged the morning tablet/.test(t))); ok('a missed tablet texts the caregiver at the heads-up time');
 pushes.length = 0; clock = at(30, 22, 5); await alarmNow(hb.pid);
@@ -213,6 +215,20 @@ pushes.length = 0; await alarmNow(hb.pid); assert.equal(smsTexts().length, 0); o
 clock = at(31, 6); await call('POST', HB + 'dose', { slot: 'morning', date: '2026-10-31', qty: 1 }, hb.token); pushes.length = 0; clock = at(31, 22, 5); await alarmNow(hb.pid);
 assert.equal(smsTexts().length, 0); ok('no missed-tablet texts when the tablet was logged');
 delete env.AT_USERNAME; delete env.AT_API_KEY;
+
+// ---------- J3. caregivers can remove caregivers; the patient still cannot
+env.AT_USERNAME = undefined; delete env.AT_USERNAME;
+clock = at(31, 9);
+const rm = await call('POST', '/api/create', { name: 'Ada', slots: [], today: '2026-10-31', tz: 0, accountType: 'individual' });
+const RM = '/api/h/' + rm.pid + '/'; const toks = [];
+for (const nm of ['Ann', 'Bob', 'Cy']) { r = await call('POST', RM + 'invite', { name: nm, phone: '08011112222' }, rm.token); const jj = await call('POST', '/api/join', { code: r.code }); assert.ok(jj.ok); toks.push(jj.token); }
+r = await call('GET', RM + 'state', null, toks[0]); assert.equal(r.team.length, 3); assert.ok(r.team[0].you); ok('a caregiver sees the care team');
+r = await call('POST', RM + 'remove', { id: 'c2' }, rm.token); assert.equal(r._s, 403); ok('the patient still cannot remove anyone');
+r = await call('POST', RM + 'remove', { id: 'c1' }, toks[0]); assert.equal(r._s, 400); assert.equal(r.error, 'cannot_remove_self'); ok('a caregiver cannot remove themselves this way');
+r = await call('POST', RM + 'remove', { id: 'c2' }, toks[0]); assert.equal(r._s, 200); assert.deepEqual(r.team.map((x) => x.name + x.order), ['Ann1', 'Cy2']); ok('a caregiver can remove another caregiver; order closes up');
+r = await call('GET', RM + 'state', null, toks[1]); assert.equal(r._s, 401); ok('the removed caregiver is signed out');
+await call('POST', RM + 'sos', { why: 'x' }, rm.token);
+r = await call('POST', RM + 'remove', { id: 'c3' }, toks[0]); assert.equal(r._s, 409); assert.equal(r.error, 'alert_active'); ok('nobody can be removed during an active alert');
 
 // ---------- K. invalid input
 r = await call('POST', Q + 'bp', { sys: 300, dia: 400, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
