@@ -75,19 +75,35 @@ window.OXRead = (function () {
       });
     });
   }
-  function read(file, progress) {
+  // Shrink a photo to a small JPEG so it uploads fast on mobile data (about 150-500 KB).
+  function jpegOf(c) { var q = 0.72, u = c.toDataURL('image/jpeg', q); while (u.length > 1400000 && q > 0.3) { q -= 0.12; u = c.toDataURL('image/jpeg', q); } return u; }
+  function read(file, progress, opts) {
+    read.last = null;
     var name = (file.name || '').toLowerCase(), type = file.type || '';
     if (file.size > 15 * 1024 * 1024) return Promise.reject(new Error('That file is too large (limit 15 MB).'));
     var p;
     if (type === 'application/pdf' || /\.pdf$/.test(name)) p = readPdf(file, progress);
-    else if (/^image\//.test(type) || /\.(png|jpe?g|webp|bmp|gif|heic)$/.test(name)) { progress && progress('Opening the picture...'); p = bitmapCanvas(file, 2200).then(function (c) { return ocr([c], progress); }); }
+    else if (/^image\//.test(type) || /\.(png|jpe?g|webp|bmp|gif|heic)$/.test(name)) {
+      progress && progress('Opening the picture...');
+      var viaAI = false, note = '';
+      var onPhone = function () { return bitmapCanvas(file, 2200).then(function (c) { return ocr([c], progress); }); };
+      p = (opts && opts.ai)
+        ? bitmapCanvas(file, 1600).then(function (c) {
+            progress && progress('The AI is reading the photo...');
+            return opts.ai(jpegOf(c)).then(function (t) { viaAI = true; return t; }, function (e) {
+              note = (e && e.message) || ''; progress && progress('The AI could not read this photo, so it is being read on this phone instead...'); return onPhone();
+            });
+          })
+        : onPhone();
+      p = p.then(function (t) { read.last = { via: viaAI ? 'ai' : 'phone', note: note }; return t; });
+    }
     else if (/\.docx$/.test(name) || type.indexOf('wordprocessingml') > -1) { progress && progress('Opening the Word file...'); p = Promise.all([load(MAM), readAs(file, 'buf')]).then(function (r) { return mammoth.extractRawText({ arrayBuffer: r[1] }); }).then(function (r) { return r.value; }); }
     else if (/\.doc$/.test(name)) return Promise.reject(new Error('Old .doc files are not supported. Save it as .docx or PDF, or paste the text.'));
     else p = readAs(file, 'text');
     return p.then(function (t) {
       t = tidy(t); var cut = t.length > MAXCHARS; if (cut) t = t.slice(0, MAXCHARS);
       if (t.length < 20) throw new Error('I could not find readable text in that file. Try a clearer photo, or paste the text instead.');
-      return { text: t, truncated: cut };
+      return { text: t, truncated: cut, via: (read.last && read.last.via) || 'file', note: (read.last && read.last.note) || '' };
     });
   }
   return { read: read };
