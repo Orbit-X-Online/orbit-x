@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node test/smoke.mjs && node test/household.test.mjs && node test/notifications.test.mjs && node test/static.test.mjs",
+    "test": "node test/smoke.mjs && node test/household.test.mjs && node test/notifications.test.mjs && node test/e2e.test.mjs && node test/static.test.mjs",
     "check": "node --check src/worker.js && node --check src/meta.js && node --check src/ai.js && node --check src/connect.js && node --check src/fhir.js && node --check src/intel.js && node --check public/sw.js && node --check public/call.js && node --check public/radio.js && node --check public/ox.js && node --check public/data.js && node --check public/docread.js"
   },
   "devDependencies": {
