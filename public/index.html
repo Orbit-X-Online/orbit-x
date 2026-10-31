@@ -99,6 +99,16 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 .tag.ok{color:#86EFAC;border-color:#1b6b3a;background:#0b2417}.tag.warn{color:#FCD34D;border-color:#7a5a12;background:#241b06}.tag.bad{color:#FCA5A5;border-color:#7f2a2a;background:#2a0d0d}
 @media (prefers-reduced-motion:reduce){details.acc>summary::after{transition:none}}
 
+.slotrow{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px}
+.slotl{display:flex;align-items:center;gap:10px;font-size:15.5px;flex:1;min-width:0}.slotl input{width:20px;height:20px;accent-color:#38BDF8;flex:none}
+.qty{display:inline-flex;align-items:center;gap:8px;flex:none}
+.qty .qb{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:#0B1226;color:#E6F0FF;font-size:22px;line-height:1;cursor:pointer;padding:0}
+.qty .qb:active{background:#122350}
+.qty output{min-width:24px;text-align:center;font-size:19px;font-weight:700}
+.qty .ql{font-size:13px;color:var(--mut);min-width:54px}
+.dosec .dh{display:flex;justify-content:space-between;align-items:center;gap:10px}.dosec .dh b{font-size:17px}
+.dosec .dq{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
+.dosec .acts button.pri{background:#2563EB;border-color:#2563EB;color:#fff;font-weight:600}
 :focus-visible{outline:3px solid #38BDF8;outline-offset:2px}
 </style>
 </head>
@@ -197,21 +207,29 @@ function welcome(msg){
   '<div class="small center" style="margin-top:10px">Built with Muse Spark Open. Orbit-X is not a medical device.</div>';
   $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = function(){ codeScreen('restore'); };
 }
+/* ---------- tablets per time: a small stepper used when setting times and when logging a dose ---------- */
+var SLOT_ROWS = [['morning', 'Morning', 'sm'], ['afternoon', 'Afternoon', 'sa'], ['evening', 'Evening', 'se'], ['night', 'Night', 'sg']];
+function qtyCtl(id, val){ val = Math.max(1, Math.min(10, +val || 1)); return '<span class="qty" id="' + id + '"><button type="button" class="qb" data-d="-1" aria-label="One tablet fewer">&minus;</button><output aria-live="polite">' + val + '</output><button type="button" class="qb" data-d="1" aria-label="One tablet more">+</button><span class="ql">' + (val === 1 ? 'tablet' : 'tablets') + '</span></span>'; }
+function getQty(id){ var o = $(id) && $(id).querySelector('output'); var n = o ? parseInt(o.textContent, 10) : 1; return n >= 1 && n <= 10 ? n : 1; }
+function bindQty(root){ root.querySelectorAll('.qty').forEach(function(q){ q.querySelectorAll('.qb').forEach(function(b){ b.onclick = function(){ var o = q.querySelector('output'), n = Math.max(1, Math.min(10, (parseInt(o.textContent, 10) || 1) + (+b.getAttribute('data-d')))); o.textContent = n; q.querySelector('.ql').textContent = n === 1 ? 'tablet' : 'tablets'; }; }); }); }
+function slotRows(sel, usual){ return SLOT_ROWS.map(function(r){ return '<div class="slotrow"><label class="slotl"><input type="checkbox" id="' + r[2] + '"' + (sel.indexOf(r[0]) > -1 ? ' checked' : '') + '> ' + r[1] + '</label>' + qtyCtl('q_' + r[0], (usual || {})[r[0]] || 1) + '</div>'; }).join(''); }
+function readSlots(){ var slots = [], dq = {}; SLOT_ROWS.forEach(function(r){ if ($(r[2]).checked) { slots.push(r[0]); dq[r[0]] = getQty('q_' + r[0]); } }); return { slots: slots, doseQty: dq }; }
+function parseQty(t){ var W = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }; var m = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:tablets?|pills?|capsules?)\b/i.exec(String(t || '')); if (!m) return 0; var n = isNaN(m[1]) ? W[m[1].toLowerCase()] : +m[1]; return n >= 1 && n <= 10 ? n : 0; }
 function onboard(){
   app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><h2 style="font-weight:500;font-size:20px;margin:18px 0 0">Let us set you up</h2>' +
   '<label class="l" for="nm">What should I call you?</label><input class="field" id="nm" maxlength="40" autocomplete="given-name" placeholder="Your name">' +
   '<label class="l" for="ph">Your phone number (optional)</label><input class="field" id="ph" type="tel" maxlength="20" autocomplete="tel" placeholder="+234 801 234 5678"><div class="small" style="margin-top:4px">So your family can call you straight from an alert.</div>' +
-  '<label class="l">When do you take regular medicine?</label>' +
-  '<label class="check"><input type="checkbox" id="sm"> Morning</label><label class="check"><input type="checkbox" id="sa"> Afternoon</label><label class="check"><input type="checkbox" id="se"> Evening</label><label class="check"><input type="checkbox" id="sg"> Night</label>' +
-  '<div class="small" style="margin-top:6px">Leave all empty if you do not take regular medicine. I will remind you at these times. You can change this later.</div>' +
+  '<label class="l">When do you take regular medicine, and how many tablets?</label>' + slotRows([], {}) +
+  '<div class="small" style="margin-top:6px">Tick each time you take medicine and set how many tablets you usually take. Leave all unticked if you take no regular medicine. I will remind you at these times. You can change this later.</div>' +
   '<div class="small" style="margin-top:14px">Your readings stay private to you and the family members you invite. Orbit-X is not a doctor and does not give medical advice. If you feel very unwell, call 112.</div>' +
   '<div class="err" id="er"></div><button class="btn" id="st">Start</button>';
+  bindQty(app);
   $('bk').onclick = function(){ welcome(); };
   $('st').onclick = function(){
     var name = $('nm').value.trim(); if (!name) { $('er').textContent = 'Please tell me your name.'; return; }
-    var slots = []; if ($('sm').checked) slots.push('morning'); if ($('sa').checked) slots.push('afternoon'); if ($('se').checked) slots.push('evening'); if ($('sg').checked) slots.push('night');
+    var rs = readSlots(), slots = rs.slots;
     $('st').disabled = true; $('er').textContent = '';
-    api('POST', '/api/create', { name: name, slots: slots, phone: $('ph').value, today: todayStr(), tz: tzNow(), tzName: tzName(), accountType: 'individual' }).then(function(j){
+    api('POST', '/api/create', { name: name, slots: slots, doseQty: rs.doseQty, phone: $('ph').value, today: todayStr(), tz: tzNow(), tzName: tzName(), accountType: 'individual' }).then(function(j){
       if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
       sess = { role: 'patient', pid: j.pid, token: j.token, firstRun: true, accountType: 'individual' }; saveSession(sess); location.href = '/?guardian=1';
     });
@@ -442,7 +460,7 @@ function handle(text){
   if (pending && cmd.type === 'no') { pending = null; say('Okay, I did not save it. Please say it again.'); return; }
   if (cmd.type === 'log_bp') { pending = { sys: cmd.sys, dia: cmd.dia }; say('I heard ' + cmd.sys + ' over ' + cmd.dia + '. Is that right?'); return; }
   if (/log bp/i.test(text)) { say('Please say or type your reading, like 150 over 95.'); return; }
-  if (cmd.type === 'log_med') return saveDose();
+  if (cmd.type === 'log_med') return saveDose(parseQty(text));
   if (cmd.type === 'missed_med') { say('Thank you for telling me. Please take it when you can, as your doctor told you. I will not log it until you do.'); return; }
   if (cmd.type === 'explain') return explain();
   if (SYMP.test(text) && cmd.type !== 'log_bp' && cmd.type !== 'log_med') {
@@ -569,37 +587,40 @@ function saveBP(sys, dia, src){
     say('Saved ' + sys + ' over ' + dia + '. ' + (b.code !== 'ok' ? 'That is ' + b.label + '. One reading is not a diagnosis. If it stays there, please tell your doctor.' : a.baseline && sys >= a.baseline + D.HIGH_MARGIN ? 'That is higher than your usual. I will keep watching with you.' : a.baseline ? 'That is close to your usual.' : a.sentence));
   });
 }
-function saveDose(){
+function saveDose(hint){
   var slots = st.profile.slots;
   if (!slots.length) { say('You told me you do not take regular medicine. You can add medicine times in Settings.'); return; }
   // Re-read the server first so a new day always starts fresh and nothing stale is shown.
-  hApi('state').then(function(j){ take(j); refreshCards(); openDoseSheet(); });
+  hApi('state').then(function(j){ take(j); refreshCards(); openDoseSheet(hint); });
 }
-function openDoseSheet(){
-  var slots = st.profile.slots, t = todayStr(), logged = {};
+function openDoseSheet(hint){
+  var slots = st.profile.slots, t = todayStr(), logged = {}, usual = st.profile.doseQty || {};
   st.doses.forEach(function(d){ if (d.date === t) logged[d.slot] = d; });
-  if (slots.length === 1 && !logged[slots[0]]) { logDose(slots[0]); return; }
   var nice = new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
   var cap = function(x){ return x.charAt(0).toUpperCase() + x.slice(1); };
   $('evo').innerHTML = '<h2>Today\'s tablets</h2><div class="small" style="margin-bottom:10px">' + esc(nice) + '. Each day starts fresh.</div>' +
     slots.map(function(sl){
-      return logged[sl]
-        ? '<div class="cg"><b>' + cap(sl) + '</b><div class="small">Taken today at ' + clock(logged[sl].t) + '</div><div class="acts"><button data-un="' + sl + '">Logged by mistake? Undo</button></div></div>'
-        : '<button class="btn" data-sl="' + sl + '">I took my ' + sl + ' tablet</button>';
+      var L = logged[sl], q = L ? (L.qty || 1) : (hint || usual[sl] || 1);
+      return '<div class="cg dosec"><div class="dh"><b>' + cap(sl) + '</b>' + (L ? '<span class="tag ok">Taken ' + clock(L.t) + '</span>' : '<span class="tag warn">Not logged</span>') + '</div>' +
+        '<div class="dq"><span class="small">How many tablets?</span>' + qtyCtl('dq_' + sl, q) + '</div>' +
+        '<div class="acts"><button class="pri" data-sl="' + sl + '">' + (L ? 'Update amount' : 'I took it') + '</button>' + (L ? '<button data-un="' + sl + '">Undo</button>' : '') + '</div></div>';
     }).join('') +
-    '<div class="small" style="margin-top:12px">I only record that you took it. I never record or suggest an amount. Follow what your doctor or pharmacist told you.</div><button class="btn ghost" id="evb">Close</button>';
+    '<div class="small" style="margin-top:12px">Record the number of tablets you actually took, as your doctor or pharmacist told you. Orbit-X never suggests or changes an amount.</div><button class="btn ghost" id="evb">Close</button>';
   $('evo').classList.add('on'); $('evb').onclick = function(){ $('evo').classList.remove('on'); };
-  $('evo').querySelectorAll('[data-sl]').forEach(function(b){ b.onclick = function(){ $('evo').classList.remove('on'); logDose(b.getAttribute('data-sl')); }; });
+  bindQty($('evo'));
+  $('evo').querySelectorAll('[data-sl]').forEach(function(b){ b.onclick = function(){ var sl = b.getAttribute('data-sl'); $('evo').classList.remove('on'); logDose(sl, getQty('dq_' + sl)); }; });
   $('evo').querySelectorAll('[data-un]').forEach(function(b){ b.onclick = function(){
     var sl = b.getAttribute('data-un'); b.disabled = true;
-    hApi('undose', { slot: sl, date: t }).then(function(j){ if (take(j)) { refreshCards(); openDoseSheet(); say('Okay. I removed today\'s ' + sl + ' tablet from your record.'); } else { b.disabled = false; say('I could not undo that. Please try again.'); } });
+    hApi('undose', { slot: sl, date: t }).then(function(j){ if (take(j)) { refreshCards(); openDoseSheet(); say('Okay. I removed today\'s ' + sl + ' dose from your record.'); } else { b.disabled = false; say('I could not undo that. Please try again.'); } });
   }; });
 }
-function logDose(slot){
-  hQ('dose', { slot: slot, date: todayStr() }).then(function(j){
-    if (j && j.queued) { st.doses.push({ t: Date.now(), date: todayStr(), slot: slot }); refreshCards(); say('No internet. I saved your ' + slotName(slot) + ' tablet on this phone and will send it when signal returns.'); return; }
+function tabletsText(q){ return q + (q === 1 ? ' tablet' : ' tablets'); }
+function logDose(slot, qty){
+  qty = qty >= 1 && qty <= 10 ? qty : ((st.profile.doseQty || {})[slot] || 1);
+  hQ('dose', { slot: slot, date: todayStr(), qty: qty }).then(function(j){
+    if (j && j.queued) { st.doses = st.doses.filter(function(d){ return !(d.date === todayStr() && d.slot === slot); }); st.doses.push({ t: Date.now(), date: todayStr(), slot: slot, qty: qty }); refreshCards(); say('No internet. I saved ' + tabletsText(qty) + ' for your ' + slotName(slot) + ' dose on this phone and will send it when signal returns.'); return; }
     if (!take(j)) { say('I could not save that. Please check your internet and try again.'); return; }
-    refreshCards(); say('Good. I have noted that you took your ' + slotName(slot) + ' tablet. I only keep a record that you took it, never an amount.');
+    refreshCards(); say('Good. I noted ' + tabletsText(qty) + ' for your ' + slotName(slot) + ' dose.');
   });
 }
 function withTimeout(p, ms){ return Promise.race([p, new Promise(function(res){ setTimeout(function(){ res(null); }, ms); })]); }
@@ -655,9 +676,9 @@ function showHistory(){
   var empty = function(t){ return '<div class="small" style="padding:6px 0">' + esc(t) + '</div>'; };
   var rs = (st.readings || []).slice().sort(function(x, y){ return (y.t || 0) - (x.t || 0); });
   var bp = rs.length ? rs.map(function(r){ var b = bpBand(r.sys, r.dia); return '<div class="hrow"><div><b class="hv">' + r.sys + '/' + r.dia + '</b><span class="small"> mmHg</span><div class="small">' + fmtLong(r.date) + (r.t ? ' &middot; ' + clock(r.t) : '') + (r.src === 'bluetooth' ? ' &middot; cuff' : '') + '</div></div><span class="tag ' + b[1] + '">' + b[0] + '</span></div>'; }).join('') : empty('No readings yet. Tap Log BP to add your first one.');
-  var byDay = {}; (st.doses || []).forEach(function(d){ (byDay[d.date] = byDay[d.date] || []).push(d.slot); });
+  var byDay = {}; (st.doses || []).forEach(function(d){ (byDay[d.date] = byDay[d.date] || []).push({ slot: d.slot, qty: d.qty || 1 }); });
   var days = Object.keys(byDay).sort().reverse();
-  var tabs = days.length ? days.map(function(dt){ return '<div class="hrow"><div><b>' + fmtLong(dt) + '</b><div class="small">Taken: ' + byDay[dt].map(slotName).join(', ') + '</div></div><span class="tag ok">Logged</span></div>'; }).join('') : empty(st.profile.slots.length ? 'No tablets logged yet.' : 'You have not set any medicine times. You can add them in Settings.');
+  var tabs = days.length ? days.map(function(dt){ return '<div class="hrow"><div><b>' + fmtLong(dt) + '</b><div class="small">' + byDay[dt].map(function(x){ return esc(slotName(x.slot)) + ': ' + tabletsText(x.qty); }).join(' &middot; ') + '</div></div><span class="tag ok">Logged</span></div>'; }).join('') : empty(st.profile.slots.length ? 'No tablets logged yet.' : 'You have not set any medicine times. You can add them in Settings.');
   var miss = a.missed.length ? a.missed.slice().reverse().map(function(m){ return '<div class="hrow"><div><b>' + fmtLong(m.date) + '</b><div class="small">' + esc(slotName(m.slot)) + ' tablet not logged</div></div><span class="tag warn">Not logged</span></div>'; }).join('') : empty(st.profile.slots.length ? 'Nothing missed in the last 7 days.' : 'No medicine times set.');
   var sy = (st.symptoms || []).slice().reverse();
   var notes = sy.length ? sy.map(function(n){ return '<div class="hrow"><div><b>' + esc(n.text) + '</b><div class="small">' + (n.t ? fmtLong(new Date(n.t).getFullYear() + '-' + (new Date(n.t).getMonth() + 1) + '-' + new Date(n.t).getDate()) + ' &middot; ' + clock(n.t) : '') + '</div></div></div>'; }).join('') : empty('Nothing noted. If you tell Orbit how you feel, it is kept here for your care team.');
@@ -676,27 +697,27 @@ function showHistory(){
 function showFamily(){
   var o = $('fmo');
   var list = st.caregivers.length ? st.caregivers.map(function(c){
-    return '<div class="cg"><b>' + (c.role === 'clinician' ? 'Dr ' : c.order + '. ') + esc(c.name) + '</b><div class="st ' + (c.joined ? 'ok' : '') + '">' + (c.role === 'clinician' ? (c.joined ? 'Doctor. Linked. Writes your alert rules. Does not get rung' : (c.status === 'expired' ? 'Doctor. Invite expired. Tap New invite' : 'Doctor. Waiting to join')) : (c.joined ? 'Linked. Will be called' + (c.order === 1 ? ' first' : ' if the one before does not answer') + (c.alertsOn ? '. Phone alerts ON' : '. Phone alerts not on yet (they must tap Arm this phone)') : (c.status === 'expired' ? 'Invite expired after 7 days. Tap New invite' : 'Invited. Waiting for them to open the link'))) + '</div>' + (c.joined ? '<div class="small">' + esc(pushLine(c.push)) + '</div>' : '') + '<div class="acts"><button data-inv="' + esc(c.id) + '">' + (c.joined || c.status === 'expired' ? 'New invite' : 'Show invite') + '</button><button data-rm="' + esc(c.id) + '">Remove</button></div></div>';
+    return '<div class="cg"><b>' + (c.role === 'clinician' ? 'Dr ' : c.order + '. ') + esc(c.name) + '</b><div class="st ' + (c.joined ? 'ok' : '') + '">' + (c.role === 'clinician' ? (c.joined ? 'Doctor. Linked. Writes your alert rules. Does not get rung' : (c.status === 'expired' ? 'Doctor. Invite expired. Tap New code' : 'Doctor. Waiting to join')) : (c.joined ? 'Linked. Will be called' + (c.order === 1 ? ' first' : ' if the one before does not answer') + (c.alertsOn ? '. Phone alerts ON' : '. Phone alerts not on yet (they must tap Arm this phone)') : (c.status === 'expired' ? 'Invite expired after 7 days. Tap New code' : 'Invited. Waiting for them to open the link'))) + '</div>' + (c.joined ? '<div class="small">' + esc(pushLine(c.push)) + '</div>' : '') + (c.joined ? '' : '<div class="acts"><button data-inv="' + esc(c.id) + '">' + (c.status === 'expired' ? 'New code' : 'Show invite') + '</button></div>') + '</div>';
   }).join('') : '<div class="small" style="margin-top:10px">No one yet. Add someone who should be alerted if you need help, like a child or a neighbour.</div>';
-  var EVL = { emergency: 'Emergency alert', escalation: 'Escalated to next person', unanswered: 'No-answer notice', reminder: 'Tablet reminder', missed_dose: 'Tablet-not-logged heads-up', test: 'Test', ready: 'Alerts turned on', cancel_notice: 'Cancel notice', handled_notice: 'Handled notice', invite: 'Invite' };
-  var EVS = { accepted: 'accepted by push service', gone: 'phone subscription expired', rejected: 'refused by push service', throttled: 'throttled', service_error: 'push service error', network_error: 'network error', no_subscription: 'no phone alerts on', window_passed: 'too late, not sent', joined: 'joined' };
+  var EVL = { emergency: 'Emergency alert', escalation: 'Escalated to next person', unanswered: 'No-answer notice', reminder: 'Tablet reminder', missed_dose: 'Tablet-not-logged heads-up', test: 'Test', ready: 'Alerts turned on', cancel_notice: 'Cancel notice', handled_notice: 'Handled notice', invite: 'Invite', sms: 'Text message', phone_call: 'Phone call' };
+  var EVS = { accepted: 'accepted by push service', gone: 'phone subscription expired', rejected: 'refused by push service', throttled: 'throttled', service_error: 'push service error', network_error: 'network error', no_subscription: 'no phone alerts on', window_passed: 'too late, not sent', joined: 'joined', sent: 'sent', not_configured: 'text messages are not set up on the server', bad_number: 'phone number not valid' };
   var evs = (st.events || []).slice(-8).reverse().map(function(e){ return '<div class="ev"><small>' + clock(e.t) + '</small><span>' + esc(EVL[e.kind] || e.kind) + ' to ' + esc(String(e.to || '').replace(/^caregiver:|^clinician:/, '') || 'phone') + ': ' + esc(EVS[e.state] || e.state) + (e.http ? ' (code ' + e.http + ')' : '') + '</span></div>'; }).join('');
   list += evs ? '<details class="acc"><summary><span>Recent alert activity</span><span class="cnt">' + (st.events || []).slice(-8).length + '</span></summary><div class="accb"><div class="small" style="margin-bottom:6px">What the server tried. "Accepted" means the push service took it. It does not prove a phone showed it.</div>' + evs + '</div></details>' : '';
-  o.innerHTML = '<h2>Family and caregivers</h2><div class="small">When you press help or Orbit sees a dangerous reading, the first person rings like a phone call. If they do not answer in 20 seconds, the next one rings.</div>' + list +
-    (st.caregivers.length < 4 ? '<label class="l" for="cn">Add a caregiver</label><input class="field" id="cn" maxlength="40" placeholder="Their name"><input class="field" id="cp" type="tel" maxlength="20" placeholder="Their phone (optional)"><div class="err" id="er"></div><button class="btn" id="ad">Add and get invite</button>' : '') +
+  o.innerHTML = '<h2>Family and caregivers</h2><div class="small">When you press help or Orbit sees a dangerous reading, the first person rings like a phone call. If they do not answer in 20 seconds, the next one rings. A text message goes to the phone of each person at the same time, so they are told even with no internet.</div>' + list + (st.caregivers.some(function(c){ return c.joined; }) ? '<div class="small" style="margin-top:10px">Once someone has joined, they stay linked. This keeps your safety net on at all times.</div>' : '') +
+    (st.caregivers.length < 4 ? '<label class="l" for="cn">Add a caregiver</label><input class="field" id="cn" maxlength="40" placeholder="Their name"><input class="field" id="cp" type="tel" maxlength="20" placeholder="Their phone number (required)" autocomplete="off"><div class="err" id="er"></div><button class="btn" id="ad">Add and get invite</button>' : '') +
     (st.caregivers.filter(function(c){ return c.role === 'clinician'; }).length < 3 ? '<label class="l" for="dn">Add your doctor or nurse</label><div class="small">They write alert rules in plain words, like "tell me if she reports headaches with blurred vision". You see every rule, in plain English, before it runs.</div><input class="field" id="dn" maxlength="40" placeholder="Their name"><button class="btn ghost" id="ad2">Add doctor and get invite</button>' : '') +
     '<button class="btn ghost" id="fb">Close</button>';
   o.classList.add('on'); $('fb').onclick = function(){ o.classList.remove('on'); };
   var ad = $('ad'); if (ad) ad.onclick = function(){
     var n = $('cn').value.trim(); if (!n) { $('er').textContent = 'Please type their name.'; return; }
-    ad.disabled = true; hApi('invite', { name: n, phone: ($('cp') || {}).value || '' }).then(function(j){ if (take(j)) showInvite(j.code, n); else { ad.disabled = false; $('er').textContent = 'Could not add. Please try again.'; } });
+    var ph = (($('cp') || {}).value || '').trim(); if (!/^\+?[0-9][0-9\s\-()]{6,18}$/.test(ph)) { $('er').textContent = 'Please add their phone number. It is used for the automatic text-message backup.'; return; }
+    ad.disabled = true; hApi('invite', { name: n, phone: ph }).then(function(j){ if (take(j)) showInvite(j.code, n); else { ad.disabled = false; $('er').textContent = j && j.error === 'phone_required' ? 'Please add a valid phone number for them.' : 'Could not add. Please try again.'; } });
   };
   var ad2 = $('ad2'); if (ad2) ad2.onclick = function(){
     var n = $('dn').value.trim(); if (!n) { $('er').textContent = 'Please type their name.'; return; }
     ad2.disabled = true; hApi('invite', { name: n, role: 'clinician' }).then(function(j){ if (take(j)) showInvite(j.code, n, true); else { ad2.disabled = false; $('er').textContent = 'Could not add. Please try again.'; } });
   };
   o.querySelectorAll('[data-inv]').forEach(function(b){ b.onclick = function(){ var id = b.getAttribute('data-inv'); var c = st.caregivers.filter(function(x){ return x.id === id; })[0]; hApi('reinvite', { id: id }).then(function(j){ if (take(j)) showInvite(j.code, c.name); }); }; });
-  o.querySelectorAll('[data-rm]').forEach(function(b){ b.onclick = function(){ if (confirm('Remove this person?')) hApi('remove', { id: b.getAttribute('data-rm') }).then(function(j){ if (take(j)) showFamily(); }); }; });
 }
 function showInvite(code, name, doctor){
   var link = location.origin + '/?join=' + code;
@@ -813,7 +834,7 @@ function showSettings(){
   var o = $('seo'), sl = st.profile.slots;
   o.innerHTML = '<h2>Settings</h2><label class="l" for="sn">Your name</label><input class="field" id="sn" maxlength="40" value="' + esc(st.profile.name) + '">' +
     '<label class="l" for="sp">Your phone number</label><input class="field" id="sp" type="tel" maxlength="20" value="' + esc(st.profile.phone || '') + '"><div class="small" style="margin-top:4px">So your family can call you from an alert.</div>' +
-    '<label class="l">Medicine times</label><label class="check"><input type="checkbox" id="sm"' + (sl.indexOf('morning') > -1 ? ' checked' : '') + '> Morning</label><label class="check"><input type="checkbox" id="sa"' + (sl.indexOf('afternoon') > -1 ? ' checked' : '') + '> Afternoon</label><label class="check"><input type="checkbox" id="se"' + (sl.indexOf('evening') > -1 ? ' checked' : '') + '> Evening</label><label class="check"><input type="checkbox" id="sg"' + (sl.indexOf('night') > -1 ? ' checked' : '') + '> Night</label>' +
+    '<label class="l">Medicine times and tablets per time</label>' + slotRows(sl, st.profile.doseQty) + '<div class="small" style="margin-top:6px">Set how many tablets you usually take each time. You can still change the number whenever you log a dose.</div>' +
     '<label class="check"><input type="checkbox" id="ta"' + (st.profile.tabletAlerts ? ' checked' : '') + '> Tell my caregivers if I have not logged a tablet</label><div class="small" style="margin-top:4px">I remind you first. If you still have not logged it a few hours later, your caregivers get a gentle heads-up. They are not rung.</div>' +
     '<button class="btn" id="sv">Save</button>' +
     '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
@@ -823,10 +844,11 @@ function showSettings(){
     OXRadio.settingsHtml() +
     '<label class="l">Bluetooth blood-pressure cuff</label><div class="small">Pair a cuff that uses the standard Bluetooth blood-pressure service (Chrome on Android). Each reading comes straight in, works with no internet, and you confirm it before it is saved.</div><div class="err" id="bte"></div><button class="btn ghost" id="btc">Connect a cuff</button><div class="small" id="btm"></div>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
-    (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private. <a href="/developer.html" style="color:#7DD3FC">Try the API demo in a safe sandbox</a>.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
+    (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
-  $('sv').onclick = function(){ var s = []; if ($('sm').checked) s.push('morning'); if ($('sa').checked) s.push('afternoon'); if ($('se').checked) s.push('evening'); if ($('sg').checked) s.push('night'); hApi('profile', { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: s }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
+  bindQty(o);
+  $('sv').onclick = function(){ var rs = readSlots(); hApi('profile', { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: rs.slots, doseQty: rs.doseQty }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
   $('alb').onclick = function(){ if (st.profile.alertsOn) { var t0 = Date.now(); $('ale').textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ $('ale').textContent = diagText(j); if (j && j.ok && j.diag && j.diag[0] && j.diag[0].state === 'accepted') watchDisplayed(t0, function(m){ $('ale').textContent = m; }); }); return; } enableAlerts(function(ok, m){ $('ale').textContent = ok ? 'Phone alerts are on.' : m; if (ok) $('alb').textContent = 'Phone alerts are ON. Send a test'; }, true); };
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
