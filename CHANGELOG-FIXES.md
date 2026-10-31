@@ -61,3 +61,11 @@ Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio ha
 | 35 | **Baseten / Muse Spark Open.** The model "reasons" before answering, so tiny token budgets returned empty text and looked like an error. Minimum budget raised, one automatic retry with more room, `<think>` text stripped. A key limited to one model is no longer reported as "key rejected" just because the model list is refused. Payment problems show as "no credits". Default model name is `meta-models/muse-spark-open-1026`. | `src/meta.js`, `src/ai.js`, `wrangler.toml` |
 | 36 | Tests: 45 notification/security checks (tablet amounts, caregiver protection, SMS), plus Baseten restricted-key and reasoning tests. | `test/` |
 
+
+## Round 5
+37. **Abnormal BP flag.** `bpBand` now names every reading: Normal (<130/85), Slightly raised, High grade 1 (>=140/90, the WHO line), High grade 2 (>=160/100), Very high (>=180/110, same line as the fixed emergency rule) and Low (<90/60). The higher of the two numbers decides. Shown as a tag on the home "Last reading" card, in History and in the confirmation after saving. One reading is never called a diagnosis.
+38. **History uses the same bands** as the rest of the app (the old local copy disagreed at 120 diastolic).
+39. **Home screen fits a 360x720 phone.** Smaller face and caption, tidier cards, "I took my tablet" shortened to "Log tablet"; Family, Settings and "I need help now" are visible without scrolling.
+40. **High BP texts the caregiver.** A reading of 140/90 or more (below the 180/110 emergency line, which already alerts with push, SMS and call) sends a push and an SMS to every caregiver with a phone number, naming the reading and band. At most one per 3 hours so repeat measurements do not spam the family.
+41. **Missed tablet texts the caregiver.** At the heads-up time (11:00 / 16:00 / 21:00 / 23:00 local) an SMS goes out as well as the push. New: a last-chance SMS at 22:00 local if a tablet is still not logged, once per day, before the day ends.
+42. Every SMS attempt (sent, refused, or SMS not set up) appears in the alert log. Tests added (notifications 46-53).
