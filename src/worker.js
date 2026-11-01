@@ -1233,6 +1233,18 @@ function cleanMessages(input) {
   return out;
 }
 
+// Best-effort per-address limit for the AI routes (30 requests per 10 minutes). Kept in memory, so it resets if the worker restarts.
+const AI_HITS = new Map();
+function aiLimited(req) {
+  const ip = req.headers.get('CF-Connecting-IP') || 'anon', now = Date.now(), win = 600000;
+  const list = (AI_HITS.get(ip) || []).filter((t) => now - t < win);
+  if (list.length >= (AI_LIMIT_N)) { AI_HITS.set(ip, list); return Math.ceil((win - (now - list[0])) / 1000); }
+  list.push(now); AI_HITS.set(ip, list);
+  if (AI_HITS.size > 2000) for (const k of AI_HITS.keys()) { if (!(AI_HITS.get(k) || []).some((t) => now - t < win)) AI_HITS.delete(k); }
+  return 0;
+}
+const AI_LIMIT_N = 30;
+const CREATE_HITS = new Map();
 async function handleAssistant(req, env, cors) {
   let body;
   try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400, cors); }
@@ -1301,6 +1313,7 @@ async function handleHousehold(req, env, url, cors) {
   if (!env.ALERTS) return json({ error: 'Alert store not configured' }, 503, cors);
   const p = url.pathname;
   if (p === '/api/create' && req.method === 'POST') {
+    { const ip = req.headers.get('CF-Connecting-IP'), now0 = Date.now(); if (ip) { const l = (CREATE_HITS.get(ip) || []).filter((t) => now0 - t < 3600000); if (l.length >= 20) return json({ error: 'slow_down' }, 429, cors); l.push(now0); CREATE_HITS.set(ip, l); if (CREATE_HITS.size > 2000) CREATE_HITS.clear(); } } // at most 20 new accounts per hour from one address
     let body = {}; try { body = (await req.json()) || {}; } catch { /* empty */ }
     const pid = rand(8);
     body.pid = pid;
@@ -1425,6 +1438,9 @@ export default {
       return json({ ok: true, app: 'orbit-x', time: new Date().toISOString(), metaKeyConfigured: Boolean(env.MODEL_API_KEY), aiMode: aiMode(env) }, 200, cors);
     }
     if (url.pathname === '/api/ai/status' && req.method === 'GET') return handleAiStatus(req, env, url, cors);
+    if ((url.pathname === '/api/assistant' || url.pathname === '/api/explain') && req.method === 'POST') { // public AI routes spend AI credit: limit each address
+      const w = aiLimited(req); if (w) return json({ error: 'slow_down', retryAfterSeconds: w }, 429, { ...cors, 'Retry-After': String(w) });
+    }
     if (url.pathname === '/api/assistant' && req.method === 'POST') return handleAssistant(req, env, cors);
     if (url.pathname === '/api/explain' && req.method === 'POST') return handleExplain(req, env, cors);
     if (url.pathname.startsWith('/api/alert/')) return env.ALERTS ? handleDemoAlert(req, env, url, cors) : json({ error: 'Alert store not configured' }, 503, cors);
