@@ -243,7 +243,58 @@
   }
 
 
+
+  // General, non-diagnostic information about common symptoms. Fixed text written once, never generated:
+  // it names no medicine and no dose, never says what the person "has", and always points to the care team and 112.
+  var SYMPTOMS = [
+    { id: 'headache', label: 'Headache', re: /head ?ache|migraine|head (hurts|is pounding|pain)|my head/i,
+      about: 'Headaches have many causes. Sometimes they come with high blood pressure, but many people with high pressure feel nothing at all.',
+      steps: ['Sit or lie down somewhere quiet and calm for a few minutes.', 'Sip some water.', 'Rest for 5 minutes, then measure your blood pressure and log it.'],
+      urgent: 'a sudden, very strong headache, or a headache with confusion, trouble speaking, weakness on one side, or a stiff neck' },
+    { id: 'dizzy', label: 'Dizzy', re: /dizz|light ?headed|spinning|giddy|unsteady/i,
+      about: 'Feeling dizzy can happen when blood pressure is too high or too low, or when you stand up too fast.',
+      steps: ['Sit down or lie down right away so you do not fall.', 'Stand up slowly next time, a little at a time.', 'Sip some water, then measure and log your blood pressure.'],
+      urgent: 'dizziness with fainting, chest pain, trouble breathing, or trouble speaking or seeing' },
+    { id: 'vision', label: 'Blurred vision', re: /blurr?y?|vision|can.?t see|double|spots|see(ing)? (stars|flash)/i,
+      about: 'Changes in eyesight can sometimes go with very high blood pressure. It is worth telling your care team the same day.',
+      steps: ['Sit down and rest your eyes.', 'Measure your blood pressure and log it.', 'Tell your doctor or nurse today.'],
+      urgent: 'sudden loss of sight, or blurred vision together with a bad headache, confusion or weakness' },
+    { id: 'nausea', label: 'Sick or vomiting', re: /nause|vomit|throw(ing)? up|sick to my|queasy/i,
+      about: 'Feeling sick can have many causes. With a bad headache or blurred vision it should be checked.',
+      steps: ['Rest and take small sips of water.', 'Measure your blood pressure and log it.', 'Tell your care team if it does not settle.'],
+      urgent: 'vomiting that will not stop, or feeling sick together with a very bad headache or confusion' },
+    { id: 'swelling', label: 'Swollen feet or legs', re: /swell|swollen|puffy|oedema|edema/i,
+      about: 'Swollen feet or ankles can have several causes. Your doctor should know about it.',
+      steps: ['Rest with your feet raised for a while.', 'Tell your doctor or nurse at your next contact, sooner if it is new.'],
+      urgent: 'swelling that comes on suddenly, only in one leg, or with shortness of breath' },
+    { id: 'tired', label: 'Very tired or weak', re: /tired|fatigue|exhaust|weak(ness)?|no energy/i,
+      about: 'Tiredness is common and has many causes. It is worth noting if it is new or getting worse.',
+      steps: ['Rest and drink some water.', 'Measure your blood pressure and log it.', 'Mention it to your doctor or nurse.'],
+      urgent: 'sudden weakness on one side, a drooping face, or trouble speaking' },
+    { id: 'heart', label: 'Racing heart', re: /palpitat|racing heart|heart (is )?(racing|pounding|fluttering|skipping)|pounding/i,
+      about: 'A fast or pounding heartbeat can have many causes, from worry to caffeine to heart rhythm. It should be noted.',
+      steps: ['Sit down and breathe slowly in and out for a minute.', 'Measure your blood pressure and log it.', 'Tell your doctor or nurse.'],
+      urgent: 'a racing heart with chest pain, fainting or trouble breathing' },
+    { id: 'numb', label: 'Tingling or numb', re: /numb|tingl|pins and needles/i,
+      about: 'Numbness or tingling can have many causes. Tell your care team.',
+      steps: ['Sit down and rest.', 'Tell your doctor or nurse today.'],
+      urgent: 'numbness on one side of the body or face, or with weakness or trouble speaking' },
+    { id: 'cough', label: 'Cough or fever', re: /cough|fever|temperature|cold|flu/i,
+      about: 'Coughs and fevers have many causes. Some cold medicines can raise blood pressure, so ask your pharmacist before taking any.',
+      steps: ['Rest and drink water.', 'Tell your doctor or nurse if it lasts more than a few days.'],
+      urgent: 'trouble breathing, or a high fever that will not come down' },
+    { id: 'pain', label: 'Pain somewhere else', re: /\bpain\b|ache\b|hurts?\b/i,
+      about: 'Pain has many causes. Please tell your care team where it is and how long you have had it.',
+      steps: ['Rest in a comfortable position.', 'Tell your doctor or nurse.'],
+      urgent: 'pain in the chest, jaw or arm, or pain that is very strong or getting worse' }
+  ];
+  function symptomGuide(text) {
+    var t = String(text || '');
+    for (var i = 0; i < SYMPTOMS.length; i++) if (SYMPTOMS[i].re.test(t)) return SYMPTOMS[i];
+    return null;
+  }
+
   var api = { buildDays: buildDays, analyze: analyze, analyzeReal: analyzeReal, slotForNow: slotForNow, addDays: addDays, fmtDate: fmtDate,
-    isEmergencyReading: isEmergencyReading, detectEmergency: detectEmergency, parseCommand: parseCommand, HIGH_MARGIN: HIGH_MARGIN, bpBand: bpBand, slotList: slotList };
+    isEmergencyReading: isEmergencyReading, detectEmergency: detectEmergency, parseCommand: parseCommand, HIGH_MARGIN: HIGH_MARGIN, bpBand: bpBand, slotList: slotList, SYMPTOMS: SYMPTOMS, symptomGuide: symptomGuide };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.OrbitData = api;
 })(typeof window !== 'undefined' ? window : this);
