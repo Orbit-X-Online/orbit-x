@@ -953,6 +953,7 @@ function showSettings(){
     '<label class="l">Fall guard</label><div class="small">If your phone falls and then lies still, Orbit asks "Did you fall?" If you do not answer in 15 seconds, your family is alerted. Works while Orbit-X is open on this phone with the screen on.</div><label class="check"><input type="checkbox" id="fg"' + (fallOn() ? ' checked' : '') + '> Turn on fall guard</label><div class="err" id="fge"></div><button class="btn ghost" id="fgt">Test it now</button>' +
     '<label class="l">No internet? Orbit-X keeps working</label><div class="small">Readings and tablets are saved on this phone and sent when signal returns. If you press help with no internet, I save the alert, show Call 112 and text buttons (with your location), and send the alert automatically the moment signal is back.</div>' +
     OXRadio.settingsHtml() +
+    '<label class="l">Voice calls</label><div class="small">Checks that the call relay (TURN) is working, so a caregiver can talk to you after answering an alert.</div><button class="btn ghost" id="vct">Test voice calls</button><div class="small" id="vcr" style="margin-top:6px"></div>' +
     '<label class="l">Bluetooth blood-pressure cuff</label><div class="small">Pair a cuff that uses the standard Bluetooth blood-pressure service (Chrome on Android). Each reading comes straight in, works with no internet, and you confirm it before it is saved.</div><div class="err" id="bte"></div><button class="btn ghost" id="btc">Connect a cuff</button><div class="small" id="btm"></div>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
     (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
@@ -965,6 +966,18 @@ function showSettings(){
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
   OXRadio.bindSettings(function(){ startHelp('Help button pressed'); });
   $('btc').onclick = connectCuff;
+  $('vct').onclick = function(){
+    var r = $('vcr'); r.textContent = 'Checking...';
+    hApi('ice').then(function(j){
+      if (!j || !j.ok) { r.textContent = 'Could not check. Are you online?'; return; }
+      var n = (j.iceServers || []).filter(function(x){ return /turn/.test([].concat(x.urls).join(' ')); }).length;
+      if (j.relay === 'cloudflare' || j.relay === 'custom') r.innerHTML = '<span style="color:#4ADE80">Working.</span> Your private call relay (' + esc(j.relay) + ') is on. Calls should connect on mobile networks.';
+      else {
+        var why = String(j.turnError || ''), msg = /missing/.test(why) ? 'The server cannot see ' + why.split(':')[1] + '. Add it as a Worker secret on THIS Worker, then redeploy.' : /http_401|http_403/.test(why) ? 'Cloudflare refused the TURN key (' + why + '). Check the key ID and API token are from the same TURN key.' : /http_404/.test(why) ? 'Cloudflare cannot find that TURN key ID (' + why + ').' : why ? 'Cloudflare TURN problem: ' + why : 'No private relay set.';
+        r.innerHTML = '<span style="color:#FBBF24">Using a shared free relay only (' + n + ' relay entries).</span> ' + esc(msg);
+      }
+    });
+  };
   if ($('kn')) $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
   o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
   $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
