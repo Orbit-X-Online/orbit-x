@@ -230,6 +230,32 @@ r = await call('GET', RM + 'state', null, toks[1]); assert.equal(r._s, 401); ok(
 await call('POST', RM + 'sos', { why: 'x' }, rm.token);
 r = await call('POST', RM + 'remove', { id: 'c3' }, toks[0]); assert.equal(r._s, 409); assert.equal(r.error, 'alert_active'); ok('nobody can be removed during an active alert');
 
+// ---------- J4. clinician rules really reach the family (alert + text), on save and on every new entry
+env.AT_USERNAME = 'OrbitX'; env.AT_API_KEY = 'atk';
+clock = at(31, 9);
+const rl = await call('POST', '/api/create', { name: 'Funmi', slots: [], today: '2026-10-31', tz: 0, accountType: 'individual' });
+const RL = '/api/h/' + rl.pid + '/';
+r = await call('POST', RL + 'invite', { name: 'Kemi', phone: '08033334444' }, rl.token); assert.ok((await call('POST', '/api/join', { code: r.code })).ok);
+r = await call('POST', RL + 'invite', { name: 'Isaac', role: 'clinician' }, rl.token); const drj = await call('POST', '/api/join', { code: r.code }); assert.ok(drj.ok);
+const rtexts = () => pushes.filter((x) => x.url.includes('africastalking')).map((x) => decodeURIComponent(String(x.init.body).replace(/\+/g, ' ')));
+const mkRule = async (text, sev) => { const d = await call('POST', RL + 'draft', { text }, drj.token); assert.ok(d.ok, text); return call('POST', RL + 'rulesave', { rule: { ...d.draft.rule, severity: sev } }, drj.token); };
+pushes.length = 0;
+r = await mkRule('Monitor for headaches and blurred vision', 'notice'); assert.ok(r.ok); assert.deepEqual(r.matchedNow, []); ok('a saved rule that does not match yet says so');
+await call('POST', RL + 'symptom', { text: 'I have a headache and blurry vision' }, rl.token);
+assert.ok(rtexts().some((t) => /care rule "[^"]*"/i.test(t) && /Funmi/.test(t))); ok('a symptom rule texts the caregiver when the patient reports those symptoms');
+r = await call('GET', RL + 'state', null, drj.token); assert.ok(r.notices.some((x) => x.kind === 'rule' && x.ruleName)); ok('the clinician sees the rule alert, labelled as a rule');
+pushes.length = 0; await call('POST', RL + 'symptom', { text: 'headache again, vision blurred' }, rl.token); assert.equal(rtexts().length, 0); ok('the same rule does not text again within 12 hours');
+await call('POST', RL + 'bp', { sys: 168, dia: 104, date: '2026-10-31' }, rl.token); await call('POST', RL + 'bp', { sys: 170, dia: 102, date: '2026-10-31' }, rl.token);
+pushes.length = 0;
+r = await mkRule('Alert me if systolic is above 160 twice in 3 days', 'notice'); assert.ok(r.ok); assert.equal(r.matchedNow.length, 1);
+assert.ok(rtexts().some((t) => /care rule/i.test(t) && /16[0-9]|170/.test(t))); ok('a new blood-pressure rule is checked against recent readings the moment it is saved, and alerts at once');
+r = await mkRule('Ring the family if diastolic is above 100', 'emergency'); assert.ok(r.ok); assert.match(String(r.matchedNow[0]), /would ring/); r = await call('GET', RL + 'state', null, rl.token); assert.ok(!r.alert || r.alert.status === undefined || r.alert.status === 'cancelled' || !r.alert.active); ok('saving a ringing rule never rings the family by itself');
+const rid = (await call('GET', RL + 'state', null, drj.token)).rules[0].id;
+pushes.length = 0; r = await call('POST', RL + 'ruletest', { id: rid }, rl.token); assert.equal(r._s, 403); ok('the patient cannot send a rule test');
+r = await call('POST', RL + 'ruletest', { id: rid }, drj.token); assert.ok(r.ok && r.tested); assert.equal(rtexts().length, 0);
+r = await call('GET', RL + 'state', null, drj.token); assert.ok(r.notices.some((x) => x.kind === 'rule_test')); ok('a clinician can send a test alert; it texts nobody');
+delete env.AT_USERNAME; delete env.AT_API_KEY;
+
 // ---------- K. invalid input
 r = await call('POST', Q + 'bp', { sys: 300, dia: 400, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
 r = await call('POST', Q + 'bp', { sys: 80, dia: 90, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
