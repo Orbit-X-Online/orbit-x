@@ -647,12 +647,16 @@ function connectCuff(){
 function gotCuff(r, src){
   if (!r || !(r.sys >= 50 && r.sys <= 300 && r.dia >= 30 && r.dia <= 200 && r.sys > r.dia)) { say('The cuff sent a reading I could not understand. Please measure again.'); return; }
   $('seo').classList.remove('on');
-  $('evo').innerHTML = '<h2>' + 'Cuff reading' + '</h2><div style="font-size:38px;font-weight:700;text-align:center;margin:10px 0">' + r.sys + ' / ' + r.dia + '</div>' + (r.pulse ? '<div class="small" style="text-align:center">Pulse ' + r.pulse + '</div>' : '') +
-    '<div class="small" style="margin-top:8px">' + ('Saved only if you tap Save. I never record a reading without you.') + '</div>' +
-    '<button class="btn" id="cfs">Save this reading</button><button class="btn ghost" id="cfd">Discard</button>';
+  var left = 10, done = false, tm = null;
+  $('evo').innerHTML = '<h2>Cuff reading</h2><div style="font-size:38px;font-weight:700;text-align:center;margin:10px 0">' + r.sys + ' / ' + r.dia + '</div>' + (r.pulse ? '<div class="small" style="text-align:center">Pulse ' + r.pulse + '</div>' : '') +
+    '<div class="small center" style="margin-top:8px" id="cfc"></div>' +
+    '<button class="btn" id="cfs">Save now</button><button class="btn ghost" id="cfd">Do not save</button>';
   $('evo').classList.add('on');
-  $('cfd').onclick = function(){ $('evo').classList.remove('on'); };
-  $('cfs').onclick = function(){ $('evo').classList.remove('on'); saveBP(r.sys, r.dia, src); };
+  function fin(save){ if (done) return; done = true; clearInterval(tm); $('evo').classList.remove('on'); if (save) saveBP(r.sys, r.dia, src); }
+  function tick(){ $('cfc').textContent = 'Saving automatically in ' + left + ' seconds, so your doctor can see it. Tap Do not save if the reading is wrong.'; if (left-- <= 0) fin(true); }
+  tick(); tm = setInterval(tick, 1000);
+  $('cfd').onclick = function(){ fin(false); };
+  $('cfs').onclick = function(){ fin(true); };
 }
 function saveBP(sys, dia, src){
   hQ('bp', { sys: sys, dia: dia, date: todayStr(), src: src }).then(function(j){
@@ -760,7 +764,7 @@ function showHistory(){
   var o = $('hio'), a = analysis();
   var empty = function(t){ return '<div class="small" style="padding:6px 0">' + esc(t) + '</div>'; };
   var rs = (st.readings || []).slice().sort(function(x, y){ return (y.t || 0) - (x.t || 0); });
-  var bp = rs.length ? rs.map(function(r){ var b = D.bpBand(r.sys, r.dia); return '<div class="hrow"><div><b class="hv">' + r.sys + '/' + r.dia + '</b><span class="small"> mmHg</span><div class="small">' + fmtLong(r.date) + (r.t ? ' &middot; ' + clock(r.t) : '') + (r.src === 'bluetooth' ? ' &middot; cuff' : '') + '</div></div><span class="tag ' + (b.tone === 'watch' ? 'warn' : b.tone === 'low' ? 'info' : b.tone) + '">' + esc(b.name) + '</span></div>'; }).join('') : empty('No readings yet. Tap Log BP to add your first one.');
+  var bp = rs.length ? rs.map(function(r){ var b = D.bpBand(r.sys, r.dia); return '<div class="hrow"><div><b class="hv">' + r.sys + '/' + r.dia + '</b><span class="small"> mmHg</span><div class="small">' + fmtLong(r.date) + (r.t ? ' &middot; ' + clock(r.t) : '') + (r.src === 'bluetooth' ? ' &middot; Bluetooth cuff' : r.src ? ' &middot; ' + esc(r.src) : '') + '</div></div><span class="tag ' + (b.tone === 'watch' ? 'warn' : b.tone === 'low' ? 'info' : b.tone) + '">' + esc(b.name) + '</span></div>'; }).join('') : empty('No readings yet. Tap Log BP to add your first one.');
   var byDay = {}; (st.doses || []).forEach(function(d){ (byDay[d.date] = byDay[d.date] || []).push({ slot: d.slot, qty: d.qty || 1 }); });
   var days = Object.keys(byDay).sort().reverse();
   var tabs = days.length ? days.map(function(dt){ return '<div class="hrow"><div><b>' + fmtLong(dt) + '</b><div class="small">' + byDay[dt].map(function(x){ return esc(slotName(x.slot)) + ': ' + tabletsText(x.qty); }).join(' &middot; ') + '</div></div><span class="tag ok">Logged</span></div>'; }).join('') : empty(st.profile.slots.length ? 'No tablets logged yet.' : 'You have not set any medicine times. You can add them in Settings.');
@@ -772,10 +776,20 @@ function showHistory(){
   var alerts = evs.length ? evs.map(function(e){ return '<div class="hrow"><div><b>' + esc(EVL[e.kind] || e.kind) + '</b><div class="small">' + clock(e.t) + '</div></div></div>'; }).join('') : empty('No alerts have been sent.');
   var cur = st.alert && st.alert.status ? '<div class="hrow"><div><b>Latest help request</b><div class="small">' + esc(String(st.alert.status).replace(/_/g, ' ')) + (st.alert.startedAt ? ' &middot; ' + fmtLong(new Date(st.alert.startedAt).getFullYear() + '-' + (new Date(st.alert.startedAt).getMonth() + 1) + '-' + new Date(st.alert.startedAt).getDate()) + ', ' + clock(st.alert.startedAt) : '') + '</div></div></div>' : '';
   o.innerHTML = '<h2>History</h2><div class="sum"><small>This week</small>' + esc(a.short || a.sentence) + '</div>' +
+    '<div class="gd" id="ins"><b>Your week, in plain words</b><div class="small" id="inst" style="margin:4px 0 8px">A short summary written from your own numbers, to share with your doctor.</div><button class="btn ghost" id="insb" style="margin-top:0">Write my summary</button></div>' +
     '<div class="accs">' + acc('Trend and why Orbit said this', a.win.length + (a.win.length === 1 ? ' day' : ' days'), a.win.length ? trendHtml(a) : empty('The graph appears after your first reading.'), a.win.length > 0) + acc('Blood pressure readings', rs.length, bp, rs.length > 0) + acc('Tablets taken', (st.doses || []).length, tabs, false) + acc('Tablets not logged (last 7 days)', a.missed.length, miss, a.missed.length > 0) + acc('Notes for your care team', sy.length, notes, false) + acc('Alerts and help requests', evs.length + (cur ? 1 : 0), cur + alerts, false) + '</div>' +
     '<div class="small" style="margin-top:12px">Only what you have saved appears here. Orbit-X is not a doctor. One reading is not a diagnosis. Please share your history with your doctor.</div>' +
     '<button class="btn" id="hib" style="margin-top:14px">Back to Orbit</button>';
   o.classList.add('on'); o.scrollTop = 0; $('hib').onclick = function(){ o.classList.remove('on'); };
+  $('insb').onclick = function(){
+    var b = $('insb'); b.disabled = true; b.textContent = 'Writing...';
+    hApi('insight', {}).then(function(j){
+      b.disabled = false; b.textContent = 'Write it again';
+      if (!j || !j.insight) { $('inst').textContent = 'Could not write it now. Please try again.'; return; }
+      var i = j.insight;
+      $('inst').innerHTML = '<div style="font-size:15px;color:var(--txt);line-height:1.5">' + esc(i.text) + '</div><div class="small" style="margin-top:6px">' + (i.source === 'meta' ? 'Written by Muse Spark from your numbers. Checked by code.' : 'Written by Orbit from your numbers.') + ' Not medical advice.</div>';
+    });
+  };
 }
 
 /* family: invite caregivers */
