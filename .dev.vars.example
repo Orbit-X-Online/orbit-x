@@ -22,3 +22,10 @@ WHATSAPP_VERIFY_TOKEN=    # any random string you choose; same value in the Meta
 # AT_USERNAME=            # Africa's Talking username of the LIVE app (not "sandbox")
 # AT_API_KEY=             # Africa's Talking API key created inside the live app
 # AT_FROM=                # optional approved sender ID
+
+# --- Two AI providers (optional). MODEL_* is tried first (e.g. Meta Model API); MODEL2_* takes over if it is busy, out of credit or down.
+# MODEL_BASE_URL=         # the Meta Model API address from your Meta dashboard
+# MODEL_TEXT=             # the model name shown in your Meta dashboard
+# MODEL2_API_KEY=         # your Baseten key
+# MODEL2_BASE_URL=https://inference.baseten.co/v1
+# MODEL2_TEXT=meta-models/muse-spark-open-1026
