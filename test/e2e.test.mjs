@@ -12,9 +12,15 @@ const env = { ESCALATE_MS: '20000', ALLOWED_ORIGINS: '', MODEL_API_KEY: 'bt-key'
   AT_USERNAME: 'OrbitX', AT_API_KEY: 'atk', ASSETS: { fetch: async () => new Response('<html>') },
   ALERTS: { idFromName: (n) => n, get: (n) => { if (!hubs.has(n)) hubs.set(n, new AlertHub({ storage: new Store() }, env)); const hub = hubs.get(n); return { fetch: (r) => hub.fetch(r) }; } } };
 const realNow = Date.now; let clock = Date.UTC(2026, 9, 31, 9, 0, 0); Date.now = () => clock;
+const fhirSeen = []; let fhirStatus = 200;
+let fhirBundle = { resourceType: 'Bundle', type: 'searchset', entry: [
+  { resource: { resourceType: 'Observation', id: 'bp1', status: 'final', subject: { reference: 'Patient/example' }, code: { coding: [{ system: 'http://loinc.org', code: '85354-9', display: 'Blood pressure panel' }] }, effectiveDateTime: '2026-10-12', component: [
+    { code: { coding: [{ system: 'http://loinc.org', code: '8480-6', display: 'Systolic blood pressure' }] }, valueQuantity: { value: 152, unit: 'mmHg' } },
+    { code: { coding: [{ system: 'http://loinc.org', code: '8462-4', display: 'Diastolic blood pressure' }] }, valueQuantity: { value: 96, unit: 'mmHg' } }] } }] };
 const net = []; let model = () => ({ status: 500, body: 'x' });
 globalThis.fetch = async (url, init) => {
   url = String(url); net.push({ url, init });
+  if (url.includes('hapi.fhir.org')) { fhirSeen.push({ url, init }); return new Response(JSON.stringify(fhirBundle), { status: fhirStatus }); }
   if (url.includes('africastalking')) return new Response('{"SMSMessageData":{"Recipients":[{"statusCode":101}]}}', { status: 201 });
   if (url.endsWith('/models')) return new Response('{"error":"restricted"}', { status: 403 });
   if (url.includes('baseten')) { const m = model(JSON.parse(init.body)); return new Response(typeof m.body === 'string' ? m.body : JSON.stringify(m.body), { status: m.status }); }
@@ -86,11 +92,25 @@ r = await call('POST', H + 'apikey', { label: 'EMR link', scopes: ['events:write
 const key = r.key;
 r = await call('POST', '/api/v1/signals', { type: 'reading', sys: 124, dia: 80 }, key); assert.ok(r.ok, JSON.stringify(r));
 r = await call('POST', '/api/v1/signals', { type: 'reading', sys: 186, dia: 112 }, key); assert.ok(r.ok && r.alert && r.alert.status === 'ringing', 'emergency from an API reading starts an alert');
+r = await call('POST', '/api/v1/signals', { systolic: '150', diastolic: '95', pulse: 72, device: 'Omron-BLE-gateway' }, key); assert.ok(r.ok, JSON.stringify(r)); assert.equal(r.result.band, 'High (grade 1)'); assert.equal(r.recent.at(-1).pulse, 72); assert.equal(r.recent.at(-1).source, 'Omron-BLE-gateway'); ok('API accepts text numbers, systolic/diastolic, pulse and device name, and reports the band');
 r = await call('GET', '/api/v1/alert', null, key); assert.ok(r.ok && r.alert); ok('partner API: readings accepted, emergency reading starts the alert, alert can be read back');
 r = await call('POST', '/api/v1/events', { type: 'fall', reason: 'Fall sensor' }, key); assert.equal(r._s, 202); assert.ok(r.eventId); ok('connect API accepts an event');
 r = await call('GET', '/api/v1/records', null, key); assert.ok(r.ok); assert.ok(r.count >= 2); ok('connect API lists the facts Baseten extracted');
 r = await call('GET', '/api/v1/records', null, 'ox_' + pt.pid + '_' + 'a'.repeat(24)); assert.equal(r._s, 401); ok('a wrong API key is refused');
 r = await call('POST', H + 'bp', { sys: 120, dia: 80, date: '2026-10-31' }, key); assert.notEqual(r._s, 200); ok('an API key cannot act as the patient');
+
+// ---- live FHIR import from a hospital-record system
+r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org/baseR4' }, pt.token);
+assert.ok(r.ok, JSON.stringify(r)); assert.ok(r.counts.newFacts >= 2); assert.equal(r.simulated, true);
+assert.ok(fhirSeen[0].url.startsWith('https://hapi.fhir.org/baseR4/Observation?code=http%3A%2F%2Floinc.org%7C85354-9'), fhirSeen[0].url); ok('Orbit pulls blood-pressure records from a FHIR server and imports them, labelled as test data');
+r = await call('GET', W + 'wstate', null, pt.token); assert.ok(r.facts.some((f) => /systolic/i.test(f.name) && f.value === 152 && /hapi\.fhir\.org/.test(JSON.stringify(f.source || f)))); ok('imported readings appear in Health Memory with their source');
+r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org/baseR4' }, pt.token); assert.equal(r.counts.newFacts, 0); assert.ok(r.counts.duplicates >= 2); ok('pulling the same records twice adds no duplicates');
+r = await call('POST', W + 'fhirpull', { base: 'https://evil.example.com/fhir' }, pt.token); assert.equal(r.error, 'host_not_allowed'); fhirSeen.length = 0;
+r = await call('POST', W + 'fhirpull', { base: 'http://hapi.fhir.org/baseR4' }, pt.token); assert.equal(r.error, 'host_not_allowed');
+r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org:8443/baseR4' }, pt.token); assert.equal(r.error, 'host_not_allowed'); assert.equal(fhirSeen.length, 0); ok('only listed https servers are ever contacted');
+r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org/baseR4', patientId: 'x' }, mum.token); assert.equal(r._s, 403); ok('only the patient can run an import');
+fhirStatus = 401; r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org/baseR4' }, pt.token); assert.equal(r.error, 'server_needs_login'); fhirStatus = 200;
+fhirBundle = { resourceType: 'OperationOutcome' }; r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org/baseR4' }, pt.token); assert.equal(r.error, 'not_fhir'); ok('login-required and non-FHIR answers are reported clearly');
 
 // ---- AI status page
 r = await worker.fetch(new Request('https://t.test/api/ai/status?test=1'), env); const j = await r.json();
