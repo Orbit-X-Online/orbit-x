@@ -100,3 +100,9 @@ Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio ha
 67. The "running low" banner shows once per level (7 days, 3 days, empty), has Text my pharmacist / Got it, and does not return after Got it.
 68. When the pack is finished the app stops asking about tablets (no reminders, no missed-tablet texts, no question on the home screen) until a new count is entered in Settings.
 69. Home greeting shortened to the headline; "This week" chip reads "N missed".
+70. Pharmacist requests capped at one per 20 hours whatever number is set (no spam), with tests.
+71. Two AI providers: MODEL_* (e.g. Meta Model API) first, MODEL2_* (Baseten) takes over automatically on 401/402/403/404/429/5xx/timeouts. Safety checks apply to either answer.
+72. Cuff Gateway (/gateway.html): any phone or laptop with Chrome pairs a Bluetooth cuff and sends every reading to the patient's account through the public API with a device key. Linked from the doctor page. Verified with a simulated Bluetooth cuff (reading parsed, sent with the key header, band returned).
+73. In-app cuff readings now save automatically after a 10-second countdown (Do not save / Save now), are labelled "Bluetooth cuff" in History and in the doctor's Rule Studio so doctors can see where each reading came from.
+74. "Your week, in plain words": code finds every number, Muse Spark (Meta model) rewords them, a safety check rejects advice and any number the model invents, otherwise fixed sentences are used. Shown in History and in the doctor's Rule Studio, labelled with who wrote it. Cached 6 hours.
+75. API: signals accept systolic/diastolic, text numbers, pulse, device, measuredAt (earlier round) and are used by the gateway.
