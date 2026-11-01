@@ -70,7 +70,7 @@ function textOf(msg) {
   return c.replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^[\s\S]*<\/think>/i, '').trim();
 }
 
-export async function metaChat(env, { messages, model, temperature = 0.3, maxTokens, timeoutMs }) {
+async function metaChatOne(env, { messages, model, temperature = 0.3, maxTokens, timeoutMs }) {
   if (!keyOf(env)) throw new MetaError('MODEL_API_KEY is not set', 500);
   const tried = []; let candidates = [model || null], retried = false;
   let maxTok = Math.max(Number(maxTokens) || Number(env.MODEL_MAX_TOKENS) || 4000, 800); // Muse Spark Open always reasons first; a tiny budget leaves no room for the answer
@@ -101,6 +101,21 @@ export async function metaChat(env, { messages, model, temperature = 0.3, maxTok
 }
 
 // Tiny live test used by the status badge and the developer page. Never throws.
+// Two providers can be set: MODEL_* is tried first (for example the Meta Model API), and MODEL2_* (for example Baseten) takes over
+// if the first one is busy, out of credit, refuses the key, or is down. The answer always comes from one provider and is checked the same way.
+export function secondProvider(env) {
+  if (!env.MODEL2_API_KEY) return null;
+  return { ...env, MODEL_API_KEY: env.MODEL2_API_KEY, MODEL_BASE_URL: env.MODEL2_BASE_URL || 'https://inference.baseten.co/v1', MODEL_TEXT: env.MODEL2_TEXT || 'meta-models/muse-spark-open-1026', MODEL2_API_KEY: '' };
+}
+export async function metaChat(env, opts) {
+  try { return await metaChatOne(env, opts); }
+  catch (e) {
+    const alt = secondProvider(env);
+    if (!alt || !(e instanceof MetaError) || ![401, 402, 403, 404, 408, 429, 500, 502, 503, 504].includes(e.status)) throw e;
+    return metaChatOne(alt, { ...opts, model: undefined });
+  }
+}
+
 export async function probeAI(env) {
   const t0 = Date.now();
   const provider = isBaseten(env) ? 'Baseten' : baseUrl(env).replace(/^https?:\/\//, '').split('/')[0];
