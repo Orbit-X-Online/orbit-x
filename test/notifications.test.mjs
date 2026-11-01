@@ -256,6 +256,22 @@ r = await call('POST', RL + 'ruletest', { id: rid }, drj.token); assert.ok(r.ok 
 r = await call('GET', RL + 'state', null, drj.token); assert.ok(r.notices.some((x) => x.kind === 'rule_test')); ok('a clinician can send a test alert; it texts nobody');
 delete env.AT_USERNAME; delete env.AT_API_KEY;
 
+// ---------- J5. the app knows when the tablets will run out
+env.AT_USERNAME = 'OrbitX'; env.AT_API_KEY = 'atk';
+clock = at(31, 8);
+const sp = await call('POST', '/api/create', { name: 'Bola', slots: ['morning', 'evening'], doseQty: { morning: 1, evening: 1 }, today: '2026-10-31', tz: 0, accountType: 'individual' });
+const SP = '/api/h/' + sp.pid + '/';
+r = await call('POST', SP + 'invite', { name: 'Tayo', phone: '08066667777' }, sp.token); assert.ok((await call('POST', '/api/join', { code: r.code })).ok);
+const stxt = () => pushes.filter((x) => x.url.includes('africastalking')).map((x) => decodeURIComponent(String(x.init.body).replace(/\+/g, ' ')));
+r = await call('POST', SP + 'profile', { supplyLeft: 9 }, sp.token); assert.equal(r.profile.supply.daysLeft, 4); assert.equal(r.profile.supply.daily, 2); ok('the app works out days left from the tablets in the pack and the daily amount');
+pushes.length = 0; await call('POST', SP + 'dose', { slot: 'morning', date: '2026-10-31' }, sp.token); r = await call('GET', SP + 'state', null, sp.token); assert.equal(r.profile.supply.remaining, 8); assert.equal(stxt().length, 0); ok('each logged tablet counts down the pack; no text while there is enough');
+await call('POST', SP + 'dose', { slot: 'evening', date: '2026-10-31' }, sp.token); clock = at(31, 9); await call('POST', SP + 'dose', { slot: 'morning', date: '2026-11-01' }, sp.token).catch(() => {});
+r = await call('POST', SP + 'profile', { supplyLeft: 5 }, sp.token); assert.equal(r.profile.supply.daysLeft, 2);
+assert.ok(stxt().some((t) => /run out in about 2 days/.test(t))); ok('the family is texted when 3 days or fewer are left');
+pushes.length = 0; await call('POST', SP + 'profile', { name: 'Bola' }, sp.token); assert.equal(stxt().length, 0); ok('the running-low text is sent once');
+r = await call('POST', SP + 'profile', { supplyLeft: -3 }, sp.token); assert.equal(r._s, 400); r = await call('POST', SP + 'profile', { supplyLeft: null }, sp.token); assert.equal(r.profile.supply, null); ok('bad pack sizes are refused and the tracker can be cleared');
+delete env.AT_USERNAME; delete env.AT_API_KEY;
+
 // ---------- K. invalid input
 r = await call('POST', Q + 'bp', { sys: 300, dia: 400, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
 r = await call('POST', Q + 'bp', { sys: 80, dia: 90, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
@@ -286,6 +302,8 @@ r = await call('POST', '/api/assistant', { messages: [{ role: 'user', content: '
 pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Take 40 mg of it and you probably have X.' } }] }), { status: 200 });
 r = await call('POST', '/api/assistant', { messages: [{ role: 'user', content: 'hi' }] }, null, withKey); assert.ok(/can't give medical advice/.test(r.reply)); ok('malformed provider answers fail safely; unsafe medical advice is replaced');
 pushHandler = async () => new Response('', { status: 201 });
+
+{ let hit = 0; for (let i = 0; i < 40 && !hit; i++) { const x = await call('POST', '/api/explain', { sentence: 'x' }, null, noKey); if (x._s === 429) hit = i; } assert.ok(hit > 0 && hit <= 31); ok('the public AI routes are rate-limited per address so nobody can drain the AI credit'); }
 
 // ---------- N. FHIR validation
 assert.equal(validateBundle(null).ok, false);
