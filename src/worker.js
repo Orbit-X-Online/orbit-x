@@ -682,8 +682,32 @@ export class AlertHub {
 
   // Tablet reminders. The person gets a gentle reminder; caregivers get a heads-up only if the person allows it.
   // Each reminder is sent at most once (h.sent), so a repeated alarm or retry cannot spam anyone.
+  // Running low: at 3 days or fewer left, and again when the pack is empty, tell the person, the family and the pharmacist (once each).
+  async refillCheck(h, now) {
+    const sup = supplyInfo(h); if (!sup || !sup.daily) return sup;
+    const tier = sup.remaining <= 0 ? 'out' : sup.daysLeft <= 3 ? 'low' : '';
+    h.supply.warn = h.supply.warn || {};
+    if (!tier || h.supply.warn[tier]) return sup;
+    h.supply.warn[tier] = 1;
+    const name = h.name || 'Someone';
+    const msg = tier === 'out' ? name + ' has run out of tablets by Orbit-X\'s count. Please help them get a refill today.' : name + '\'s tablets will run out in about ' + sup.daysLeft + ' day' + (sup.daysLeft === 1 ? '' : 's') + '. Please help them get a refill.';
+    h.notices = h.notices || []; h.notices.push({ id: 's' + now, t: now, kind: 'refill', text: msg }); if (h.notices.length > 30) h.notices = h.notices.slice(-30);
+    const ehs = this.subsFor(h, (x) => x.role === 'caregiver' || x.role === 'patient');
+    await this.deliver(h, ehs, { title: 'Orbit-X: tablets running low', body: msg, tag: 'orbit-supply' }, now, 'refill', 'everyone');
+    if (h.tabletAlerts !== false) await this.smsCaregivers(h, 'ORBIT-X: ' + msg, now, 'refill');
+    const ph = h.pharmacist;
+    if (ph && ph.phone) { // the pharmacist the person chose gets a short refill request. No health details are included.
+      const ptxt = 'ORBIT-X refill request: ' + name + (tier === 'out' ? ' has run out of tablets.' : ' will run out of tablets in about ' + sup.daysLeft + ' day' + (sup.daysLeft === 1 ? '' : 's') + '.') + (h.phone ? ' Please call them on ' + h.phone + ' to prepare a refill.' : ' Please prepare a refill.');
+      if (!smsConfigured(this.env)) this.ev(h, now, 'refill', 'sms_not_configured', 'pharmacist');
+      else { const r = await sendSms(this.env, ph.phone, ptxt); this.ev(h, now, 'sms', r.state, 'pharmacist', r.http); }
+    }
+    return sup;
+  }
+
   async doseCheck(h, now) {
+    const sup0 = await this.refillCheck(h, now);
     const slots = h.slots || []; if (!slots.length) return;
+    if (sup0 && sup0.remaining <= 0) return; // the pack is finished: stop reminders and missed-tablet alerts until a new count is entered
     h.sent = h.sent || {};
     const tz = h.tz || 0, tzn = h.tzName || '';
     const lp = localParts(now, tz, tzn), name = h.name || 'Someone';
@@ -726,20 +750,6 @@ export class AlertHub {
         await this.smsCaregivers(h, 'ORBIT-X: today is nearly over and ' + name + ' has still not logged the ' + open.join(' and ') + ' tablet. Please call them now.', now, 'missed_dose');
       }
     }
-    // Running low: tell the family once at 3 days left and once when the pack is empty.
-    const sup = supplyInfo(h);
-    if (sup && sup.daily && joinedChain(h).length && h.tabletAlerts !== false) {
-      const tier = sup.remaining <= 0 ? 'out' : sup.daysLeft <= 3 ? 'low' : '';
-      h.supply.warn = h.supply.warn || {};
-      if (tier && !h.supply.warn[tier]) {
-        h.supply.warn[tier] = 1;
-        const msg = tier === 'out' ? name + ' has run out of tablets by Orbit-X\'s count. Please help them get a refill today.' : name + '\'s tablets will run out in about ' + sup.daysLeft + ' day' + (sup.daysLeft === 1 ? '' : 's') + '. Please help them get a refill.';
-        h.notices = h.notices || []; h.notices.push({ id: 's' + now, t: now, kind: 'refill', text: msg }); if (h.notices.length > 30) h.notices = h.notices.slice(-30);
-        const ehs = this.subsFor(h, (x) => x.role === 'caregiver' || x.role === 'patient');
-        await this.deliver(h, ehs, { title: 'Orbit-X: tablets running low', body: msg, tag: 'orbit-supply' }, now, 'refill', 'everyone');
-        await this.smsCaregivers(h, 'ORBIT-X: ' + msg, now, 'refill');
-      }
-    }
     Object.keys(h.sent).forEach((k) => { const d = k.split('|')[1]; if (d && d < dayShift(lp.date, -3)) delete h.sent[k]; });
   }
 
@@ -776,7 +786,7 @@ export class AlertHub {
     return {
       ok: true, now, role: who.role, pid: h.pid,
       me: who.role === 'caregiver' || who.role === 'clinician' ? { id: who.id, name: (h.caregivers.find((c) => c.id === who.id) || {}).name, role: who.role } : null,
-      profile: { supply: supplyInfo(h), name: h.name, slots: h.slots, doseQty: h.doseQty || {}, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, tzName: h.tzName || '', alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)), push: pushDiag(h, (x) => x.role === who.role && (x.id || null) === (who.id || null)), nextReminderAt: h.alarmAt || null },
+      profile: { supply: supplyInfo(h), pharmacist: h.pharmacist || null, name: h.name, slots: h.slots, doseQty: h.doseQty || {}, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, tzName: h.tzName || '', alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)), push: pushDiag(h, (x) => x.role === who.role && (x.id || null) === (who.id || null)), nextReminderAt: h.alarmAt || null },
       caregivers: who.role === 'patient' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, order: c.order, joined: !!c.tokenHash, status: c.tokenHash ? 'joined' : (c.invitedAt && now - c.invitedAt > INVITE_TTL_MS ? 'expired' : 'invited'), invitedAt: c.invitedAt || null, joinedAt: c.joinedAt || null, role: c.role || 'caregiver', phone: c.phone || '', alertsOn: (h.pushSubs || []).some((x) => x.id === c.id), push: pushDiag(h, (x) => x.id === c.id) })) : undefined,
       events: who.role === 'patient' ? (h.events || []).slice(-20) : undefined,
       team: who.role === 'caregiver' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, role: c.role || 'caregiver', order: c.order, joined: !!c.tokenHash, you: c.id === who.id })) : undefined,
@@ -1050,6 +1060,10 @@ export class AlertHub {
         if (Number.isInteger(body.tz) && Math.abs(body.tz) <= 840) h.tz = body.tz;
         if (body.tzName !== undefined) h.tzName = validTzName(body.tzName);
         if (typeof body.tabletAlerts === 'boolean') h.tabletAlerts = body.tabletAlerts;
+        if (body.pharmacist !== undefined) {
+          if (body.pharmacist === null) h.pharmacist = null;
+          else { const pn = cleanName(body.pharmacist && body.pharmacist.name, 40), pp = cleanPhone(body.pharmacist && body.pharmacist.phone); if (!pp) { fail(400, 'bad_pharmacist'); break; } h.pharmacist = { name: pn || 'Pharmacist', phone: pp }; }
+        }
         if (body.supplyLeft !== undefined) { // how many tablets are left in the pack right now; Orbit-X counts down from the tablets you log
           if (body.supplyLeft === null || body.supplyLeft === '') h.supply = null;
           else if (Number.isInteger(body.supplyLeft) && body.supplyLeft >= 0 && body.supplyLeft <= 2000) h.supply = { left: body.supplyLeft, at: now };
