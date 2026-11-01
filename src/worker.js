@@ -683,6 +683,38 @@ export class AlertHub {
   // Tablet reminders. The person gets a gentle reminder; caregivers get a heads-up only if the person allows it.
   // Each reminder is sent at most once (h.sent), so a repeated alarm or retry cannot spam anyone.
   // Running low: at 3 days or fewer left, and again when the pack is empty, tell the person, the family and the pharmacist (once each).
+  // Facts come from plain code. The model (Muse Spark through Meta or Baseten) only turns them into a calm summary, and its text is checked
+  // for advice before it is shown. With no AI available, the same facts are put into fixed sentences instead.
+  async makeInsight(h, now) {
+    const week = now - 7 * 86400000, rd = (h.readings || []).filter((r) => r.t >= week);
+    const avg = (k) => rd.length ? Math.round(rd.reduce((n, r) => n + r[k], 0) / rd.length) : null;
+    const high = rd.filter((r) => /^High/.test(bpTier(r.sys, r.dia))).length, low = rd.filter((r) => bpTier(r.sys, r.dia) === 'Low').length;
+    const days = Math.max(1, Math.min(7, Math.ceil((now - (h.createdAt || now)) / 86400000)));
+    const perDay = (h.slots || []).length, expected = perDay * days, taken = (h.doses || []).filter((d) => d.t >= week).length;
+    const missed = perDay ? Math.max(0, expected - taken) : 0, sup = supplyInfo(h);
+    const sy = (h.symptoms || []).filter((x) => x.t >= week).map((x) => x.text).slice(-4);
+    const facts = { readings: rd.length, avgSys: avg('sys'), avgDia: avg('dia'), highReadings: high, lowReadings: low, tabletsExpected: perDay ? expected : null, tabletsMissed: perDay ? missed : null, symptoms: sy, daysOfTabletsLeft: sup && sup.daily ? sup.daysLeft : null };
+    const line = [
+      rd.length ? 'This week there ' + (rd.length === 1 ? 'was 1 reading' : 'were ' + rd.length + ' readings') + ', averaging ' + facts.avgSys + '/' + facts.avgDia + (high ? ', and ' + high + (high === 1 ? ' was' : ' were') + ' in the high range' : '') + (low ? (high ? ' and ' : ', and ') + low + ' low' : '') + '.' : 'No blood pressure readings were logged this week.',
+      perDay ? (missed ? missed + ' tablet' + (missed === 1 ? ' was' : 's were') + ' not logged.' : 'Every tablet was logged.') : '',
+      sy.length ? 'Reported: ' + sy.join(', ') + '.' : '',
+      facts.daysOfTabletsLeft !== null && facts.daysOfTabletsLeft <= 7 ? 'The tablets may run out in about ' + facts.daysOfTabletsLeft + ' day' + (facts.daysOfTabletsLeft === 1 ? '' : 's') + '.' : '',
+      'Please share this with your doctor.',
+    ].filter(Boolean).join(' ');
+    let text = line, source = 'rules';
+    if (this.env.MODEL_API_KEY && rd.length + sy.length > 0) {
+      try {
+        const out = await metaChat(this.env, { temperature: 0.2, maxTokens: 1500, timeoutMs: 25000, messages: [
+          { role: 'system', content: 'Write a calm summary of 2 to 4 short sentences for an older adult and their family, in plain English, using ONLY the facts in the JSON. Do not add causes, diagnoses, advice, medicine names or doses. Do not use numbers that are not in the JSON. End by saying to share it with their doctor.' },
+          { role: 'user', content: JSON.stringify({ name: h.name || 'The person', ...facts }) }] });
+        const t = guardReply(out);
+        const okNums = new Set((JSON.stringify(facts) + ' ' + line).match(/\d+/g) || []), usedNums = t.match(/\d+/g) || [];
+        if (t && t !== SAFE_FALLBACK && t.length >= 20 && usedNums.every((n) => okNums.has(n))) { text = t; source = 'meta'; } // any number the model invented means the fixed sentences are used instead
+      } catch (e) { console.error('insight error:', e && e.message); }
+    }
+    return { t: now, text, source, facts };
+  }
+
   async refillCheck(h, now) {
     const sup = supplyInfo(h); if (!sup || !sup.daily) return sup;
     const tier = sup.remaining <= 0 ? 'out' : sup.daysLeft <= 3 ? 'low' : '';
@@ -696,7 +728,8 @@ export class AlertHub {
     await this.deliver(h, ehs, { title: 'Orbit-X: tablets running low', body: msg, tag: 'orbit-supply' }, now, 'refill', 'everyone');
     if (h.tabletAlerts !== false) await this.smsCaregivers(h, 'ORBIT-X: ' + msg, now, 'refill');
     const ph = h.pharmacist;
-    if (ph && ph.phone) { // the pharmacist the person chose gets a short refill request. No health details are included.
+    if (ph && ph.phone && now - (h.pharmAt || 0) >= 20 * 3600000) { // at most one request every 20 hours, whatever number is set, so nobody can be spammed
+      h.pharmAt = now; // the pharmacist the person chose gets a short refill request. No health details are included.
       const ptxt = 'ORBIT-X refill request: ' + name + (tier === 'out' ? ' has run out of tablets.' : ' will run out of tablets in about ' + sup.daysLeft + ' day' + (sup.daysLeft === 1 ? '' : 's') + '.') + (h.phone ? ' Please call them on ' + h.phone + ' to prepare a refill.' : ' Please prepare a refill.');
       if (!smsConfigured(this.env)) this.ev(h, now, 'refill', 'sms_not_configured', 'pharmacist');
       else { const r = await sendSms(this.env, ph.phone, ptxt); this.ev(h, now, 'sms', r.state, 'pharmacist', r.http); }
@@ -1160,6 +1193,13 @@ export class AlertHub {
         h.rules.splice(i, 1); delete h.rulesFired[body.id];
         break;
       }
+      case 'insight': { // a short plain-words summary of the last 7 days. Code finds every number; the model may only reword them.
+        if (who.role === 'api') { fail(403, 'not_allowed'); break; }
+        const fresh = h.insight && now - h.insight.t < 6 * 3600000 && !(body && body.force && now - h.insight.t > 60000);
+        if (!fresh) h.insight = await this.makeInsight(h, now);
+        extra.insight = h.insight;
+        break;
+      }
       case 'share': {
         if (who.role === 'api') { fail(403, 'not_allowed'); break; }
         const al = (body.alertId && [h.alert, ...h.history].filter(Boolean).find((x) => x.id === body.alertId)) || h.alert || h.history[0];
@@ -1371,7 +1411,7 @@ async function handleHousehold(req, env, url, cors) {
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
-    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc'].includes(m[2]);
+    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc'].includes(m[2]);
     if (!get && !post) return json({ error: 'Not found' }, 404, cors);
     const text = post ? await req.text() : undefined;
     if (text && text.length > (m[2] === 'rtc' ? 14000 : 4000)) return json({ error: 'too_large' }, 413, cors);
