@@ -148,6 +148,7 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 .stage .chip{position:absolute;max-width:36%;padding:7px 9px;font-size:12px;line-height:1.3;z-index:2}
 .stage .chip b{font-size:14px;line-height:1.25}.stage .chip .rtag{font-size:11px;padding:1px 7px;margin-top:3px}
 .hint:empty{display:none}
+#supb .supa{display:flex;gap:8px;margin-top:8px}#supb .supa .btn,#supb .supa button{flex:1;margin:0;padding:9px 8px;font-size:13.5px;border-radius:999px;border:1px solid #7a5a12;background:none;color:#FCD34D;cursor:pointer;text-decoration:none;text-align:center}#supb .supa a.btn{background:#7a5a12;color:#fff}
 #c1{left:0;top:2px;bottom:auto}#c2{right:0;top:2px;bottom:auto}
 #face{position:absolute;left:50%;top:62%;transform:translate(-50%,-50%);height:104%;overflow:visible;width:auto;aspect-ratio:1;z-index:1}
 .caption{padding:4px 8px;line-height:1.45}
@@ -377,7 +378,9 @@ function syncPatientCall(a){
 /* ---------- helpers on state ---------- */
 function analysis(){ return D.analyzeReal(st.readings, st.doses, st.profile.slots, todayStr(), st.profile.createdDate); }
 function slotName(s){ return ['morning', 'afternoon', 'evening', 'night'].indexOf(s) > -1 ? s : 'evening'; }
+function packFinished(){ var su = st && st.profile && st.profile.supply; return !!(su && su.daily && su.remaining <= 0); }
 function pendingToday(){
+  if (packFinished()) return []; // no tablets left by my count: stop asking
   var h = new Date().getHours(), t = todayStr(), out = [];
   var gone = {}; st.doses.forEach(function(d){ gone[d.date + '|' + d.slot] = 1; });
   st.profile.slots.forEach(function(s){ if (!gone[t + '|' + s] && ((s === 'morning' && h >= 11) || (s === 'afternoon' && h >= 16) || (s === 'evening' && h >= 20) || (s === 'night' && h >= 23))) out.push(s); });
@@ -427,7 +430,7 @@ function firstLoad(){
     sess.firstRun = false; saveSession(sess);
   } else {
     var first = String(a.short || '').split(/(?<=\.)\s+/)[0]; // the full story is in History; the home screen only says the headline
-    txt = 'Hello ' + st.profile.name + '. ' + first + (pend.length ? ' Have you taken your ' + slotName(pend[0]) + ' tablet?' : '');
+    txt = 'Hello ' + st.profile.name + '. ' + first + (packFinished() ? ' Your tablets have finished. After you refill, enter the new count in Settings.' : '') + (pend.length ? ' Have you taken your ' + slotName(pend[0]) + ' tablet?' : '');
   }
   setCaption(txt, a.level === 'pattern' || a.level === 'watch');
   if (a.level === 'pattern' || a.level === 'watch') hint('Tap the sentence to see the proof');
@@ -442,7 +445,19 @@ function refreshCards(){
   if (st.profile.slots.length) { $('c2v').textContent = dosesLine(a); c2.classList.remove('hide'); } else c2.classList.add('hide');
   c2.querySelector('b').style.color = a.missed.length ? '' : '#86efac';
   var sb = $('supb'), su = st.profile.supply;
-  if (sb) { if (su && su.daily && su.daysLeft <= 7) { sb.textContent = su.remaining <= 0 ? 'Your tablets have run out by my count. Please get a refill today.' : 'Your tablets will run out in about ' + su.daysLeft + ' day' + (su.daysLeft === 1 ? '' : 's') + ' (' + su.remaining + ' left). Please ask your pharmacist for a refill.'; sb.classList.add('on'); } else sb.classList.remove('on'); }
+  if (sb) {
+    var tier = su && su.daily ? (su.remaining <= 0 ? 'out' : su.daysLeft <= 3 ? 'low' : su.daysLeft <= 7 ? 'soon' : '') : '';
+    var key = tier ? 'oxsup-' + sess.pid + '-' + su.at + '-' + tier : '';
+    window.__supShown = window.__supShown || {};
+    if (tier && (!lsGet(key) || window.__supShown[key])) { // shows once per level, stays until the person taps Got it
+      lsSet(key, '1'); window.__supShown[key] = true;
+      var ph = st.profile.pharmacist, msg = tier === 'out' ? 'Your tablets have run out by my count. Please get a refill today.' : 'Your tablets will run out in about ' + su.daysLeft + ' day' + (su.daysLeft === 1 ? '' : 's') + '. Please ask your pharmacist for a refill.';
+      sb.innerHTML = '<div>' + esc(msg) + '</div><div class="supa">' + (ph ? '<a class="btn" style="margin:0" href="' + esc(OXRadio.smsHref([ph.phone], 'Hello, this is ' + st.profile.name + '. I need a refill of my tablets. Please prepare it for me.')) + '">Text my pharmacist</a>' : '<button id="supset">Add my pharmacist</button>') + '<button id="supx">Got it</button></div>';
+      sb.classList.add('on');
+      $('supx').onclick = function(){ window.__supShown[key] = false; sb.classList.remove('on'); };
+      var ss = $('supset'); if (ss) ss.onclick = function(){ window.__supShown[key] = false; sb.classList.remove('on'); showSettings(); };
+    } else sb.classList.remove('on');
+  }
 }
 function schedulePatient(){
   stopTimer();
@@ -655,6 +670,7 @@ function saveBP(sys, dia, src){
 }
 function saveDose(hint){
   var slots = st.profile.slots;
+  if (packFinished()) { say('Your tablets have finished by my count, so I will not ask for more. If you refilled, tap Settings and enter how many tablets you have now.'); return; }
   if (!slots.length) { say('You told me you do not take regular medicine. You can add medicine times in Settings.'); return; }
   // Re-read the server first so a new day always starts fresh and nothing stale is shown.
   hApi('state').then(function(j){ take(j); refreshCards(); openDoseSheet(hint); });
@@ -980,6 +996,7 @@ function showSettings(){
     '<label class="l" for="sp">Your phone number</label><input class="field" id="sp" type="tel" maxlength="20" value="' + esc(st.profile.phone || '') + '"><div class="small" style="margin-top:4px">So your family can call you from an alert.</div>' +
     '<label class="l">Medicine times and tablets per time</label>' + slotRows(sl, st.profile.doseQty) + '<div class="small" style="margin-top:6px">Set how many tablets you usually take each time. You can still change the number whenever you log a dose.</div>' +
     '<label class="l" for="sup">Tablets left in my pack</label><input class="field" id="sup" type="number" inputmode="numeric" min="0" max="2000" placeholder="e.g. 30" value="' + (st.profile.supply ? st.profile.supply.remaining : '') + '"><div class="small" style="margin-top:4px">' + (st.profile.supply && st.profile.supply.daily ? 'About ' + st.profile.supply.daysLeft + ' day(s) left at ' + st.profile.supply.daily + ' tablet(s) a day. ' : '') + 'Orbit-X counts down as you log tablets and warns you and your family before they run out.</div>' +
+    '<label class="l" for="phn">My pharmacist (for refills)</label><input class="field" id="phn" maxlength="40" placeholder="Pharmacy name" value="' + esc(st.profile.pharmacist ? st.profile.pharmacist.name : '') + '"><input class="field" id="php" type="tel" maxlength="20" placeholder="Pharmacy phone number" value="' + esc(st.profile.pharmacist ? st.profile.pharmacist.phone : '') + '"><div class="small" style="margin-top:4px">When your tablets are nearly finished, Orbit-X texts them a short refill request with your name and number. Nothing else is shared.</div><div class="err" id="phe"></div>' +
     '<label class="check"><input type="checkbox" id="ta"' + (st.profile.tabletAlerts ? ' checked' : '') + '> Tell my caregivers if I have not logged a tablet</label><div class="small" style="margin-top:4px">I remind you first. If you still have not logged it a few hours later, your caregivers get a gentle heads-up. They are not rung.</div>' +
     '<button class="btn" id="sv">Save</button>' +
     '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
@@ -994,7 +1011,11 @@ function showSettings(){
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   bindQty(o);
-  $('sv').onclick = function(){ var rs = readSlots(); var sv0 = $('sup').value.trim(), supOld = st.profile.supply ? String(st.profile.supply.remaining) : '', body0 = { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: rs.slots, doseQty: rs.doseQty }; if (sv0 !== supOld) body0.supplyLeft = sv0 === '' ? null : parseInt(sv0, 10); hApi('profile', body0).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
+  $('sv').onclick = function(){ var rs = readSlots(); var sv0 = $('sup').value.trim(), supOld = st.profile.supply ? String(st.profile.supply.remaining) : '', body0 = { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: rs.slots, doseQty: rs.doseQty }; if (sv0 !== supOld) body0.supplyLeft = sv0 === '' ? null : parseInt(sv0, 10);
+    var pn0 = $('phn').value.trim(), pp0 = $('php').value.trim(), pOld = st.profile.pharmacist;
+    if (pp0 && !/^\+?[0-9][0-9\s\-()]{6,18}$/.test(pp0)) { $('phe').textContent = 'Please enter a valid phone number for the pharmacy.'; return; }
+    if ((pp0 || '') !== (pOld ? pOld.phone : '') || (pn0 || '') !== (pOld ? pOld.name : '')) body0.pharmacist = pp0 ? { name: pn0, phone: pp0 } : null;
+    hApi('profile', body0).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
   $('alb').onclick = function(){ if (st.profile.alertsOn) { var t0 = Date.now(); $('ale').textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ $('ale').textContent = diagText(j); if (j && j.ok && j.diag && j.diag[0] && j.diag[0].state === 'accepted') watchDisplayed(t0, function(m){ $('ale').textContent = m; }); }); return; } enableAlerts(function(ok, m){ $('ale').textContent = ok ? 'Phone alerts are on.' : m; if (ok) $('alb').textContent = 'Phone alerts are ON. Send a test'; }, true); };
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
