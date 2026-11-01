@@ -11,7 +11,7 @@
 <style>
 :root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#A9BADB;--cy:#38BDF8;--teal:#5EEAD4;--red:#F87171;--pink:#F9A8A8}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+html,body{-webkit-text-size-adjust:100%;text-size-adjust:100%;margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 body{display:flex;justify-content:center}
 .app{width:100%;max-width:440px;min-height:100%;display:flex;flex-direction:column;padding:12px 16px 18px;position:relative;overflow:hidden}
 header{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--mut)}
@@ -144,12 +144,12 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 .top .rec{color:#7DD3FC;font-size:13px;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--card)}
 .top .qm{width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:#7DD3FC;font-size:14px;font-weight:700;cursor:pointer;padding:0;line-height:1}
 .top .status{font-size:13px}
-.stage{position:relative;height:clamp(200px,29vh,245px);margin:4px 0 0;display:block;overflow:visible}
-.stage .chip{position:absolute;max-width:40%;padding:7px 9px;font-size:12px;line-height:1.3;z-index:2}
+.stage{position:relative;height:clamp(205px,30vh,250px);margin:4px 0 10px;display:block;overflow:visible}
+.stage .chip{position:absolute;max-width:38%;padding:7px 9px;font-size:12px;line-height:1.3;z-index:2}
 .stage .chip b{font-size:14px;line-height:1.25}.stage .chip .rtag{font-size:11px;padding:1px 7px;margin-top:3px}
 .hint:empty{display:none}
 #c1{left:0;top:2px;bottom:auto}#c2{right:0;top:2px;bottom:auto}
-#face{position:absolute;left:50%;top:58%;transform:translate(-50%,-50%);height:90%;width:auto;aspect-ratio:1;z-index:1}
+#face{position:absolute;left:50%;top:60%;transform:translate(-50%,-50%);height:112%;overflow:visible;width:auto;aspect-ratio:1;z-index:1}
 .caption{padding:4px 8px;line-height:1.45}
 .row{margin:8px 0}
 .dock{margin-top:6px}
@@ -392,7 +392,7 @@ function patientApp(){
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:17px">Orbit-X</b><span class="tr"><a class="rec" href="/workspace.html">My records</a><button class="qm" id="hlp" aria-label="How to use Orbit-X">?</button><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></span></div>' +
   '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b><span class="rtag" id="c1t" style="display:none"></span></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
-  '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div><div class="banner" id="offb" style="display:none;border-color:#1e3a8a;background:#0b1530;color:#bfdbfe"></div>' +
+  '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div><div class="banner" id="supb" style="border-color:#7a5a12;background:#241b06;color:#FCD34D"></div><div class="banner" id="offb" style="display:none;border-color:#1e3a8a;background:#0b1530;color:#bfdbfe"></div>' +
   '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">Log tablet</button><button id="hist" aria-haspopup="dialog">History</button></div>' +
   '<div class="inputbar"><input id="txt" placeholder="Type to Orbit" autocomplete="off" enterkeyhint="send"><button id="send">Send</button><button id="mic" aria-label="Talk to Orbit">&#127908;</button></div>' +
   '<div class="row" style="margin-top:12px"><button id="fam">Family</button><button id="fel">How I feel</button><button id="set">Settings</button></div>' +
@@ -440,6 +440,8 @@ function refreshCards(){
   var c2 = $('c2');
   if (st.profile.slots.length) { $('c2v').textContent = dosesLine(a); c2.classList.remove('hide'); } else c2.classList.add('hide');
   c2.querySelector('b').style.color = a.missed.length ? '' : '#86efac';
+  var sb = $('supb'), su = st.profile.supply;
+  if (sb) { if (su && su.daily && su.daysLeft <= 7) { sb.textContent = su.remaining <= 0 ? 'Your tablets have run out by my count. Please get a refill today.' : 'Your tablets will run out in about ' + su.daysLeft + ' day' + (su.daysLeft === 1 ? '' : 's') + ' (' + su.remaining + ' left). Please ask your pharmacist for a refill.'; sb.classList.add('on'); } else sb.classList.remove('on'); }
 }
 function schedulePatient(){
   stopTimer();
@@ -476,8 +478,7 @@ function renderEmergency(){
   if (ec) {
     var cgl = (st.caregivers || []).filter(function(c){ return c.phone && c.role !== 'clinician'; });
     var allTxt = OXRadio.helpText(st.profile.name, a.why, emLoc);
-    ec.innerHTML = (cgl.length > 1 ? '<a class="btn" href="' + esc(OXRadio.smsHref(cgl.map(function(c){ return c.phone; }), allTxt)) + '">Text everyone now</a>' : '') +
-      cgl.map(function(c){ return '<a class="btn green" href="tel:' + esc(c.phone) + '">Call ' + esc(c.name) + ' now</a><a class="btn ghost" href="' + esc(OXRadio.smsHref([c.phone], allTxt)) + '">Text ' + esc(c.name) + '</a>'; }).join('') +
+    ec.innerHTML =
       (OXRadio.radioReady() ? '<button class="btn ghost" id="emradio">Send over radio again</button>' : '');
     var rb = $('emradio'); if (rb) rb.onclick = function(){ OXRadio.sendRadio(allTxt.slice(0, 190)).then(function(ok){ rb.textContent = ok ? 'Sent over radio' : 'Radio send failed'; }); };
     if (!emLocAsked) { emLocAsked = true; OXRadio.locate(function(l){ if (l) { emLoc = l; renderEmergency(); } }); }
@@ -600,19 +601,32 @@ function parseBpm(dv){
 }
 function connectCuff(){
   var er = $('bte'), mg = $('btm'); er.textContent = '';
-  if (!navigator.bluetooth) { er.textContent = 'This browser cannot use Bluetooth devices. Use Chrome on Android.'; return; }
-  mg.textContent = 'Choose your cuff from the list...';
-  navigator.bluetooth.requestDevice({ filters: [{ services: ['blood_pressure'] }] }).then(function(d){
-    mg.textContent = 'Connecting to ' + (d.name || 'your cuff') + '...';
-    d.addEventListener('gattserverdisconnected', function(){ if ($('btm')) $('btm').textContent = 'Cuff disconnected. Tap Connect a cuff to pair again.'; });
+  if (!navigator.bluetooth) { er.textContent = 'This browser cannot use Bluetooth devices. Use Chrome on Android, with Bluetooth and Location switched on.'; return; }
+  mg.textContent = 'Switch your cuff on, then choose it from the list...';
+  var dev = null;
+  // Many cuffs do not advertise the blood-pressure service, so list every nearby device and look inside after connecting.
+  navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ['blood_pressure', 'battery_service', 'device_information', 'current_time'] }).then(function(d){
+    dev = d; mg.textContent = 'Connecting to ' + (d.name || 'your device') + '...';
+    d.addEventListener('gattserverdisconnected', function(){ if ($('btm') && $('btm').dataset.live) $('btm').textContent = 'Cuff disconnected. Tap Connect a cuff to pair again.'; });
     return d.gatt.connect();
-  }).then(function(g){ return g.getPrimaryService('blood_pressure'); })
-    .then(function(svc){ return svc.getCharacteristic('blood_pressure_measurement'); })
+  }).then(function(g){
+    return g.getPrimaryServices().then(function(list){
+      var has = list.some(function(x){ return /00001810/.test(x.uuid); });
+      if (!has) { try { g.disconnect(); } catch(e){} throw { name: 'NoBpService', found: list.map(function(x){ return x.uuid.slice(4, 8).toUpperCase(); }) }; }
+      return g.getPrimaryService('blood_pressure');
+    });
+  }).then(function(svc){ return svc.getCharacteristic('blood_pressure_measurement'); })
     .then(function(ch){ return ch.startNotifications().then(function(){
       ch.addEventListener('characteristicvaluechanged', function(e){ var r; try { r = parseBpm(e.target.value); } catch(x){ r = null; } gotCuff(r, 'bluetooth'); });
-      mg.textContent = 'Connected. Take a measurement on the cuff now. The reading will appear here.';
+      mg.dataset.live = '1'; mg.textContent = 'Connected to ' + ((dev && dev.name) || 'your cuff') + '. Take a measurement now. The reading will appear here.';
     }); })
-    .catch(function(e){ mg.textContent = ''; er.textContent = e && e.name === 'NotFoundError' ? 'No cuff was chosen, or none was found nearby.' : 'Could not connect to the cuff: ' + ((e && e.message) || 'error'); });
+    .catch(function(e){
+      mg.textContent = ''; mg.dataset.live = '';
+      if (e && e.name === 'NotFoundError') er.textContent = 'No device was chosen. Make sure the cuff is on and close to the phone, and that Location is switched on.';
+      else if (e && e.name === 'NoBpService') er.textContent = 'Connected, but ' + ((dev && dev.name) || 'this device') + ' does not use the standard Bluetooth blood-pressure service (it offers: ' + (e.found.join(', ') || 'nothing') + '). Many cuffs only work with their own app. Use that app and type the reading here, or send it through the API.';
+      else if (e && e.name === 'NetworkError') er.textContent = 'The cuff did not respond. Switch it off and on, move closer, and try again.';
+      else er.textContent = 'Could not connect to the cuff: ' + ((e && e.message) || 'error');
+    });
 }
 function gotCuff(r, src){
   if (!r || !(r.sys >= 50 && r.sys <= 300 && r.dia >= 30 && r.dia <= 200 && r.sys > r.dia)) { say('The cuff sent a reading I could not understand. Please measure again.'); return; }
@@ -653,7 +667,7 @@ function openDoseSheet(hint){
     slots.map(function(sl){
       var L = logged[sl], q = L ? (L.qty || 1) : (hint || usual[sl] || 1);
       return '<div class="cg dosec"><div class="dh"><b>' + cap(sl) + '</b>' + (L ? '<span class="tag ok">Taken ' + clock(L.t) + '</span>' : '<span class="tag warn">Not logged</span>') + '</div>' +
-        '<div class="dq"><span class="small">How many tablets?</span>' + qtyCtl('dq_' + sl, q) + '</div>' +
+        '<div class="dq"><span class="small">Tablets</span>' + qtyCtl('dq_' + sl, q) + '</div>' +
         '<div class="acts"><button class="pri" data-sl="' + sl + '">' + (L ? 'Update amount' : 'I took it') + '</button>' + (L ? '<button data-un="' + sl + '">Undo</button>' : '') + '</div></div>';
     }).join('') +
     '<div class="small" style="margin-top:12px">Record the number of tablets you actually took, as your doctor or pharmacist told you. Orbit-X never suggests or changes an amount.</div><button class="btn ghost" id="evb">Close</button>';
@@ -964,6 +978,7 @@ function showSettings(){
   o.innerHTML = '<h2>Settings</h2><label class="l" for="sn">Your name</label><input class="field" id="sn" maxlength="40" value="' + esc(st.profile.name) + '">' +
     '<label class="l" for="sp">Your phone number</label><input class="field" id="sp" type="tel" maxlength="20" value="' + esc(st.profile.phone || '') + '"><div class="small" style="margin-top:4px">So your family can call you from an alert.</div>' +
     '<label class="l">Medicine times and tablets per time</label>' + slotRows(sl, st.profile.doseQty) + '<div class="small" style="margin-top:6px">Set how many tablets you usually take each time. You can still change the number whenever you log a dose.</div>' +
+    '<label class="l" for="sup">Tablets left in my pack</label><input class="field" id="sup" type="number" inputmode="numeric" min="0" max="2000" placeholder="e.g. 30" value="' + (st.profile.supply ? st.profile.supply.remaining : '') + '"><div class="small" style="margin-top:4px">' + (st.profile.supply && st.profile.supply.daily ? 'About ' + st.profile.supply.daysLeft + ' day(s) left at ' + st.profile.supply.daily + ' tablet(s) a day. ' : '') + 'Orbit-X counts down as you log tablets and warns you and your family before they run out.</div>' +
     '<label class="check"><input type="checkbox" id="ta"' + (st.profile.tabletAlerts ? ' checked' : '') + '> Tell my caregivers if I have not logged a tablet</label><div class="small" style="margin-top:4px">I remind you first. If you still have not logged it a few hours later, your caregivers get a gentle heads-up. They are not rung.</div>' +
     '<button class="btn" id="sv">Save</button>' +
     '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
@@ -978,7 +993,7 @@ function showSettings(){
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   bindQty(o);
-  $('sv').onclick = function(){ var rs = readSlots(); hApi('profile', { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: rs.slots, doseQty: rs.doseQty }).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
+  $('sv').onclick = function(){ var rs = readSlots(); var sv0 = $('sup').value.trim(), supOld = st.profile.supply ? String(st.profile.supply.remaining) : '', body0 = { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: rs.slots, doseQty: rs.doseQty }; if (sv0 !== supOld) body0.supplyLeft = sv0 === '' ? null : parseInt(sv0, 10); hApi('profile', body0).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
   $('alb').onclick = function(){ if (st.profile.alertsOn) { var t0 = Date.now(); $('ale').textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ $('ale').textContent = diagText(j); if (j && j.ok && j.diag && j.diag[0] && j.diag[0].state === 'accepted') watchDisplayed(t0, function(m){ $('ale').textContent = m; }); }); return; } enableAlerts(function(ok, m){ $('ale').textContent = ok ? 'Phone alerts are on.' : m; if (ok) $('alb').textContent = 'Phone alerts are ON. Send a test'; }, true); };
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
