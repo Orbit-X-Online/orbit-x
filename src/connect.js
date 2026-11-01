@@ -4,7 +4,7 @@ import { ANALYTES, normName, compareFacts, findConflicts, buildTimeline, evidenc
 import { validateBundle, validateResource, resourceToFacts, factsToBundle } from './fhir.js';
 import { extractWithAI, explainWithAI, suggestMappings, explainDocWithAI, readPhotoWithAI, aiMode, providerName } from './ai.js';
 
-export const WORKSPACE_ACTIONS = new Set(['wstate', 'docadd', 'docdel', 'docget', 'ask', 'brief', 'briefshare', 'briefrevoke', 'decide', 'suggest', 'mapconfirm', 'consent', 'auditlog', 'wipe', 'briefpublic', 'docexplain', 'docretry', 'docphoto', 'fhirpull']);
+export const WORKSPACE_ACTIONS = new Set(['wstate', 'docadd', 'docdel', 'docget', 'ask', 'brief', 'briefshare', 'briefrevoke', 'decide', 'suggest', 'mapconfirm', 'consent', 'auditlog', 'wipe', 'briefpublic', 'docexplain', 'docretry', 'docphoto', 'fhirpull', 'cleartest']);
 export const V1_ACTIONS = new Set(['v1records', 'v1validate', 'v1connectors', 'v1events', 'v1handoffcreate', 'v1handoffget', 'v1handoffreceive', 'v1handoffack', 'v1verify', 'v1audit']);
 export const SCOPES = ['records:write', 'records:read', 'events:write', 'events:read', 'handoff:create', 'handoff:receive', 'audit:read'];
 export const LEGACY_SCOPES = ['events:write', 'events:read'];
@@ -313,6 +313,23 @@ async function wipe(ctx, D) {
   return J(wstateView(D, ctx));
 }
 
+// Removes everything that came from simulated or public test sources, plus the receipts and the activity log,
+// so the Connect area starts fresh. Real records the patient added themselves are kept.
+async function cleartest(ctx, D) {
+  const isSim = (t) => /simulated|public test data|synthetic|sandbox/i.test(String(t || ''));
+  const simDocs = D.docs.filter((d) => d.kind === 'connector' && (isSim(d.name) || isSim(d.system)));
+  const ids = new Set(simDocs.map((d) => d.id));
+  for (const d of simDocs) await ctx.storage.delete('doc:' + d.id);
+  D.docs = D.docs.filter((d) => !ids.has(d.id)); D.facts = D.facts.filter((f) => !ids.has(f.docId));
+  for (const f of D.facts) if (f.corroboratedBy) f.corroboratedBy = f.corroboratedBy.filter((c) => !c.simulated);
+  D.imports = D.imports.filter((i) => !i.simulated && !isSim(i.system)); D.handoffs = []; D.events = D.events.filter((e) => !e.simulated); D.audit = [];
+  ctx.h.shares = (ctx.h.shares || []).filter((x) => x.kind !== 'handoff');
+  const before = (ctx.h.apiKeys || []).length; ctx.h.apiKeys = (ctx.h.apiKeys || []).filter((k) => !k.sim);
+  await save(ctx, D, ['docs', 'facts', 'imports', 'handoffs', 'events', 'audit']);
+  const out = wstateView(D, ctx); out.cleared = { documents: simDocs.length, testKeys: before - ctx.h.apiKeys.length };
+  return J(out);
+}
+
 /* ------------------------------------------------------------------ Orbit Connect: FHIR import (Experience 2) */
 function outcome(severity, code, diag) { return { severity, code, diagnostics: diag }; }
 async function v1records(ctx, D) {
@@ -561,6 +578,7 @@ export async function handleConnect(ctx) {
       case 'consent': return consent(ctx, D);
       case 'auditlog': return auditlog(ctx, D);
       case 'wipe': return wipe(ctx, D);
+      case 'cleartest': return cleartest(ctx, D);
       default: break;
     }
   }
