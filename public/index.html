@@ -145,11 +145,11 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 .top .qm{width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:#7DD3FC;font-size:14px;font-weight:700;cursor:pointer;padding:0;line-height:1}
 .top .status{font-size:13px}
 .stage{position:relative;height:clamp(205px,30vh,250px);margin:4px 0 10px;display:block;overflow:visible}
-.stage .chip{position:absolute;max-width:38%;padding:7px 9px;font-size:12px;line-height:1.3;z-index:2}
+.stage .chip{position:absolute;max-width:36%;padding:7px 9px;font-size:12px;line-height:1.3;z-index:2}
 .stage .chip b{font-size:14px;line-height:1.25}.stage .chip .rtag{font-size:11px;padding:1px 7px;margin-top:3px}
 .hint:empty{display:none}
 #c1{left:0;top:2px;bottom:auto}#c2{right:0;top:2px;bottom:auto}
-#face{position:absolute;left:50%;top:60%;transform:translate(-50%,-50%);height:112%;overflow:visible;width:auto;aspect-ratio:1;z-index:1}
+#face{position:absolute;left:50%;top:62%;transform:translate(-50%,-50%);height:104%;overflow:visible;width:auto;aspect-ratio:1;z-index:1}
 .caption{padding:4px 8px;line-height:1.45}
 .row{margin:8px 0}
 .dock{margin-top:6px}
@@ -383,7 +383,7 @@ function pendingToday(){
   st.profile.slots.forEach(function(s){ if (!gone[t + '|' + s] && ((s === 'morning' && h >= 11) || (s === 'afternoon' && h >= 16) || (s === 'evening' && h >= 20) || (s === 'night' && h >= 23))) out.push(s); });
   return out;
 }
-function dosesLine(a){ return a.missed.length ? a.missed.length + ' tablet' + (a.missed.length === 1 ? '' : 's') + ' not logged this week' : 'Nothing missed this week'; }
+function dosesLine(a){ return a.missed.length ? a.missed.length + ' missed' : 'None missed'; }
 
 /* ---------- PATIENT ---------- */
 var pending = null, chatLog = [];
@@ -426,7 +426,8 @@ function firstLoad(){
     txt = 'Hello ' + st.profile.name + '. ' + a.sentence + ' You can add a family member who will be alerted if you need help. Tap Family.';
     sess.firstRun = false; saveSession(sess);
   } else {
-    txt = 'Hello ' + st.profile.name + '. ' + a.short + (pend.length ? ' Have you taken your ' + slotName(pend[0]) + ' tablet?' : '');
+    var first = String(a.short || '').split(/(?<=\.)\s+/)[0]; // the full story is in History; the home screen only says the headline
+    txt = 'Hello ' + st.profile.name + '. ' + first + (pend.length ? ' Have you taken your ' + slotName(pend[0]) + ' tablet?' : '');
   }
   setCaption(txt, a.level === 'pattern' || a.level === 'watch');
   if (a.level === 'pattern' || a.level === 'watch') hint('Tap the sentence to see the proof');
