@@ -4,7 +4,7 @@ import { ANALYTES, normName, compareFacts, findConflicts, buildTimeline, evidenc
 import { validateBundle, validateResource, resourceToFacts, factsToBundle } from './fhir.js';
 import { extractWithAI, explainWithAI, suggestMappings, explainDocWithAI, readPhotoWithAI, aiMode, providerName } from './ai.js';
 
-export const WORKSPACE_ACTIONS = new Set(['wstate', 'docadd', 'docdel', 'docget', 'ask', 'brief', 'briefshare', 'briefrevoke', 'decide', 'suggest', 'mapconfirm', 'consent', 'auditlog', 'wipe', 'briefpublic', 'docexplain', 'docretry', 'docphoto']);
+export const WORKSPACE_ACTIONS = new Set(['wstate', 'docadd', 'docdel', 'docget', 'ask', 'brief', 'briefshare', 'briefrevoke', 'decide', 'suggest', 'mapconfirm', 'consent', 'auditlog', 'wipe', 'briefpublic', 'docexplain', 'docretry', 'docphoto', 'fhirpull']);
 export const V1_ACTIONS = new Set(['v1records', 'v1validate', 'v1connectors', 'v1events', 'v1handoffcreate', 'v1handoffget', 'v1handoffreceive', 'v1handoffack', 'v1verify', 'v1audit']);
 export const SCOPES = ['records:write', 'records:read', 'events:write', 'events:read', 'handoff:create', 'handoff:receive', 'audit:read'];
 export const LEGACY_SCOPES = ['events:write', 'events:read'];
@@ -178,6 +178,34 @@ async function docphoto(ctx, D) {
   await logAudit(ctx, D, 'patient', 'document.photo', r.ok ? 'ok' : 'failed', r.ok ? 'read by ' + (r.model || 'AI') + ' (' + r.text.length + ' characters)' : r.error);
   if (!r.ok) return J({ ok: false, error: r.error, detail: r.detail || null }, r.error === 'bad_image' ? 400 : 200);
   return J({ ok: true, text: r.text, model: r.model, ms: r.ms, unclear: r.unclear });
+}
+// Pull vital signs from a real hospital-record system over standard FHIR, then run them through the same checks as any import.
+// Only https servers on the list are contacted (public test servers hold synthetic patients; real servers must be added with FHIR_HOSTS).
+export const FHIR_DEMO_HOSTS = ['hapi.fhir.org', 'r4.smarthealthit.org', 'o3.openmrs.org', 'demo.openmrs.org'];
+async function fhirpull(ctx, D) {
+  let u; try { u = new URL(String(ctx.body.base || '')); } catch { return J({ ok: false, error: 'bad_url' }, 400); }
+  const extra = String(ctx.env.FHIR_HOSTS || '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
+  const host = u.hostname.toLowerCase(), demo = FHIR_DEMO_HOSTS.includes(host);
+  if (u.protocol !== 'https:' || u.port || u.username || u.password || (!demo && !extra.includes(host))) { await logAudit(ctx, D, 'patient', 'fhir.pull', 'denied', 'host not allowed: ' + host.slice(0, 60)); return J({ ok: false, error: 'host_not_allowed', allowed: FHIR_DEMO_HOSTS.concat(extra) }, 400); }
+  const pid = String(ctx.body.patientId || '').replace(/[^A-Za-z0-9\-.]/g, '').slice(0, 64);
+  if (!demo && !pid) return J({ ok: false, error: 'patient_id_required' }, 400);
+  const base = (u.origin + u.pathname).replace(/\/+$/, '');
+  const query = pid ? 'Observation?patient=' + pid + '&category=vital-signs&_count=40' : 'Observation?code=' + encodeURIComponent('http://loinc.org|85354-9') + '&_count=30';
+  const headers = { Accept: 'application/fhir+json' };
+  const user = String(ctx.body.user || '').slice(0, 80), pass = String(ctx.body.pass || '').slice(0, 120); // used for this one request, never stored or logged
+  if (user) headers.Authorization = 'Basic ' + btoa(user + ':' + pass);
+  let res, text;
+  const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 15000);
+  try { res = await fetch(base + '/' + query, { headers, signal: ac.signal, redirect: 'error' }); text = (await res.text()).slice(0, 700000); }
+  catch (e) { clearTimeout(tm); await logAudit(ctx, D, 'patient', 'fhir.pull', 'error', host + ': unreachable'); return J({ ok: false, error: 'server_unreachable', detail: String(e && e.message || '').slice(0, 100) }, 200); }
+  clearTimeout(tm);
+  if (!res.ok) { await logAudit(ctx, D, 'patient', 'fhir.pull', 'error', host + ': HTTP ' + res.status); return J({ ok: false, error: res.status === 401 || res.status === 403 ? 'server_needs_login' : 'server_error', http: res.status }, 200); }
+  let bundle; try { bundle = JSON.parse(text); } catch { bundle = null; }
+  if (!bundle || bundle.resourceType !== 'Bundle') return J({ ok: false, error: 'not_fhir' }, 200);
+  const resources = (bundle.entry || []).map((e) => e && e.resource).filter((r) => r && r.resourceType === 'Observation').slice(0, 50);
+  if (!resources.length) { await logAudit(ctx, D, 'patient', 'fhir.pull', 'ok', host + ': nothing found'); return J({ ok: false, error: 'nothing_found' }, 200); }
+  const sub = { ...ctx, dry: false, req: { method: 'POST' }, who: { role: 'api', label: demo ? host + ' (public test data)' : host, sim: demo, scopes: ['records:write'] }, body: { resourceType: 'Bundle', type: 'collection', entry: resources.map((r) => ({ resource: r })) } };
+  return v1records(sub, D);
 }
 // Run the AI reading again for a document that fell back to the rule-based parser.
 async function docretry(ctx, D) {
@@ -522,6 +550,7 @@ export async function handleConnect(ctx) {
       case 'docexplain': return docexplain(ctx, D);
       case 'docretry': return docretry(ctx, D);
       case 'docphoto': return docphoto(ctx, D);
+      case 'fhirpull': return fhirpull(ctx, D);
       case 'ask': return ask(ctx, D);
       case 'brief': return brief(ctx, D);
       case 'briefshare': return briefshare(ctx, D);
