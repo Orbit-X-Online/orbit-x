@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070B16">
+<title>Orbit-X Cuff Gateway</title>
+<style>
+:root{--bg:#070B16;--card:#0E1730;--line:#25407A;--txt:#E6F0FF;--mut:#A9BADB;--cy:#38BDF8;--grn:#4ADE80;--red:#F87171;--amb:#FBBF24}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-text-size-adjust:100%}
+.wrap{max-width:440px;margin:0 auto;padding:16px 16px 40px}
+h1{font-size:20px;margin:6px 0 4px}p,.small{color:var(--mut);font-size:14px;line-height:1.5;margin:6px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+label{display:block;font-size:13px;color:var(--cy);margin:10px 0 4px}
+input{width:100%;background:#0B1226;border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:12px;font-size:15px}
+button{width:100%;border:0;border-radius:999px;background:#2563EB;color:#fff;font-size:15px;font-weight:600;padding:13px;margin-top:12px;cursor:pointer}
+button.g{background:none;border:1px solid var(--line);color:var(--txt)}button:disabled{opacity:.5}
+.big{font-size:40px;font-weight:700;text-align:center;margin:8px 0 2px}.tag{display:inline-block;border-radius:999px;border:1px solid var(--line);padding:3px 10px;font-size:12px}
+.ok{color:var(--grn)}.bad{color:var(--red)}.warn{color:var(--amb)}
+.row{display:flex;justify-content:space-between;gap:8px;border-top:1px solid #16224a;padding:8px 0;font-size:14px}
+a{color:var(--cy)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Orbit-X Cuff Gateway</h1>
+  <p>Turns any phone or laptop with Chrome into a bridge: a Bluetooth blood-pressure cuff measures, and every reading goes straight into the patient's Orbit-X record for the doctor to see. No typing.</p>
+
+  <div class="card">
+    <b>1. Connect to the patient's account</b>
+    <label for="k">Orbit-X device key</label>
+    <input id="k" placeholder="ox_..." autocomplete="off" spellcheck="false">
+    <p class="small">Make a key on the doctor page: Connect, "Send readings and alerts". It stays on this device only.</p>
+    <button class="g" id="ksave">Save key</button><div class="small" id="kmsg"></div>
+  </div>
+
+  <div class="card">
+    <b>2. Connect the cuff</b>
+    <p class="small">Switch the cuff on, then choose it from the list. Needs Chrome on Android or a computer, with Bluetooth on.</p>
+    <button id="go">Connect a cuff</button>
+    <div class="small" id="st" role="status"></div>
+  </div>
+
+  <div class="card">
+    <b>3. Measure</b>
+    <p class="small">Take a measurement on the cuff. It is sent automatically.</p>
+    <div class="big" id="bp">- / -</div><div style="text-align:center" id="band"></div>
+    <div id="log"></div>
+    <button class="g" id="test">Send a test reading (120/80)</button>
+  </div>
+  <p class="small">Many cheap cuffs only work with their own app and cannot connect here. If yours does not, the page tells you what it offers.</p>
+</div>
+<script>
+(function(){
+var $ = function(i){ return document.getElementById(i); }, KEY = 'orbitx.gateway.key';
+function esc(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function lsGet(){ try { return localStorage.getItem(KEY) || ''; } catch(e){ return ''; } }
+var key = new URLSearchParams(location.search).get('key') || lsGet(); if (key) { $('k').value = key; try { localStorage.setItem(KEY, key); } catch(e){} if (location.search) history.replaceState(null, '', location.pathname); }
+$('ksave').onclick = function(){ key = $('k').value.trim(); try { localStorage.setItem(KEY, key); } catch(e){} $('kmsg').textContent = /^ox_[a-z0-9]{8}_[a-z0-9]{24}$/.test(key) ? 'Saved on this device.' : 'That does not look like an Orbit-X key.'; };
+function sfloat(v){ var raw = v & 0x0FFF; if (raw >= 0x07FE && raw <= 0x0802) return NaN; var m = raw >= 0x0800 ? raw - 0x1000 : raw, e = v >> 12; if (e >= 8) e -= 16; return m * Math.pow(10, e); }
+function parseBpm(dv){ var f = dv.getUint8(0), sys = sfloat(dv.getUint16(1, true)), dia = sfloat(dv.getUint16(3, true)); if (f & 1) { sys *= 7.50062; dia *= 7.50062; } var off = 7 + (f & 2 ? 7 : 0), pulse = (f & 4) && dv.byteLength >= off + 2 ? Math.round(sfloat(dv.getUint16(off, true))) : null; return { sys: Math.round(sys), dia: Math.round(dia), pulse: pulse }; }
+var devName = 'Bluetooth cuff', seen = {};
+function send(r, name){
+  if (!/^ox_[a-z0-9]{8}_[a-z0-9]{24}$/.test(key)) { $('st').innerHTML = '<span class="bad">Add your device key in step 1 first.</span>'; return; }
+  var sig = r.sys + '/' + r.dia + '/' + Math.floor(Date.now() / 20000); if (seen[sig]) return; seen[sig] = 1; // a cuff may repeat a reading; send it once
+  $('bp').textContent = r.sys + ' / ' + r.dia;
+  fetch('/api/v1/signals', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Orbit-Key': key }, body: JSON.stringify({ systolic: r.sys, diastolic: r.dia, pulse: r.pulse || undefined, device: name || devName }) })
+    .then(function(x){ return x.json().then(function(j){ return { s: x.status, j: j }; }); })
+    .then(function(o){
+      var ok = o.s === 200 && o.j.ok;
+      $('band').innerHTML = ok ? '<span class="tag ok">Saved: ' + esc(o.j.result ? o.j.result.band : 'ok') + '</span>' : '<span class="tag bad">Not saved (' + esc(o.j.error || o.s) + ')</span>';
+      $('log').insertAdjacentHTML('afterbegin', '<div class="row"><span>' + r.sys + '/' + r.dia + (r.pulse ? ' &middot; pulse ' + r.pulse : '') + '</span><span class="' + (ok ? 'ok' : 'bad') + '">' + (ok ? 'sent' : 'failed') + ' &middot; ' + new Date().toLocaleTimeString() + '</span></div>');
+    }).catch(function(){ $('band').innerHTML = '<span class="tag bad">No internet. Not saved.</span>'; });
+}
+$('test').onclick = function(){ send({ sys: 120, dia: 80, pulse: 70 }, 'Gateway test'); seen = {}; };
+$('go').onclick = function(){
+  if (!navigator.bluetooth) { $('st').innerHTML = '<span class="bad">This browser cannot use Bluetooth. Use Chrome on Android or a computer.</span>'; return; }
+  $('st').textContent = 'Choose your cuff from the list...';
+  var dev;
+  navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ['blood_pressure', 'battery_service', 'device_information'] })
+    .then(function(d){ dev = d; devName = d.name || 'Bluetooth cuff'; $('st').textContent = 'Connecting to ' + devName + '...'; d.addEventListener('gattserverdisconnected', function(){ $('st').innerHTML = '<span class="warn">Cuff disconnected. Tap Connect a cuff to pair again.</span>'; }); return d.gatt.connect(); })
+    .then(function(g){ return g.getPrimaryServices().then(function(list){ if (!list.some(function(x){ return /00001810/.test(x.uuid); })) { try { g.disconnect(); } catch(e){} throw { name: 'NoBp', found: list.map(function(x){ return x.uuid.slice(4, 8).toUpperCase(); }) }; } return g.getPrimaryService('blood_pressure'); }); })
+    .then(function(svc){ return svc.getCharacteristic('blood_pressure_measurement'); })
+    .then(function(ch){ return ch.startNotifications().then(function(){ ch.addEventListener('characteristicvaluechanged', function(e){ var r; try { r = parseBpm(e.target.value); } catch(x){ r = null; } if (r && r.sys >= 50 && r.sys <= 300 && r.dia >= 30 && r.dia <= 200 && r.sys > r.dia) send(r); else $('st').innerHTML = '<span class="warn">The cuff sent something I could not read. Measure again.</span>'; }); $('st').innerHTML = '<span class="ok">Connected to ' + esc(devName) + '.</span> Measure now.'; }); })
+    .catch(function(e){
+      if (e && e.name === 'NotFoundError') $('st').innerHTML = '<span class="bad">No device chosen. Switch the cuff on, keep it close, and make sure Location is on.</span>';
+      else if (e && e.name === 'NoBp') $('st').innerHTML = '<span class="bad">' + esc(devName) + ' does not use the standard blood-pressure service (it offers: ' + esc(e.found.join(', ') || 'nothing') + '). Use the cuff maker\'s app instead.</span>';
+      else $('st').innerHTML = '<span class="bad">Could not connect: ' + esc((e && e.message) || 'error') + '</span>';
+    });
+};
+})();
+</script>
+</body>
+</html>
