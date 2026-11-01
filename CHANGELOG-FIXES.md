@@ -96,3 +96,7 @@ Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio ha
 63. Developer page simplified to Connect / Data in / Activity / More tools. Connect = make a key, copy a ready example (curl, Python, ESP32), watch the first reading arrive. Starts empty.
 64. "Clear test data" (new action cleartest): removes simulated/test imports, receipts, test keys and the activity log; runs once automatically on the developer page. Tests added.
 65. Home screen: bigger head, text-size-adjust, tighter spacing. Dose sheet label shortened.
+66. Pharmacist refills: Settings -> "My pharmacist". At 3 days or fewer left, and when the pack is empty, the pharmacist gets one short SMS refill request (name and the person's number only), the family gets an alert and text, and the person gets a push. Once per level.
+67. The "running low" banner shows once per level (7 days, 3 days, empty), has Text my pharmacist / Got it, and does not return after Got it.
+68. When the pack is finished the app stops asking about tablets (no reminders, no missed-tablet texts, no question on the home screen) until a new count is entered in Settings.
+69. Home greeting shortened to the headline; "This week" chip reads "N missed".
