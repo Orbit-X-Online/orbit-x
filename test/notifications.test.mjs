@@ -272,6 +272,25 @@ pushes.length = 0; await call('POST', SP + 'profile', { name: 'Bola' }, sp.token
 r = await call('POST', SP + 'profile', { supplyLeft: -3 }, sp.token); assert.equal(r._s, 400); r = await call('POST', SP + 'profile', { supplyLeft: null }, sp.token); assert.equal(r.profile.supply, null); ok('bad pack sizes are refused and the tracker can be cleared');
 delete env.AT_USERNAME; delete env.AT_API_KEY;
 
+// ---------- J6. pharmacist refill requests; reminders stop when the pack is finished
+env.AT_USERNAME = 'OrbitX'; env.AT_API_KEY = 'atk';
+clock = at(31, 6);
+const ph = await call('POST', '/api/create', { name: 'Kola', phone: '08011119999', slots: ['morning'], doseQty: { morning: 1 }, today: '2026-10-31', tz: 0, accountType: 'individual' });
+const PH = '/api/h/' + ph.pid + '/';
+r = await call('POST', PH + 'invite', { name: 'Sade', phone: '08022220000' }, ph.token); assert.ok((await call('POST', '/api/join', { code: r.code })).ok);
+r = await call('POST', PH + 'profile', { pharmacist: { name: 'Care Pharmacy', phone: 'abc' } }, ph.token); assert.equal(r._s, 400); ok('a bad pharmacist number is refused');
+r = await call('POST', PH + 'profile', { pharmacist: { name: 'Care Pharmacy', phone: '08033330000' } }, ph.token); assert.equal(r.profile.pharmacist.name, 'Care Pharmacy'); ok('the person can add their pharmacist');
+const ptxt = () => pushes.filter((x) => x.url.includes('africastalking')).map((x) => decodeURIComponent(String(x.init.body).replace(/\+/g, ' ')));
+pushes.length = 0; await call('POST', PH + 'profile', { supplyLeft: 3 }, ph.token);
+assert.ok(ptxt().some((t) => /refill request.*Kola.*3 days/.test(t) && /8033330000/.test(t))); assert.ok(ptxt().some((t) => /Please help them get a refill/.test(t))); ok('the pharmacist and the family both get a refill message when 3 days are left');
+pushes.length = 0; await call('POST', PH + 'dose', { slot: 'morning', date: '2026-10-31' }, ph.token); await call('POST', PH + 'profile', { name: 'Kola' }, ph.token); assert.equal(ptxt().filter((t) => /refill request/.test(t)).length, 0); ok('the pharmacist is told only once per level');
+r = await call('POST', PH + 'profile', { supplyLeft: 1 }, ph.token); pushes.length = 0; r = await call('POST', PH + 'dose', { slot: 'morning', date: '2026-11-01' }, ph.token).catch(() => ({})); clock = at(31, 7); r = await call('POST', PH + 'profile', { supplyLeft: 0 }, ph.token);
+assert.equal(r.profile.supply.remaining, 0); assert.ok(ptxt().some((t) => /refill request.*run out/.test(t))); ok('an empty pack sends a final refill request');
+pushes.length = 0; clock = at(31, 11, 5); await alarmNow(ph.pid); clock = at(31, 22, 5); await alarmNow(ph.pid);
+assert.equal(ptxt().filter((t) => /not logged|nearly over/.test(t)).length, 0); ok('no tablet reminders or missed-tablet texts once the pack is finished');
+r = await call('POST', PH + 'profile', { supplyLeft: 30 }, ph.token); assert.equal(r.profile.supply.daysLeft, 30); ok('entering a new pack restarts the count');
+delete env.AT_USERNAME; delete env.AT_API_KEY;
+
 // ---------- K. invalid input
 r = await call('POST', Q + 'bp', { sys: 300, dia: 400, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
 r = await call('POST', Q + 'bp', { sys: 80, dia: 90, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
