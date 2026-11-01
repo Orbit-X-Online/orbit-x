@@ -284,12 +284,34 @@ const ptxt = () => pushes.filter((x) => x.url.includes('africastalking')).map((x
 pushes.length = 0; await call('POST', PH + 'profile', { supplyLeft: 3 }, ph.token);
 assert.ok(ptxt().some((t) => /refill request.*Kola.*3 days/.test(t) && /8033330000/.test(t))); assert.ok(ptxt().some((t) => /Please help them get a refill/.test(t))); ok('the pharmacist and the family both get a refill message when 3 days are left');
 pushes.length = 0; await call('POST', PH + 'dose', { slot: 'morning', date: '2026-10-31' }, ph.token); await call('POST', PH + 'profile', { name: 'Kola' }, ph.token); assert.equal(ptxt().filter((t) => /refill request/.test(t)).length, 0); ok('the pharmacist is told only once per level');
-r = await call('POST', PH + 'profile', { supplyLeft: 1 }, ph.token); pushes.length = 0; r = await call('POST', PH + 'dose', { slot: 'morning', date: '2026-11-01' }, ph.token).catch(() => ({})); clock = at(31, 7); r = await call('POST', PH + 'profile', { supplyLeft: 0 }, ph.token);
+r = await call('POST', PH + 'profile', { supplyLeft: 1 }, ph.token); pushes.length = 0; r = await call('POST', PH + 'dose', { slot: 'morning', date: '2026-11-01' }, ph.token).catch(() => ({})); clock = at(31, 6) + 21 * 3600000; r = await call('POST', PH + 'profile', { supplyLeft: 0 }, ph.token);
 assert.equal(r.profile.supply.remaining, 0); assert.ok(ptxt().some((t) => /refill request.*run out/.test(t))); ok('an empty pack sends a final refill request');
 pushes.length = 0; clock = at(31, 11, 5); await alarmNow(ph.pid); clock = at(31, 22, 5); await alarmNow(ph.pid);
 assert.equal(ptxt().filter((t) => /not logged|nearly over/.test(t)).length, 0); ok('no tablet reminders or missed-tablet texts once the pack is finished');
+pushes.length = 0; clock = at(31, 8);
+await call('POST', PH + 'profile', { supplyLeft: 1, pharmacist: { name: 'Other', phone: '08044440000' } }, ph.token); await call('POST', PH + 'profile', { supplyLeft: 2 }, ph.token); await call('POST', PH + 'profile', { supplyLeft: 0 }, ph.token);
+assert.equal(ptxt().filter((t) => /refill request/.test(t)).length, 0); ok('changing the count or the pharmacist number again and again cannot spam anyone: one request per 20 hours at most');
+clock = at(33, 6); pushes.length = 0; await call('POST', PH + 'profile', { supplyLeft: 1 }, ph.token); assert.equal(ptxt().filter((t) => /refill request/.test(t)).length, 1); ok('a day later a new request can go out, still only one');
 r = await call('POST', PH + 'profile', { supplyLeft: 30 }, ph.token); assert.equal(r.profile.supply.daysLeft, 30); ok('entering a new pack restarts the count');
 delete env.AT_USERNAME; delete env.AT_API_KEY;
+
+// ---------- J7. the Orbit summary: code finds the numbers, the model only rewords them
+clock = at(31, 9);
+const ins = await call('POST', '/api/create', { name: 'Ife', slots: ['morning'], doseQty: { morning: 1 }, today: '2026-10-31', tz: 0, accountType: 'individual' });
+const IN = '/api/h/' + ins.pid + '/';
+await call('POST', IN + 'bp', { sys: 150, dia: 95, date: '2026-10-31' }, ins.token); await call('POST', IN + 'bp', { sys: 130, dia: 85, date: '2026-10-31' }, ins.token);
+r = await call('POST', IN + 'insight', {}, ins.token); assert.equal(r.insight.source, 'rules'); assert.equal(r.insight.facts.readings, 2); assert.equal(r.insight.facts.avgSys, 140); assert.match(r.insight.text, /2 readings.*140\/90/); ok('without an AI key the summary is written from fixed sentences, with the right numbers');
+Object.assign(env, { MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.test/v1', MODEL_TEXT: 'm' }); const aiEnv = env;
+pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Ife had 2 readings this week, averaging 140/90, and one was high. Please share this with your doctor.' } }] }), { status: 200 });
+r = await call('POST', IN + 'insight', { force: true }, ins.token, aiEnv); assert.equal(r.insight.source, 'rules'); ok('the summary is cached for a few hours so the AI is not called again and again');
+clock = at(31, 20); r = await call('POST', IN + 'insight', { force: true }, ins.token, aiEnv); assert.equal(r.insight.source, 'meta'); assert.match(r.insight.text, /140\/90/); ok('with an AI key the model rewords the facts (shown as Muse Spark)');
+pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Ife had 7 readings and averaged 150/99. Please share with your doctor.' } }] }), { status: 200 });
+clock = at(32, 9); r = await call('POST', IN + 'insight', { force: true }, ins.token, aiEnv); assert.equal(r.insight.source, 'rules'); ok('if the model invents a number, its text is thrown away and the fixed sentences are used');
+pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'You should take 40 mg more. Ife had 2 readings.' } }] }), { status: 200 });
+clock = at(33, 9); r = await call('POST', IN + 'insight', { force: true }, ins.token, aiEnv); assert.equal(r.insight.source, 'rules'); ok('if the model gives medical advice, its text is thrown away');
+pushHandler = async () => new Response('', { status: 201 });
+delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
+r = await call('POST', IN + 'insight', {}, ins.token); const kk = (await call('POST', IN + 'apikey', { label: 'k', scopes: ['events:read'] }, ins.token)).key; r = await call('POST', '/api/h/' + ins.pid + '/insight', {}, kk); assert.ok(r._s === 403 || r._s === 401); ok('an API key cannot request a summary');
 
 // ---------- K. invalid input
 r = await call('POST', Q + 'bp', { sys: 300, dia: 400, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
@@ -320,6 +342,11 @@ pushHandler = async () => new Response(JSON.stringify({ choices: [] }), { status
 r = await call('POST', '/api/assistant', { messages: [{ role: 'user', content: 'hi' }] }, null, withKey); assert.equal(r._s, 502);
 pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Take 40 mg of it and you probably have X.' } }] }), { status: 200 });
 r = await call('POST', '/api/assistant', { messages: [{ role: 'user', content: 'hi' }] }, null, withKey); assert.ok(/can't give medical advice/.test(r.reply)); ok('malformed provider answers fail safely; unsafe medical advice is replaced');
+pushHandler = async (u) => u.startsWith('https://meta.test') ? new Response(JSON.stringify({ error: 'billing' }), { status: 402 }) : new Response(JSON.stringify({ choices: [{ message: { content: 'Sit down and rest, then tell your doctor.' } }] }), { status: 200 });
+const dual = { ...env, MODEL_API_KEY: 'meta-key', MODEL_BASE_URL: 'https://meta.test/v1', MODEL_TEXT: 'muse-spark-1.3', MODEL2_API_KEY: 'bt-key', MODEL2_BASE_URL: 'https://bt.test/v1', MODEL2_TEXT: 'meta-models/muse-spark-open-1026' };
+r = await call('POST', '/api/assistant', { messages: [{ role: 'user', content: 'I feel dizzy' }] }, null, dual); assert.equal(r._s, 200); assert.match(r.reply, /rest/); assert.ok(pushes.some((x) => x.url.startsWith('https://meta.test')) && pushes.some((x) => x.url.startsWith('https://bt.test')));
+ok('if the Meta Model API is out of credit or down, Baseten answers instead (and the answer is still safety-checked)');
+r = await call('POST', '/api/assistant', { messages: [{ role: 'user', content: 'hi' }] }, null, { ...dual, MODEL2_API_KEY: '' }); assert.equal(r._s, 502); ok('with no second provider the error is reported cleanly');
 pushHandler = async () => new Response('', { status: 201 });
 
 { let hit = 0; for (let i = 0; i < 40 && !hit; i++) { const x = await call('POST', '/api/explain', { sentence: 'x' }, null, noKey); if (x._s === 429) hit = i; } assert.ok(hit > 0 && hit <= 31); ok('the public AI routes are rate-limited per address so nobody can drain the AI credit'); }
