@@ -88,3 +88,11 @@ Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio ha
 57. Guide page: "Who Orbit-X is for" (primary, secondary, partner users).
 58. API /api/v1/signals: accepts text numbers, systolic/diastolic, optional type, pulse, device/source, measuredAt; replies with band and the 10 latest readings.
 59. FHIR live import (src/connect.js, developer.html) and Baseten photo reading remain from the previous round.
+
+## Round 6
+60. Alert screen (online): only Call 112, "I am okay. Cancel the alert" and Close remain. Per-caregiver call/text buttons removed (the server already calls and texts). With no internet the text fallback stays.
+61. Tablet supply tracker: Settings -> "Tablets left in my pack". Orbit-X counts down from logged tablets, shows days left, warns on the home screen at 7 days or fewer, and texts and alerts the family once at 3 days or fewer and once when empty.
+62. Bluetooth cuff: lists every nearby device (many cuffs do not advertise the blood-pressure service), looks inside after connecting, and says clearly what a non-standard cuff offers and what to do.
+63. Developer page simplified to Connect / Data in / Activity / More tools. Connect = make a key, copy a ready example (curl, Python, ESP32), watch the first reading arrive. Starts empty.
+64. "Clear test data" (new action cleartest): removes simulated/test imports, receipts, test keys and the activity log; runs once automatically on the developer page. Tests added.
+65. Home screen: bigger head, text-size-adjust, tighter spacing. Dose sheet label shortened.
