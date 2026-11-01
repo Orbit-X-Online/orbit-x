@@ -14,11 +14,14 @@ import { aiMode, providerName } from './ai.js';
    ===================================================================== */
 
 const SYSTEM_PROMPT =
-  'You are the Orbit-X assistant. You explain health patterns in plain, calm language. ' +
-  'You are not a doctor and never diagnose. You never give medical advice, never suggest medicine or doses, ' +
-  'and never say what condition someone has. For anything that sounds like an emergency ' +
-  '(chest pain, trouble breathing, stroke signs, severe bleeding, fainting), tell the person to ' +
-  'call 112 now. For anything medical, suggest they ask their doctor or pharmacist. Keep answers short.';
+  'You are the Orbit-X assistant for older adults managing blood pressure. Speak in plain, calm, short sentences. ' +
+  'You are not a doctor. You may explain in general terms what a symptom can be linked to (for example that a headache or dizziness ' +
+  'can go with high or low blood pressure but has many other causes) and offer only simple comfort steps: sit or lie down, rest, sip water, ' +
+  'measure blood pressure again after five minutes, and tell the care team. You never diagnose, never say what condition someone has, ' +
+  'never suggest or name any medicine, and never mention doses or changing tablets. For anything that sounds like an emergency ' +
+  '(chest pain, trouble breathing, stroke signs such as a drooping face or weak arm or slurred speech, severe bleeding, fainting, ' +
+  'a sudden very bad headache), tell the person to press the help button or call 112 now. ' +
+  'Always end a symptom answer by saying to tell their doctor or nurse. Keep answers under 80 words.';
 
 const SAFE_FALLBACK = "I can't give medical advice. Please ask your doctor or pharmacist. If this is urgent, call 112 now.";
 const UNSAFE = /\b(diagnos\w*|prescri\w*|dos(e|es|age|ing)|you (have|probably have|likely have|might have|may have|are suffering)|(take|taking) (an? |some |your )?(extra|double|more|less|another|\d+)|(double|halve|skip|stop|reduce|raise|lower|increase|decrease|change|adjust) (your |the |that )?(tablet|tablets|pill|pills|medicine|medication|drug|drugs)|stop taking|you should (take|stop|start|increase|decrease|skip)|\d+\s?(mg|mcg|ml|g)\b)/i;
@@ -227,7 +230,7 @@ function readback(rule) {
     return 'the person reports ' + list + ' within the last ' + c.withinHours + ' hour' + (c.withinHours === 1 ? '' : 's');
   });
   const lead = rule.conditions.length === 1 ? 'When ' : (rule.logic === 'any' ? 'When ANY of these is true: ' : 'When ALL of these are true: ');
-  const what = rule.severity === 'emergency' ? 'ACTION: rings the caregivers like a call and tells the person to call 112.' : 'ACTION: sends a heads-up to the caregivers and the clinician. It does not ring.';
+  const what = rule.severity === 'emergency' ? 'ACTION: rings the caregivers like a call and tells the person to call 112.' : 'ACTION: sends a phone alert and a text message to the caregivers, and a phone alert to the clinician. It does not ring.';
   return lead + parts.join('; ') + '. ' + what;
 }
 
@@ -619,7 +622,18 @@ export class AlertHub {
 
   async flushOutbox(h, now) {
     const box = h.outbox || []; h.outbox = [];
-    for (const o of box.slice(0, 3)) {
+    for (const o of box.slice(0, 5)) {
+      if (o.kind === 'rule' && (h.caregivers || []).length) {
+        const name = h.name || 'Someone', ev = (o.evidence || []).map((e) => e.text).filter(Boolean).slice(0, 2).join('; ');
+        const body = (o.test ? 'TEST: ' : '') + name + ' matched the rule "' + o.name + '".' + (ev ? ' ' + ev : '') + ' Please check on them.';
+        h.notices = h.notices || [];
+        h.notices.push({ id: 'n' + now + (o.ruleId || ''), t: now, kind: o.test ? 'rule_test' : 'rule', ruleId: o.ruleId, ruleName: o.name, text: body, evidence: o.evidence || [] });
+        if (h.notices.length > 30) h.notices = h.notices.slice(-30);
+        const ehs = this.subsFor(h, (x) => x.role !== 'patient');
+        await this.deliver(h, ehs, { title: 'Orbit-X: ' + (o.test ? 'test heads-up' : 'rule matched'), body, tag: 'orbit-rule', urgent: !o.test }, now, o.test ? 'rule_test' : 'rule', 'care team');
+        if (!o.test) await this.smsCaregivers(h, 'ORBIT-X: ' + name + ' matched the care rule "' + o.name + '".' + (ev ? ' ' + ev + '.' : '') + ' Please check on them. If they feel faint or unwell, call 112.', now, 'rule');
+        continue;
+      }
       if (o.kind !== 'high_bp' || !(h.caregivers || []).length) continue;
       const name = h.name || 'Someone', rd = o.sys + '/' + o.dia;
       h.notices = h.notices || [];
@@ -756,12 +770,12 @@ export class AlertHub {
 
   // Runs the clinician's approved rules. Fixed code: same input, same answer, every time.
   runRules(h, now) {
-    const ctx = { readings: h.readings, symptoms: h.symptoms, now };
+    const ctx = { readings: h.readings, symptoms: h.symptoms, now }, matched = [];
     for (const r of h.rules) {
       if (now - (h.rulesFired[r.id] || 0) < 12 * 3600000) continue;
       const res = evaluateRule(r, ctx);
       if (!res.fired) continue;
-      h.rulesFired[r.id] = now;
+      h.rulesFired[r.id] = now; matched.push(r.name);
       if (r.severity === 'emergency') {
         const prev = h.alert, last = h.readings[h.readings.length - 1];
         const a = startAlert(h, { why: 'Rule: ' + r.name, sys: last && r.conditions.some((c) => c.type === 'reading') ? last.sys : null, dia: last && r.conditions.some((c) => c.type === 'reading') ? last.dia : null }, now);
@@ -770,10 +784,11 @@ export class AlertHub {
           res.evidence.forEach((e) => logLine(a, now, e.title + ': ' + e.text));
         }
       } else {
-        h.notices.push({ id: 'n' + now, t: now, ruleId: r.id, ruleName: r.name, text: 'A rule matched: ' + r.name, evidence: res.evidence });
-        if (h.notices.length > 30) h.notices = h.notices.slice(-30);
+        h.outbox = h.outbox || [];
+        h.outbox.push({ kind: 'rule', ruleId: r.id, name: r.name, evidence: res.evidence.slice(0, 3), t: now });
       }
     }
+    return matched;
   }
 
   // The AI may only DRAFT a rule as JSON. The draft is validated by code, then a clinician reads the
@@ -924,13 +939,14 @@ export class AlertHub {
         if (who.role !== 'patient' && who.role !== 'caregiver') { fail(403, 'forbidden'); break; }
         // STUN alone fails on most mobile networks (carrier NAT). A relay (TURN) is what makes calls go through.
         let servers = [{ urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }];
-        let relay = 'none';
+        let relay = 'none', turnError = null;
+        if (!(this.env.TURN_KEY_ID && this.env.TURN_API_TOKEN)) turnError = 'turn_secrets_missing:' + [!this.env.TURN_KEY_ID && 'TURN_KEY_ID', !this.env.TURN_API_TOKEN && 'TURN_API_TOKEN'].filter(Boolean).join(',');
         if (this.env.TURN_KEY_ID && this.env.TURN_API_TOKEN) {
           try {
             const r = await fetch('https://rtc.live.cloudflare.com/v1/turn/keys/' + encodeURIComponent(this.env.TURN_KEY_ID) + '/credentials/generate-ice-servers', {
               method: 'POST', headers: { Authorization: 'Bearer ' + this.env.TURN_API_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 7200 }) });
-            if (r.ok) { const j = await r.json(); if (Array.isArray(j.iceServers)) { servers = servers.concat(j.iceServers); relay = 'cloudflare'; } }
-          } catch (e) { console.error('turn error:', e && e.message); }
+            if (r.ok) { const j = await r.json(); if (Array.isArray(j.iceServers)) { servers = servers.concat(j.iceServers); relay = 'cloudflare'; } else turnError = 'cloudflare_bad_answer'; } else turnError = 'cloudflare_http_' + r.status;
+          } catch (e) { turnError = 'cloudflare_unreachable'; console.error('turn error:', e && e.message); }
         }
         if (this.env.TURN_URLS && this.env.TURN_USERNAME && this.env.TURN_CREDENTIAL) {
           servers.push({ urls: String(this.env.TURN_URLS).split(',').map((x) => x.trim()).filter(Boolean), username: this.env.TURN_USERNAME, credential: this.env.TURN_CREDENTIAL }); relay = 'custom';
@@ -938,7 +954,7 @@ export class AlertHub {
         if (relay === 'none') { // free public relay so calls work out of the box. Set Cloudflare TURN secrets for a private, reliable one.
           servers.push({ urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp', 'turns:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }); relay = 'public';
         }
-        extra.relay = relay;
+        extra.relay = relay; extra.turnError = relay === 'cloudflare' || relay === 'custom' ? null : turnError;
         extra.iceServers = servers; extra.turn = relay !== 'none';
         break;
       }
@@ -1080,6 +1096,20 @@ export class AlertHub {
         if (h.rules.length >= MAX_RULES) { fail(409, 'too_many_rules'); break; }
         const me = h.caregivers.find((c) => c.id === who.id) || {};
         h.rules.push({ id: 'r' + h.nextRid++, ...v.rule, author: me.name || 'Clinician', createdAt: now, readback: readback(v.rule) });
+        { // a new rule is checked against the patient's recent data straight away; a ringing rule is never fired by saving
+          const nr = h.rules[h.rules.length - 1], hit = evaluateRule(nr, { readings: h.readings, symptoms: h.symptoms, now }).fired;
+          if (hit && nr.severity === 'emergency') extra.matchedNow = [nr.name + ' (would ring now; it will ring on the next matching entry)'];
+          else extra.matchedNow = hit ? this.runRules(h, now) : [];
+        }
+        break;
+      }
+      case 'ruletest': {
+        if (who.role !== 'clinician') { fail(403, 'clinician_only'); break; }
+        const r = h.rules.find((x) => x.id === body.id);
+        if (!r) { fail(404, 'no_rule'); break; }
+        h.outbox = h.outbox || [];
+        h.outbox.push({ kind: 'rule', ruleId: r.id, name: r.name, evidence: [], test: true, t: now });
+        extra.tested = true;
         break;
       }
       case 'ruledel': {
@@ -1121,11 +1151,17 @@ export class AlertHub {
         if (who.role !== 'api' && !(isPatient && action === 'signal')) { fail(403, 'api_only'); break; }
         if (who.role === 'api' && !who.scopes.includes(action === 'signal' ? 'events:write' : 'events:read')) { fail(403, 'insufficient_scope'); extra.required = action === 'signal' ? 'events:write' : 'events:read'; break; }
         if (action === 'apistate') break;
-        const type = body.type;
+        // Easy for any device: numbers may arrive as text, "systolic"/"diastolic" work, and "type" can be left out for a reading.
+        const num = (v) => (typeof v === 'string' && /^\d{1,3}$/.test(v.trim()) ? +v : v);
+        const type = body.type || ((body.sys != null || body.systolic != null) ? 'reading' : undefined);
         if (type === 'reading') {
-          const sys = body.sys, dia = body.dia, date = validDate(body.date, now) ? body.date : new Date(now).toISOString().slice(0, 10);
+          const sys = num(body.sys != null ? body.sys : body.systolic), dia = num(body.dia != null ? body.dia : body.diastolic);
+          const iso = typeof body.measuredAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(body.measuredAt) ? body.measuredAt.slice(0, 10) : body.date;
+          const date = validDate(iso, now) ? iso : new Date(now).toISOString().slice(0, 10);
+          const pulse = num(body.pulse), src = cleanName(body.device || body.source, 40);
           if (!Number.isInteger(sys) || !Number.isInteger(dia) || sys < 50 || sys > 300 || dia < 30 || dia > 200 || sys <= dia) { fail(400, 'bad_reading'); break; }
-          h.readings.push({ t: now, date, sys, dia });
+          h.readings.push({ t: now, date, sys, dia, ...(Number.isInteger(pulse) && pulse >= 30 && pulse <= 220 ? { pulse } : {}), ...(src ? { src } : {}) });
+          extra.result = { sys, dia, date, band: isEmergencyReading(sys, dia) ? 'emergency' : (bpTier(sys, dia) || 'normal'), caregiversNotified: isEmergencyReading(sys, dia) || !!bpTier(sys, dia) };
           if (h.readings.length > 400) h.readings = h.readings.slice(-400);
           if (isEmergencyReading(sys, dia)) startAlert(h, { sys, dia, why: 'High reading' }, now);
           else queueHighBp(h, sys, dia, now);
@@ -1151,7 +1187,7 @@ export class AlertHub {
       const al = h.alert; let receipt = null;
       if (al) { let sh = h.shares.find((x) => x.alertId === al.id); if (!sh) { sh = { id: rand(10), alertId: al.id, t: now }; h.shares.push(sh); h.shares = h.shares.slice(-60); } receipt = '/receipt.html?p=' + h.pid + '&s=' + sh.id; }
       if (JSON.stringify(h) !== before) await this.state.storage.put('h', h);
-      return json({ ok: true, now, alert: alertView(al, { role: 'api' }, now, this.escalateMs), receipt });
+      return json({ ok: true, now, alert: alertView(al, { role: 'api' }, now, this.escalateMs), receipt, result: extra.result, recent: h.readings.slice(-10).map((x) => ({ date: x.date, sys: x.sys, dia: x.dia, pulse: x.pulse || null, source: x.src || null, t: x.t })) });
     }
     if (JSON.stringify(h) !== before) await this.state.storage.put('h', h);
     return json({ ...this.stateView(h, who, now), ...extra }, 200);
@@ -1281,7 +1317,7 @@ async function handleHousehold(req, env, url, cors) {
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
-    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc'].includes(m[2]);
+    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc'].includes(m[2]);
     if (!get && !post) return json({ error: 'Not found' }, 404, cors);
     const text = post ? await req.text() : undefined;
     if (text && text.length > (m[2] === 'rtc' ? 14000 : 4000)) return json({ error: 'too_large' }, 413, cors);
