@@ -109,6 +109,10 @@ r = await call('POST', W + 'fhirpull', { base: 'https://evil.example.com/fhir' }
 r = await call('POST', W + 'fhirpull', { base: 'http://hapi.fhir.org/baseR4' }, pt.token); assert.equal(r.error, 'host_not_allowed');
 r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org:8443/baseR4' }, pt.token); assert.equal(r.error, 'host_not_allowed'); assert.equal(fhirSeen.length, 0); ok('only listed https servers are ever contacted');
 r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org/baseR4', patientId: 'x' }, mum.token); assert.equal(r._s, 403); ok('only the patient can run an import');
+r = await call('GET', W + 'wstate', null, pt.token); const beforeFacts = r.facts.length, beforeImports = r.imports.length; assert.ok(beforeImports >= 1);
+r = await call('POST', W + 'cleartest', {}, mum.token); assert.equal(r._s, 403);
+r = await call('POST', W + 'cleartest', {}, pt.token); assert.ok(r.ok); assert.equal(r.imports.length, 0); assert.equal(r.handoffs.length, 0); assert.ok(r.facts.length < beforeFacts); assert.ok(r.cleared.documents >= 1); ok('"Clear test data" removes test imports, receipts and their facts; only the patient can do it');
+r = await call('GET', W + 'auditlog', null, pt.token); assert.ok(r.events.length <= 2); ok('the activity log starts fresh after clearing');
 fhirStatus = 401; r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org/baseR4' }, pt.token); assert.equal(r.error, 'server_needs_login'); fhirStatus = 200;
 fhirBundle = { resourceType: 'OperationOutcome' }; r = await call('POST', W + 'fhirpull', { base: 'https://hapi.fhir.org/baseR4' }, pt.token); assert.equal(r.error, 'not_fhir'); ok('login-required and non-FHIR answers are reported clearly');
 
