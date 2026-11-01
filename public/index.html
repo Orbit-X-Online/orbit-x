@@ -136,9 +136,21 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 .gs .dis{display:block;width:100%;background:none;border:0;border-top:1px solid #16224a;color:var(--mut);font-size:12.5px;padding:9px;cursor:pointer}
 .sgrid{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.sgrid button{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:10px 14px;font-size:14px;cursor:pointer}
 .sgrid button.on{background:#2563EB;border-color:#2563EB}
-.tour .dots{display:flex;gap:6px;justify-content:center;margin:14px 0}.tour .dots i{width:7px;height:7px;border-radius:50%;background:#25407A}.tour .dots i.on{background:var(--teal)}
+.tour .dots{flex-wrap:wrap;display:flex;gap:6px;justify-content:center;margin:14px 0}.tour .dots i{width:7px;height:7px;border-radius:50%;background:#25407A}.tour .dots i.on{background:var(--teal)}
 .tour .big2{font-size:44px;text-align:center;margin:18px 0 6px}.tour p{color:var(--mut);font-size:15px;line-height:1.5;margin:8px 4px}
 .gd{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:12px 0;font-size:14.5px;line-height:1.5}.gd ul{margin:6px 0 6px 18px;padding:0}.gd .u{color:#FCA5A5;margin-top:8px}
+.overlay.tour.on{display:flex;flex-direction:column;justify-content:center}
+.top .tr{display:flex;align-items:center;gap:8px}
+.top .rec{color:#7DD3FC;font-size:13px;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:5px 11px;background:var(--card)}
+.top .qm{width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:#7DD3FC;font-size:14px;font-weight:700;cursor:pointer;padding:0;line-height:1}
+.top .status{font-size:13px}
+.stage{position:static;height:auto;display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 2px;overflow:visible}
+.stage .chip{position:static;flex:1 1 0;min-width:0;padding:8px 10px;line-height:1.3}
+.stage .chip b{font-size:15px;line-height:1.25}
+#c1{order:1}#c2{order:2}
+#face{position:static;transform:none;order:3;flex:0 0 100%;width:100%;height:176px;margin:0 auto}
+.caption{padding:4px 8px;line-height:1.45}
+.row{margin:12px 0}
 </style>
 </head>
 <body>
@@ -372,7 +384,7 @@ var pending = null, chatLog = [];
 function patientApp(){
   if (!params.get('guardian')) { location.replace(sess && sess.accountType === 'provider' ? '/developer.html' : '/workspace.html'); return; }
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><a href="/workspace.html" style="color:#7DD3FC;font-size:13px;text-decoration:none">My records</a><button class="link" id="hlp" aria-label="How to use Orbit-X" style="font-size:15px">?</button><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
+  app.innerHTML = '<div class="top"><b style="font-size:17px">Orbit-X</b><span class="tr"><a class="rec" href="/workspace.html">My records</a><button class="qm" id="hlp" aria-label="How to use Orbit-X">?</button><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></span></div>' +
   '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b><span class="rtag" id="c1t" style="display:none"></span></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
   '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div><div class="banner" id="offb" style="display:none;border-color:#1e3a8a;background:#0b1530;color:#bfdbfe"></div>' +
   '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">Log tablet</button><button id="hist" aria-haspopup="dialog">History</button></div>' +
@@ -767,6 +779,7 @@ function startItems(){
     { t: 'Log your first blood pressure', done: (st.readings || []).length > 0, go: function(){ handle('log bp'); } },
     { t: 'Add someone to be alerted', done: (st.caregivers || []).length > 0, go: function(){ showFamily(); } },
     { t: 'Log a tablet when you take it', done: (st.doses || []).length > 0, go: function(){ handle('took my tablet'); } },
+    { t: 'Open My records and add a report', done: lsGet('oxrec') === '1', go: function(){ lsSet('oxrec', '1'); location.href = '/workspace.html'; } },
     { t: 'Try How I feel', done: (st.symptoms || []).length > 0 || lsGet('oxfeel') === '1', go: function(){ lsSet('oxfeel', '1'); showFeel(); } }
   ];
 }
@@ -788,8 +801,9 @@ function showTour(i){
     { e: '&#128075;', h: 'Welcome to Orbit-X', p: 'Orbit-X keeps your blood pressure and tablets in one place, and tells the people you trust if something is wrong. This takes 30 seconds.' },
     { e: '&#129658;', h: 'Log BP, Log tablet, How I feel', p: 'Tap Log BP and say or type a reading like "150 over 95". Tap Log tablet each time you take your medicine. Tap How I feel if you have a headache, dizziness or anything else. Your care team can see it.' },
     { e: '&#128106;', h: 'Family', p: 'Add a child, spouse or neighbour with their phone number. If your pressure is high or low, or you miss a tablet, they get a message. If you press help, they ring in turn like a phone call. Your doctor can be added here too.' },
-    { e: '&#128202;', h: 'History and My records', p: 'History shows your blood pressure trend and past alerts. My records (top of the screen) keeps your reports and test results and links them together.' },
-    { e: '&#128680;', h: 'I need help now', p: 'The red button at the bottom rings your family straight away. In an emergency also call 112. Orbit-X is not a doctor and does not give medical advice. Tap the ? at the top any time to see this again.' }
+    { e: '&#128202;', h: 'History', p: 'History shows your blood pressure trend, missed tablets and past alerts, so you and your doctor can see how you are doing.' },
+    { e: '&#128193;', h: 'My records', p: 'Tap My records at the top of the home screen. Keep your test results and doctor reports there, take a photo or upload a file, and Orbit-X reads it and links it to your blood pressure story. Only you can add records.' },
+    { e: '&#128680;', h: 'I need help now', p: 'The red button at the bottom rings your family straight away. In an emergency also call 112. Orbit-X is not a doctor and does not give medical advice. Tap the ? at the top any time to see this guide again.' }
   ];
   i = Math.max(0, Math.min(S.length - 1, i)); var s = S[i], last = i === S.length - 1;
   o.innerHTML = '<div class="big2">' + s.e + '</div><h2 style="font-size:20px">' + esc(s.h) + '</h2><p>' + esc(s.p) + '</p><div class="dots">' + S.map(function(x, k){ return '<i class="' + (k === i ? 'on' : '') + '"></i>'; }).join('') + '</div>' +
