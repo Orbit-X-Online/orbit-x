@@ -78,3 +78,13 @@ Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio ha
 49. **Evidence Graph is no longer blank with a single report.** It used to draw only facts that belong to a finding (a comparison between two reports, or a conflict), so one report gave an empty box. It now always shows each report and the facts read from it (flagged results first, up to 12), and says plainly that findings appear once a second report can be compared. The single-report layout fits a phone with no sideways scrolling.
 50. **Photo of a paper report is read by Muse Spark Open's vision first** (new `docphoto` action, standard `image_url` message). The AI only copies the words; the person checks the text against the paper, edits it, then taps Analyse, and every extracted fact must still quote that text. If the endpoint cannot take images, or the AI is off or unreachable, the app falls back automatically to reading the photo on the phone (Tesseract). A tick box (on by default, remembered) lets people keep photos on the phone only. Photos are shrunk to a small JPEG, sent once, never stored.
 51. Add-document sheet: clearer privacy text, "Let the AI read my photos" box; workspace pages get bottom padding so the + button never covers content. New tests (e2e 14-18).
+
+## Round 5 (rules, onboarding, API)
+52. Rules now work end to end: a matched "alert" rule sends a phone alert to caregivers and clinician and a text to caregivers (12-hour repeat guard kept). Before, it only wrote a line inside the app.
+53. A new rule is checked against recent readings/symptoms the moment it is saved; a ringing rule is never fired by saving.
+54. Clinicians get "Send a test alert" on each rule (phones only, no texts). Rule Studio labels alerts (your rule / blood pressure / missed tablet) and shows the evidence.
+55. Patients get a "How I feel" button: tap symptoms or write them; it is saved for the care team and shows fixed, non-diagnostic general information with warning signs and 112. The chat also records and answers symptoms the same way. Assistant prompt now allows general symptom information, never diagnosis, medicine or doses.
+56. First-time guide: 5-step tour (also under the "?" button) and a "Get started" checklist on the home screen.
+57. Guide page: "Who Orbit-X is for" (primary, secondary, partner users).
+58. API /api/v1/signals: accepts text numbers, systolic/diastolic, optional type, pulse, device/source, measuredAt; replies with band and the 10 latest readings.
+59. FHIR live import (src/connect.js, developer.html) and Baseten photo reading remain from the previous round.
