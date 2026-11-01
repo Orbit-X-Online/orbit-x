@@ -124,6 +124,21 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 .dosec .dq{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
 .dosec .acts button.pri{background:#2563EB;border-color:#2563EB;color:#fff;font-weight:600}
 :focus-visible{outline:3px solid #38BDF8;outline-offset:2px}
+
+.gs{background:var(--card);border:1px solid var(--line);border-radius:14px;margin:10px 0;padding:0}
+.gs summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;padding:11px 14px;font-size:14.5px;font-weight:600}
+.gs summary::-webkit-details-marker{display:none}
+.gs .bar{flex:1;height:6px;border-radius:99px;background:#16224a;overflow:hidden}.gs .bar i{display:block;height:100%;background:var(--teal)}
+.gs .it{display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:1px solid #16224a;font-size:14px}
+.gs .it .ck{width:22px;height:22px;border-radius:50%;border:2px solid var(--line);flex:none;display:flex;align-items:center;justify-content:center;font-size:13px;color:#06222a}
+.gs .it.done .ck{background:var(--teal);border-color:var(--teal)}.gs .it.done .tt{color:var(--mut);text-decoration:line-through}
+.gs .it .tt{flex:1}.gs .it button{background:none;border:1px solid var(--line);color:var(--cy);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer}
+.gs .dis{display:block;width:100%;background:none;border:0;border-top:1px solid #16224a;color:var(--mut);font-size:12.5px;padding:9px;cursor:pointer}
+.sgrid{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}.sgrid button{background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:10px 14px;font-size:14px;cursor:pointer}
+.sgrid button.on{background:#2563EB;border-color:#2563EB}
+.tour .dots{display:flex;gap:6px;justify-content:center;margin:14px 0}.tour .dots i{width:7px;height:7px;border-radius:50%;background:#25407A}.tour .dots i.on{background:var(--teal)}
+.tour .big2{font-size:44px;text-align:center;margin:18px 0 6px}.tour p{color:var(--mut);font-size:15px;line-height:1.5;margin:8px 4px}
+.gd{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:12px 0;font-size:14.5px;line-height:1.5}.gd ul{margin:6px 0 6px 18px;padding:0}.gd .u{color:#FCA5A5;margin-top:8px}
 </style>
 </head>
 <body>
@@ -159,7 +174,7 @@ function api(method, path, body){
     .catch(function(){ return { ok: false, _status: 0, error: 'offline' }; });
 }
 function hApi(action, body){ return api(action === 'state' ? 'GET' : 'POST', '/api/h/' + sess.pid + '/' + action, body === undefined && action !== 'state' ? {} : body); }
-function take(j){ if (j && j.ok && j.profile) { st = j; rememberState(j); return true; } return false; }
+function take(j){ if (j && j.ok && j.profile) { st = j; rememberState(j); try { renderStart(); } catch (e) {} return true; } return false; }
 function gone(j){ return j && (j._status === 401 || j._status === 404); }
 
 /* ---------- face + voice ---------- */
@@ -357,15 +372,16 @@ var pending = null, chatLog = [];
 function patientApp(){
   if (!params.get('guardian')) { location.replace(sess && sess.accountType === 'provider' ? '/developer.html' : '/workspace.html'); return; }
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><a href="/workspace.html" style="color:#7DD3FC;font-size:13px;text-decoration:none">My records</a><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
+  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><a href="/workspace.html" style="color:#7DD3FC;font-size:13px;text-decoration:none">My records</a><button class="link" id="hlp" aria-label="How to use Orbit-X" style="font-size:15px">?</button><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></div>' +
   '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b><span class="rtag" id="c1t" style="display:none"></span></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
   '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div><div class="banner" id="offb" style="display:none;border-color:#1e3a8a;background:#0b1530;color:#bfdbfe"></div>' +
   '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">Log tablet</button><button id="hist" aria-haspopup="dialog">History</button></div>' +
   '<div class="inputbar"><input id="txt" placeholder="Type to Orbit" autocomplete="off" enterkeyhint="send"><button id="send">Send</button><button id="mic" aria-label="Talk to Orbit">&#127908;</button></div>' +
-  '<div class="row" style="margin-top:12px"><button id="fam">Family</button><button id="set">Settings</button></div>' +
+  '<div class="row" style="margin-top:12px"><button id="fam">Family</button><button id="fel">How I feel</button><button id="set">Settings</button></div>' +
+  '<details class="gs" id="gs" style="display:none"></details>' +
   '<button class="sos" id="sos">I need help now</button>' +
   '<div class="small center" style="margin-top:10px">Orbit-X is not a doctor and does not give medical advice. In an emergency call 112.</div>' +
-  '<div class="overlay" id="hio"></div><div class="overlay" id="evo"></div><div class="overlay" id="fmo"></div><div class="overlay" id="seo"></div>' +
+  '<div class="overlay" id="hio"></div><div class="overlay" id="evo"></div><div class="overlay" id="fmo"></div><div class="overlay" id="seo"></div><div class="overlay" id="feo"></div><div class="overlay tour" id="tro"></div>' +
   '<div class="overlay" id="emer"><div class="pulse"></div><div class="big" id="emtxt"></div><div class="tl" id="emtl"></div><div class="banner on" id="emban" style="display:none"></div><div id="callbox"></div><audio id="rtcaudio" autoplay playsinline></audio><div id="emcalls"></div><a class="btn red" href="tel:112">Call 112</a><button class="btn ghost" id="emok">I am okay. Cancel the alert</button><button class="btn ghost" id="emclose">Close</button></div>';
   $('send').onclick = function(){ handle($('txt').value); };
   if (fallOn()) fallStart();
@@ -374,6 +390,7 @@ function patientApp(){
   document.querySelectorAll('.row button[data-q]').forEach(function(b){ b.onclick = function(){ handle(b.getAttribute('data-q')); }; });
   $('cap').onclick = function(){ if ($('cap').dataset.proof) showEvidence(); };
   $('hist').onclick = showHistory; $('fam').onclick = showFamily; $('set').onclick = showSettings;
+  $('fel').onclick = function(){ showFeel(); }; $('hlp').onclick = function(){ showTour(0); };
   $('sos').onclick = function(){ startHelp('Pressed the help button'); };
   $('emclose').onclick = function(){ $('emer').classList.remove('on'); };
   $('emok').onclick = function(){ var had = qDrop('sos'); hApi('cancel').then(function(j){ if (take(j)) { renderEmergency(); say('Okay. I have told your family you are fine.'); $('emer').classList.remove('on'); } else if (had || (j && j._status === 0)) { $('emer').classList.remove('on'); say('Okay. I cancelled the saved help request.'); } }); };
@@ -397,6 +414,8 @@ function firstLoad(){
   }
   setCaption(txt, a.level === 'pattern' || a.level === 'watch');
   if (a.level === 'pattern' || a.level === 'watch') hint('Tap the sentence to see the proof');
+  try { renderStart(); } catch (e) {}
+  if (lsGet('oxtour-' + sess.pid) !== '1') showTour(0);
 }
 function refreshCards(){
   var a = analysis();
@@ -478,9 +497,10 @@ function handle(text){
   if (cmd.type === 'log_med') return saveDose(parseQty(text));
   if (cmd.type === 'missed_med') { say('Thank you for telling me. Please take it when you can, as your doctor told you. I will not log it until you do.'); return; }
   if (cmd.type === 'explain') return explain();
-  if (SYMP.test(text) && cmd.type !== 'log_bp' && cmd.type !== 'log_med') {
+  var sg = D.symptomGuide ? D.symptomGuide(text) : null;
+  if ((SYMP.test(text) || (sg && /\b(i|my|feel|feeling|have|got)\b/i.test(text))) && cmd.type !== 'log_bp' && cmd.type !== 'log_med') {
     hApi('symptom', { text: text.slice(0, 200) }).then(function(j){
-      if (take(j)) { renderEmergency(); say('I wrote that down so your care team can see it. I cannot tell you what it means. If you feel worse, press help.'); }
+      if (take(j)) { renderEmergency(); say(sg ? 'I wrote that down so your care team can see it. ' + sg.about + ' ' + sg.steps[0] + ' If you get ' + sg.urgent + ', press help or call 112.' : 'I wrote that down so your care team can see it. I cannot tell you what it means. If you feel worse, press help.'); }
       else say('I could not save that. Please try again.');
     }); return;
   }
@@ -712,6 +732,74 @@ function showHistory(){
 }
 
 /* family: invite caregivers */
+/* ---------- how I feel, get-started list and the guided tour ---------- */
+function lsGet(k){ try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v){ try { localStorage.setItem(k, v); } catch (e) {} }
+function showFeel(done){
+  var o = $('feo'), picked = null;
+  function guideHtml(g){ return '<div class="gd"><b>' + esc(g.label) + '</b><div style="margin-top:4px">' + esc(g.about) + '</div><ul>' + g.steps.map(function(x){ return '<li>' + esc(x) + '</li>'; }).join('') + '</ul><div class="u">Press help or call 112 straight away if you have ' + esc(g.urgent) + '.</div></div>'; }
+  o.innerHTML = '<h2>How do you feel?</h2><div class="small center">Tap what fits, or write it in your own words. Your care team and the doctor who writes your rules can see it. Orbit-X does not diagnose.</div>' +
+    '<div class="sgrid" id="sg">' + D.SYMPTOMS.map(function(g){ return '<button data-g="' + g.id + '">' + esc(g.label) + '</button>'; }).join('') + '</div>' +
+    '<input class="field" id="sn" maxlength="160" placeholder="Anything else? Write it here (optional)" autocomplete="off"><div class="err" id="ser"></div>' +
+    '<button class="btn" id="ssv">Tell my care team</button><div id="sres"></div><button class="btn ghost" id="sfb">Close</button>';
+  o.classList.add('on'); o.scrollTop = 0;
+  var chosen = {};
+  o.querySelectorAll('[data-g]').forEach(function(b){ b.onclick = function(){ var k = b.getAttribute('data-g'); if (chosen[k]) { delete chosen[k]; b.classList.remove('on'); } else { chosen[k] = 1; b.classList.add('on'); } }; });
+  $('sfb').onclick = function(){ o.classList.remove('on'); };
+  $('ssv').onclick = function(){
+    var labels = D.SYMPTOMS.filter(function(g){ return chosen[g.id]; }), extra = $('sn').value.trim();
+    if (!labels.length && !extra) { $('ser').textContent = 'Please tap how you feel, or write it.'; return; }
+    var text = labels.map(function(g){ return g.label.toLowerCase(); }).join(', ') + (extra ? (labels.length ? '. ' : '') + extra : '');
+    $('ser').textContent = ''; $('ssv').disabled = true;
+    hApi('symptom', { text: text.slice(0, 200) }).then(function(j){
+      $('ssv').disabled = false;
+      if (!take(j)) { $('ser').textContent = 'Could not save that. Please try again.'; return; }
+      renderEmergency();
+      var gs = labels.slice(); if (!gs.length) { var g1 = D.symptomGuide(extra); if (g1) gs = [g1]; }
+      $('sres').innerHTML = '<div class="banner on" style="display:block;margin-top:12px">Saved. Your care team can see it.</div>' + gs.slice(0, 3).map(guideHtml).join('') + '<div class="small center">This is general information, not medical advice. Please ask your doctor or pharmacist about anything that worries you.</div>';
+      $('sres').scrollIntoView && $('sres').scrollIntoView({ block: 'nearest' });
+    });
+  };
+}
+function startItems(){
+  var p = st.profile || {};
+  return [
+    { t: 'Log your first blood pressure', done: (st.readings || []).length > 0, go: function(){ handle('log bp'); } },
+    { t: 'Add someone to be alerted', done: (st.caregivers || []).length > 0, go: function(){ showFamily(); } },
+    { t: 'Log a tablet when you take it', done: (st.doses || []).length > 0, go: function(){ handle('took my tablet'); } },
+    { t: 'Try How I feel', done: (st.symptoms || []).length > 0 || lsGet('oxfeel') === '1', go: function(){ lsSet('oxfeel', '1'); showFeel(); } }
+  ];
+}
+function renderStart(){
+  var el = $('gs'); if (!el || !st) return;
+  var its = startItems(), n = its.filter(function(x){ return x.done; }).length;
+  if (n === its.length || lsGet('oxgs-off-' + sess.pid) === '1') { el.style.display = 'none'; return; }
+  var wasOpen = el.open; el.style.display = '';
+  el.innerHTML = '<summary><span>Get started</span><span class="bar"><i style="width:' + Math.round(n / its.length * 100) + '%"></i></span><span class="small">' + n + ' of ' + its.length + '</span></summary>' +
+    its.map(function(x, i){ return '<div class="it' + (x.done ? ' done' : '') + '"><span class="ck">' + (x.done ? '&#10003;' : '') + '</span><span class="tt">' + esc(x.t) + '</span>' + (x.done ? '' : '<button data-gs="' + i + '">Do it</button>') + '</div>'; }).join('') +
+    '<button class="dis" id="gsx">Hide this list</button>';
+  if (wasOpen) el.open = true;
+  el.querySelectorAll('[data-gs]').forEach(function(b){ b.onclick = function(ev){ ev.preventDefault(); its[+b.getAttribute('data-gs')].go(); }; });
+  $('gsx').onclick = function(){ lsSet('oxgs-off-' + sess.pid, '1'); el.style.display = 'none'; };
+}
+function showTour(i){
+  var o = $('tro');
+  var S = [
+    { e: '&#128075;', h: 'Welcome to Orbit-X', p: 'Orbit-X keeps your blood pressure and tablets in one place, and tells the people you trust if something is wrong. This takes 30 seconds.' },
+    { e: '&#129658;', h: 'Log BP, Log tablet, How I feel', p: 'Tap Log BP and say or type a reading like "150 over 95". Tap Log tablet each time you take your medicine. Tap How I feel if you have a headache, dizziness or anything else. Your care team can see it.' },
+    { e: '&#128106;', h: 'Family', p: 'Add a child, spouse or neighbour with their phone number. If your pressure is high or low, or you miss a tablet, they get a message. If you press help, they ring in turn like a phone call. Your doctor can be added here too.' },
+    { e: '&#128202;', h: 'History and My records', p: 'History shows your blood pressure trend and past alerts. My records (top of the screen) keeps your reports and test results and links them together.' },
+    { e: '&#128680;', h: 'I need help now', p: 'The red button at the bottom rings your family straight away. In an emergency also call 112. Orbit-X is not a doctor and does not give medical advice. Tap the ? at the top any time to see this again.' }
+  ];
+  i = Math.max(0, Math.min(S.length - 1, i)); var s = S[i], last = i === S.length - 1;
+  o.innerHTML = '<div class="big2">' + s.e + '</div><h2 style="font-size:20px">' + esc(s.h) + '</h2><p>' + esc(s.p) + '</p><div class="dots">' + S.map(function(x, k){ return '<i class="' + (k === i ? 'on' : '') + '"></i>'; }).join('') + '</div>' +
+    '<button class="btn" id="tn">' + (last ? 'Got it' : 'Next') + '</button>' + (last ? '' : '<button class="btn ghost" id="ts">Skip</button>');
+  o.classList.add('on');
+  function fin(){ lsSet('oxtour-' + sess.pid, '1'); o.classList.remove('on'); }
+  $('tn').onclick = function(){ if (last) fin(); else showTour(i + 1); };
+  if ($('ts')) $('ts').onclick = fin;
+}
+
 function showFamily(){
   var o = $('fmo');
   var list = st.caregivers.length ? st.caregivers.map(function(c){
