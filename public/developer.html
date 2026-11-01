@@ -21,8 +21,9 @@
 (function(){
 var sess = OX.need('patient'); if (!sess) return;
 if (sess.accountType === 'individual') { document.querySelector('.wrap').innerHTML = '<div class="card" style="margin-top:40px"><h2 style="margin-top:0">This area is for doctors, clinics and organisations</h2><p>Orbit Connect (API keys, record import, emergency handoff) is only available to accounts registered as a doctor, healthcare provider or organisation. Your personal account has its own simpler pages.</p><p><a class="btn g" href="/workspace.html">Go to my records</a> <a class="btn g" href="/?guardian=1">Family and alerts</a></p></div>'; return; }
-var esc = OX.esc, S = null, tab = 'overview', last = null, SK = 'orbitx.sandbox.v1', stepState = null;
-var TABS = [['overview','API Overview'],['creds','API Credentials'],['sandbox','Import & Handoff Sandbox'],['connectors','Connectors & Imports'],['receipts','Proof Receipts'],['logs','Integration Logs']];
+var esc = OX.esc, S = null, tab = 'start', last = null, SK = 'orbitx.sandbox.v1', stepState = null;
+var TABS = [['start','Connect'],['data','Data in'],['activity','Activity'],['advanced','More tools']];
+var GROUP = { overview: 'advanced', creds: 'advanced', sandbox: 'advanced', connectors: 'data', receipts: 'activity', logs: 'activity' };
 var SCOPE_HELP = { 'records:write':'send FHIR records in', 'records:read':'read imported records', 'events:write':'report emergency events', 'events:read':'read alert status (legacy)', 'handoff:create':'create emergency handoffs', 'handoff:receive':'receive and acknowledge handoffs', 'audit:read':'read the audit log' };
 var PRESETS = [['Record import (test key)', ['records:write','records:read'], true, 'emr'], ['Event reporting (test key)', ['events:write','events:read','handoff:create'], false, 'evt'], ['Receiving system (test key)', ['handoff:receive'], true, 'rcv']];
 function kstore(){ try { return sess && sess.synthetic ? localStorage : sessionStorage; } catch(e){ return sessionStorage; } } // sandbox keys survive a reload; real keys stay in this tab only
@@ -30,8 +31,8 @@ function keys(){ try { return JSON.parse(kstore().getItem(SK) || '{}'); } catch(
 function setKeys(k){ try { kstore().setItem(SK, JSON.stringify(k)); } catch(e){} }
 function paintBadge(ai){ var el = document.getElementById('aib'); if (!el) return; el.innerHTML = OX.aiBadge(ai); OX.bindBadge(); if (ai && ai.mode === 'live') OX.checkAI(function(){ el.innerHTML = OX.aiBadge(ai); OX.bindBadge(); }); }
 function load(silent){ return OX.w('wstate', null, 'GET').then(function(j){ if (j._status === 401) { location.href = '/'; return; } S = j; return OX.api('GET', '/api/h/' + sess.pid + '/state').then(function(st){ S.keys = st.apiKeys || []; document.getElementById('who').textContent = '· ' + j.patient; paintBadge(j.ai); if (silent !== true) render(); }); }); }
-function drawTabs(){ document.getElementById('tabs').innerHTML = TABS.map(function(t){ return '<button class="tab" role="tab" aria-selected="' + (t[0] === tab) + '" data-t="' + t[0] + '">' + t[1] + '</button>'; }).join(''); document.querySelectorAll('.tab').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-t'); render(); }; }); }
-function render(){ drawTabs(); var v = document.getElementById('view'); v.innerHTML = VIEWS[tab](); BIND[tab] && BIND[tab](); }
+function drawTabs(){ document.getElementById('tabs').innerHTML = TABS.map(function(t){ return '<button class="tab" role="tab" aria-selected="' + (t[0] === tab || GROUP[tab] === t[0]) + '" data-t="' + t[0] + '">' + t[1] + '</button>'; }).join(''); document.querySelectorAll('.tab').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-t'); render(); }; }); }
+function render(){ if (feedTimer && tab !== 'start') { clearInterval(feedTimer); feedTimer = null; } drawTabs(); var v = document.getElementById('view'); v.innerHTML = VIEWS[tab](); BIND[tab] && BIND[tab](); }
 var VIEWS = {}, BIND = {};
 
 /* real API call from the browser, with a visible request/response */
@@ -181,7 +182,7 @@ BIND.connectors = function(){
     });
   };
   var k = keys().emr, box = document.getElementById('cn');
-  if (!k) { box.innerHTML = '<div class="card flat small">Create the sandbox keys to see live connector status.</div>'; return; }
+  if (!k) { box.innerHTML = ''; return; }
   fetch('/api/v1/connectors', { headers: { 'X-Orbit-Key': k } }).then(function(r){ return r.json(); }).then(function(j){
     box.innerHTML = j.connectors && j.connectors.length ? j.connectors.map(function(c){ return '<div class="card"><b>' + esc(c.name) + '</b> ' + (c.simulated ? '<span class="chip sim">simulated</span>' : '') + '<span class="chip ' + (c.status === 'healthy' ? 'ok' : c.status === 'idle' ? 'info' : c.status === 'degraded' ? 'warn' : 'bad') + '">' + esc(c.status) + '</span><div class="small">' + c.imports + ' imports · ' + c.accepted + ' new facts · ' + c.duplicates + ' duplicates · ' + c.rejected + ' invalid' + (c.lastImportAt ? ' · last ' + OX.ago(c.lastImportAt) : '') + '</div>' + (c.lastError ? '<div class="small err">Last error: ' + esc(c.lastError) + '</div>' : '') + '</div>'; }).join('') : '<div class="card flat small">No connector has been used yet.</div>';
   });
@@ -199,8 +200,72 @@ BIND.receipts = function(){};
 VIEWS.logs = function(){ return '<h1>Integration Logs</h1><p class="small">Every API call that reads or changes your record is listed: who, what, and whether it was allowed. Denied attempts are logged too.</p><div id="lg"><span class="spin"></span></div>'; };
 BIND.logs = function(){ OX.w('auditlog', null, 'GET').then(function(j){ var el = document.getElementById('lg'); el.innerHTML = j.events && j.events.length ? '<div class="card" style="padding:4px 8px;overflow:auto"><table><tbody>' + j.events.map(function(e){ return '<tr><td class="small">' + OX.ago(e.t) + '</td><td>' + esc(e.actor) + '</td><td>' + esc(e.action) + '</td><td><span class="chip ' + (e.outcome === 'ok' ? 'ok' : 'bad') + '">' + esc(e.outcome) + '</span></td><td class="small">' + esc(e.detail) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="card flat small">No activity yet.</div>'; }); };
 
-var h0 = (location.hash || '').slice(1); if (TABS.some(function(t){ return t[0] === h0; })) tab = h0;
-drawTabs(); load();
+
+/* ---------- simple pages: Connect / Data in / Activity / More tools ---------- */
+var newKey = null, feedTimer = null;
+function snippets(key){
+  var K = key || 'YOUR_KEY', u = location.origin + '/api/v1/signals';
+  return '<details class="more"><summary>curl (any computer)</summary><pre>curl -X POST ' + esc(u) + ' \\\n  -H "X-Orbit-Key: ' + esc(K) + '" \\\n  -H "Content-Type: application/json" \\\n  -d \'{"systolic":150,"diastolic":95,"pulse":72,"device":"My cuff"}\'</pre></details>' +
+    '<details class="more"><summary>Python (Raspberry Pi, gateway, script)</summary><pre>import requests\nrequests.post("' + esc(u) + '",\n  headers={"X-Orbit-Key": "' + esc(K) + '"},\n  json={"systolic": 150, "diastolic": 95, "pulse": 72, "device": "My cuff"})</pre></details>' +
+    '<details class="more"><summary>ESP32 / Arduino (Wi-Fi sensor or LoRa gateway)</summary><pre>#include &lt;WiFiClientSecure.h&gt;\n#include &lt;HTTPClient.h&gt;\nWiFiClientSecure c; c.setInsecure();\nHTTPClient h; h.begin(c, "' + esc(u) + '");\nh.addHeader("X-Orbit-Key", "' + esc(K) + '");\nh.addHeader("Content-Type", "application/json");\nh.POST("{\\"systolic\\":150,\\"diastolic\\":95}");</pre></details>' +
+    '<details class="more"><summary>Fall or help button</summary><pre>{"type":"fall"}   or   {"type":"sos"}\nsent to the same address</pre></details>';
+}
+VIEWS.start = function(){
+  var ks = S.keys || [];
+  return '<h1>Connect a device or app</h1><p class="small">For clinics, doctors and developers. Three steps. Your account starts empty: nothing is connected or pre-filled.</p>' +
+    '<div class="card"><b>1. Make a key</b><p class="small">A key lets one device or app send data to this account. It works for no one else.</p>' +
+    '<label class="l" for="kn">Name</label><input id="kn" maxlength="30" placeholder="e.g. Clinic cuff, Ward gateway">' +
+    '<label class="l" for="kw">What will it do?</label><select id="kw"><option value="dev">Send readings and alerts</option><option value="rec">Send hospital records</option></select>' +
+    '<button class="btn" id="kgo" style="margin-top:10px">Create key</button><div class="small" id="ker" style="color:#F87171"></div><div id="knew">' + (newKey ? keyBox(newKey) : '') + '</div></div>' +
+    '<div class="card"><b>2. Copy this into your device or app</b><p class="small">The address is ready. ' + (newKey ? 'Your new key is already filled in.' : 'Replace YOUR_KEY with the key from step 1.') + '</p>' + snippets(newKey) + '<p class="small">Numbers can be sent as text. <code>pulse</code>, <code>device</code> and <code>measuredAt</code> are optional. Doctors can use the <a href="/studio.html">Rule Studio</a> to say who gets alerted, in plain English.</p></div>' +
+    '<div class="card"><b>3. See it arrive</b><div id="feed" class="small">Waiting for the first reading...</div></div>' +
+    '<h2>Your keys (' + ks.length + ')</h2>' + (ks.length ? ks.map(function(k){ return '<div class="card"><div class="row" style="justify-content:space-between"><b>' + esc(k.label) + '</b><button class="btn r s" data-rev="' + esc(k.id) + '">Revoke</button></div><div class="small">' + (k.lastUsedAt ? 'Last used ' + OX.ago(k.lastUsedAt) : 'Not used yet') + '</div></div>'; }).join('') : '<div class="small">No keys yet.</div>');
+};
+function keyBox(k){ return '<div class="banner green" style="margin-top:10px">Copy this key now. It is shown once.</div><pre>' + esc(k) + '</pre><button class="btn g s" id="kcp">Copy key</button>'; }
+function pollFeed(){
+  var el = document.getElementById('feed'); if (!el) { clearInterval(feedTimer); feedTimer = null; return; }
+  OX.api('GET', '/api/h/' + sess.pid + '/state').then(function(st){
+    if (!document.getElementById('feed')) return;
+    var r = (st.readings || []).slice(-1)[0];
+    document.getElementById('feed').innerHTML = r ? '<b>Latest reading: ' + r.sys + '/' + r.dia + '</b>' + (r.pulse ? ' · pulse ' + r.pulse : '') + (r.src ? ' · from ' + esc(r.src) : '') + ' · ' + OX.ago(r.t) : 'Waiting for the first reading. This updates by itself.';
+  });
+}
+BIND.start = function(){
+  var scopes = { dev: ['events:write', 'events:read'], rec: ['records:write', 'records:read'] };
+  document.getElementById('kgo').onclick = function(){
+    var er = document.getElementById('ker'); er.textContent = '';
+    OX.api('POST', '/api/h/' + sess.pid + '/apikey', { label: document.getElementById('kn').value || 'My device', scopes: scopes[document.getElementById('kw').value], simulated: false }).then(function(j){
+      if (!j.ok) { er.textContent = j.error === 'too_many_keys' ? 'You have 5 keys already. Revoke one first.' : 'Could not create the key.'; return; }
+      newKey = j.key; load();
+    });
+  };
+  var cp = document.getElementById('kcp'); if (cp) cp.onclick = function(){ OX.copy(newKey, this); };
+  document.querySelectorAll('[data-rev]').forEach(function(b){ b.onclick = function(){ if (confirm('Revoke this key? Anything using it stops working immediately.')) OX.api('POST', '/api/h/' + sess.pid + '/apikeydel', { id: b.getAttribute('data-rev') }).then(function(){ load(); }); }; });
+  pollFeed(); if (feedTimer) clearInterval(feedTimer); feedTimer = setInterval(pollFeed, 5000);
+};
+function freshCard(){
+  return '<div class="card"><b>Start fresh</b><p class="small">Removes test and simulated imports, test keys, receipts and the activity log from this account. Records you added yourself are kept.</p><button class="btn r s" id="clr">Clear test data</button><span class="small" id="clm" role="status"></span></div>';
+}
+function bindFresh(){ var b = document.getElementById('clr'); if (b) b.onclick = function(){ if (!confirm('Clear all test imports, test keys, receipts and the activity log?')) return; b.disabled = true; OX.w('cleartest', {}).then(function(j){ b.disabled = false; if (j && j.ok) { document.getElementById('clm').textContent = ' Cleared.'; load(); } else document.getElementById('clm').textContent = ' Could not clear. Try again.'; }); }; }
+var _vc = VIEWS.connectors, _bc = BIND.connectors;
+VIEWS.data = function(){ return _vc() + freshCard(); };
+BIND.data = function(){ _bc(); bindFresh(); };
+VIEWS.activity = function(){ return VIEWS.receipts() + VIEWS.logs() + freshCard(); };
+BIND.activity = function(){ BIND.logs(); bindFresh(); };
+VIEWS.advanced = function(){
+  return '<h1>More tools</h1><p class="small">For developers who want the full detail.</p>' +
+    [['overview', 'API overview', 'Everything the API can do, with the quick start.'], ['creds', 'Advanced keys', 'Scopes, test keys and OAuth tokens.'], ['sandbox', 'Import and handoff sandbox', 'Try record import and emergency handoff with simulated systems.']].map(function(x){ return '<div class="card"><b>' + x[1] + '</b><div class="small">' + x[2] + '</div><button class="btn g s" data-go="' + x[0] + '">Open</button></div>'; }).join('') + '<p class="small"><a href="/docs.html">API docs</a> · <a href="/openapi.json">openapi.json</a></p>';
+};
+BIND.advanced = function(){ document.querySelectorAll('[data-go]').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-go'); render(); }; }); };
+
+var h0 = (location.hash || '').slice(1); if (VIEWS[h0]) tab = h0;
+drawTabs();
+// One-time clean-up: remove the test imports, receipts and logs left by earlier sandbox runs, so the account starts empty.
+var CK = 'oxclean2-' + sess.pid, cleaned = false; try { cleaned = localStorage.getItem(CK) === '1'; } catch(e){}
+OX.w('wstate', null, 'GET').then(function(j){
+  if (!cleaned && j && j.ok && ((j.imports || []).length || (j.handoffs || []).length)) return OX.w('cleartest', {}).then(function(){ try { localStorage.setItem(CK, '1'); } catch(e){} });
+  try { localStorage.setItem(CK, '1'); } catch(e){}
+}).catch(function(){}).then(function(){ load(); });
 })();
 </script>
 </body>
