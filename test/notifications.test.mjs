@@ -254,6 +254,12 @@ const rid = (await call('GET', RL + 'state', null, drj.token)).rules[0].id;
 pushes.length = 0; r = await call('POST', RL + 'ruletest', { id: rid }, rl.token); assert.equal(r._s, 403); ok('the patient cannot send a rule test');
 r = await call('POST', RL + 'ruletest', { id: rid }, drj.token); assert.ok(r.ok && r.tested); assert.equal(rtexts().length, 0);
 r = await call('GET', RL + 'state', null, drj.token); assert.ok(r.notices.some((x) => x.kind === 'rule_test')); ok('a clinician can send a test alert; it texts nobody');
+r = await call('POST', RL + 'docphone', { phone: 'abc' }, drj.token); assert.equal(r._s, 400); r = await call('POST', RL + 'docphone', { phone: '08055556666' }, rl.token); assert.equal(r._s, 403);
+r = await call('POST', RL + 'docphone', { phone: '08055556666' }, drj.token); assert.ok(r.ok); assert.ok(/8055556666/.test(r.me.phone)); ok('only the doctor can set their own number, and bad numbers are refused');
+clock = at(31, 22); pushes.length = 0; await call('POST', RL + 'bp', { sys: 150, dia: 104, date: '2026-10-31' }, rl.token);
+const docTexts = () => pushes.filter((x) => x.url.includes('africastalking') && /8055556666/.test(decodeURIComponent(String(x.init.body)))).map((x) => decodeURIComponent(String(x.init.body).replace(/\+/g, ' ')));
+assert.ok(docTexts().some((t) => /your rule/i.test(t) && /Funmi/.test(t) && /112/.test(t))); ok('an emergency rule the doctor wrote also texts the doctor');
+clock = at(31, 23); pushes.length = 0; await call('POST', RL + 'bp', { sys: 151, dia: 105, date: '2026-10-31' }, rl.token); assert.equal(docTexts().filter((t) => /your rule/i.test(t)).length, 0); ok('the doctor is not texted again for the same rule within 12 hours');
 delete env.AT_USERNAME; delete env.AT_API_KEY;
 
 // ---------- J5. the app knows when the tablets will run out
@@ -362,4 +368,13 @@ assert.equal(validateResource({ resourceType: 'Observation', status: 'bogus' }).
 const sample = JSON.parse(fs.readFileSync(new URL('../public/samples/emr-bundle.json', import.meta.url), 'utf8'));
 assert.equal(validateBundle(sample).ok, true); ok('FHIR: malformed input rejected with messages, unsupported types named, bundled sample passes');
 
+{ // Android app link served from settings
+  const FP = Array.from({ length: 32 }, (_, i) => (i * 7 % 256).toString(16).padStart(2, '0')).join(':').toUpperCase();
+  const e3 = { ...env, ASSETS: { fetch: async () => new Response('[]', { headers: { 'Content-Type': 'application/json' } }) }, TWA_PACKAGE: 'app.orbitx.twa', TWA_SHA256: FP };
+  const r1 = await worker.fetch(new Request('https://x.test/.well-known/assetlinks.json'), e3); const j1 = await r1.json();
+  assert.equal(j1[0].target.package_name, 'app.orbitx.twa'); assert.equal(j1[0].target.sha256_cert_fingerprints[0], FP);
+  const r2 = await worker.fetch(new Request('https://x.test/.well-known/assetlinks.json'), { ...e3, TWA_SHA256: 'not a fingerprint' }); assert.deepEqual(await r2.json(), []);
+  const r3 = await worker.fetch(new Request('https://x.test/.well-known/assetlinks.json'), { ...e3, TWA_PACKAGE: undefined }); assert.deepEqual(await r3.json(), []);
+  console.log('  ok Android app link: built from settings, bad values ignored');
+}
 console.log('ALL NOTIFICATION/SECURITY TESTS PASSED (' + n + ')'); Date.now = realNow;
