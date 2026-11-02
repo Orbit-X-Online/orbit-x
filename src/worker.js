@@ -1,6 +1,6 @@
 import { metaChat, MetaError, listModels, probeAI } from './meta.js';
 import { handleConnect, WORKSPACE_ACTIONS, V1_ACTIONS, SCOPES, LEGACY_SCOPES, oauthToken, chainAppend, kindOf, signHead, publicReceipt, loadForReceipt, rand as crand, sha as csha } from './connect.js';
-import { aiMode, providerName } from './ai.js';
+import { aiMode, providerName, countTabletsWithAI } from './ai.js';
 
 /* =====================================================================
    Orbit-X server. One file on purpose (easy to upload, nothing to mis-place).
@@ -21,10 +21,30 @@ const SYSTEM_PROMPT =
   'never suggest or name any medicine, and never mention doses or changing tablets. For anything that sounds like an emergency ' +
   '(chest pain, trouble breathing, stroke signs such as a drooping face or weak arm or slurred speech, severe bleeding, fainting, ' +
   'a sudden very bad headache), tell the person to press the help button or call 112 now. ' +
-  'Always end a symptom answer by saying to tell their doctor or nurse. Keep answers under 80 words.';
+  'Always end a symptom answer by saying to tell their doctor or nurse. Keep answers under 80 words. ' +
+  'The person may write in any language. Understand it, but always write your reply in simple English; the app translates it for them afterwards.';
 
 const SAFE_FALLBACK = "I can't give medical advice. Please ask your doctor or pharmacist. If this is urgent, call 112 now.";
 const UNSAFE = /\b(diagnos\w*|treat(ment|ments|ing)?|cure[sd]?|antibiotics?|painkillers?|ibuprofen|paracetamol|acetaminophen|aspirin|amlodipine|lisinopril|losartan|metformin|prescri\w*|dos(e|es|age|ing)|you (have|probably have|likely have|might have|may have|are suffering)|(take|taking) (an? |some |your )?(extra|double|more|less|another|\d+)|(double|halve|skip|stop|reduce|raise|lower|increase|decrease|change|adjust) (your |the |that )?(tablet|tablets|pill|pills|medicine|medication|drug|drugs)|stop taking|you should (take|stop|start|increase|decrease|skip)|\d+\s?(mg|mcg|ml|g)\b)/i;
+/* Any language. Orbit writes (and the safety check reads) English; this step only translates finished, checked text.
+   The translation is accepted only if it keeps every digit exactly, adds no web links and is not wildly longer. Otherwise the English text is used. */
+function cleanLang(v) { const t = String(v == null ? '' : v).trim().replace(/\s+/g, ' '); return /^[\p{L}\p{M}][\p{L}\p{M} ()'.\-]{1,39}$/u.test(t) ? t : ''; }
+const isEnglish = (l) => !l || /^(english|en)\b/i.test(l);
+async function translateGuarded(env, text, lang) {
+  lang = cleanLang(lang); text = String(text || '').trim();
+  if (!text || isEnglish(lang)) return text;
+  if (!env.MODEL_API_KEY && !env.MODEL2_API_KEY) return null;
+  try {
+    const out = await metaChat(env, { temperature: 0, maxTokens: 900, timeoutMs: 20000, messages: [
+      { role: 'system', content: 'Translate the text into ' + lang + '. Translate faithfully and completely. Do not add, remove, explain or soften anything. Keep every number exactly as written with ordinary digits 0-9 (never spell numbers or use other digit styles). Keep "112" and "Orbit-X" unchanged. Output only the translation.' },
+      { role: 'user', content: text }] });
+    const t = String(out || '').trim().replace(/^["\u201C]|["\u201D]$/g, '');
+    const nums = (x) => (x.match(/\d+/g) || []).sort().join(',');
+    if (!t || t.length > text.length * 3 + 80 || /https?:|www\./i.test(t) || nums(t) !== nums(text)) return null;
+    return t;
+  } catch (e) { console.error('translate error:', e && e.message); return null; }
+}
+
 function guardReply(text) {
   const t = String(text || '').trim();
   if (!t || t.length > 1200 || UNSAFE.test(t)) return SAFE_FALLBACK;
@@ -36,6 +56,8 @@ const MAX_CHARS = 2000;
 const DEFAULT_ESCALATE_MS = 20000;
 const HIGH_BP_SYS = 180, HIGH_BP_DIA = 110; // severe hypertension line (WHO defines hypertension at 140/90 but sets no crisis number)
 const MAX_CAREGIVERS = 4;
+const PROOF_TTL_MS = 48 * 3600000;
+const IMG_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+\/=]+$/;
 
 function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data), {
@@ -834,12 +856,13 @@ export class AlertHub {
     return {
       ok: true, now, role: who.role, pid: h.pid,
       me: who.role === 'caregiver' || who.role === 'clinician' ? { id: who.id, name: (h.caregivers.find((c) => c.id === who.id) || {}).name, role: who.role, phone: who.role === 'clinician' ? ((h.caregivers.find((c) => c.id === who.id) || {}).phone || '') : undefined } : null,
-      profile: { supply: supplyInfo(h), pharmacist: h.pharmacist || null, name: h.name, slots: h.slots, doseQty: h.doseQty || {}, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, tzName: h.tzName || '', alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)), push: pushDiag(h, (x) => x.role === who.role && (x.id || null) === (who.id || null)), nextReminderAt: h.alarmAt || null },
+      profile: { lang: h.lang || '', supply: supplyInfo(h), pharmacist: h.pharmacist || null, name: h.name, slots: h.slots, doseQty: h.doseQty || {}, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, tzName: h.tzName || '', alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)), push: pushDiag(h, (x) => x.role === who.role && (x.id || null) === (who.id || null)), nextReminderAt: h.alarmAt || null },
       caregivers: who.role === 'patient' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, order: c.order, joined: !!c.tokenHash, status: c.tokenHash ? 'joined' : (c.invitedAt && now - c.invitedAt > INVITE_TTL_MS ? 'expired' : 'invited'), invitedAt: c.invitedAt || null, joinedAt: c.joinedAt || null, role: c.role || 'caregiver', phone: c.phone || '', alertsOn: (h.pushSubs || []).some((x) => x.id === c.id), push: pushDiag(h, (x) => x.id === c.id) })) : undefined,
       events: who.role === 'patient' ? (h.events || []).slice(-20) : undefined,
       team: who.role === 'caregiver' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, role: c.role || 'caregiver', order: c.order, joined: !!c.tokenHash, you: c.id === who.id })) : undefined,
       careNumbers: who.role === 'caregiver' ? { patient: h.phone || '' } : undefined,
       rules: (h.rules || []).map((r) => ({ id: r.id, name: r.name, severity: r.severity, author: r.author, readback: r.readback, createdAt: r.createdAt })),
+      proof: (who.role === 'patient' || who.role === 'caregiver') && h.proof ? { id: h.proof.id, at: h.proof.at, by: h.proof.by, status: h.proof.status, sentAt: h.proof.sentAt || null, result: h.proof.result || null } : undefined,
       notices: (h.notices || []).slice(-20),
       symptoms: (h.symptoms || []).slice(-20),
       apiKeys: who.role === 'patient' ? (h.apiKeys || []).map((k) => ({ id: k.id, label: k.label, createdAt: k.createdAt, scopes: k.scopes || LEGACY_SCOPES, simulated: !!k.sim, lastUsedAt: k.lastUsedAt || null })) : undefined,
@@ -958,6 +981,10 @@ export class AlertHub {
     let extra = {}, status = 200, error = null;
     const fail = (s, e) => { status = s; error = e; };
     if (h.alert) advance(h.alert, now, this.escalateMs);
+    if (h.proof) { // a photo is kept for 2 days at most, then it is deleted
+      if (h.proof.status === 'sent' && now - h.proof.sentAt > PROOF_TTL_MS) { h.proof.status = 'expired'; try { await this.state.storage.delete('proofimg'); } catch (e) { /* none */ } }
+      else if (h.proof.status === 'asked' && now - h.proof.at > 24 * 3600000) h.proof.status = 'expired';
+    }
     const isPatient = who.role === 'patient';
     if (who.retry) return new Response(JSON.stringify({ ok: false, error: 'rate_limited', retryAfterSeconds: who.retry }), { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': String(who.retry), 'Cache-Control': 'no-store' } });
     if (WORKSPACE_ACTIONS.has(action) || V1_ACTIONS.has(action)) {
@@ -1109,6 +1136,7 @@ export class AlertHub {
         if (Number.isInteger(body.tz) && Math.abs(body.tz) <= 840) h.tz = body.tz;
         if (body.tzName !== undefined) h.tzName = validTzName(body.tzName);
         if (typeof body.tabletAlerts === 'boolean') h.tabletAlerts = body.tabletAlerts;
+        if (body.lang !== undefined) h.lang = cleanLang(body.lang) || undefined;
         if (body.pharmacist !== undefined) {
           if (body.pharmacist === null) h.pharmacist = null;
           else { const pn = cleanName(body.pharmacist && body.pharmacist.name, 40), pp = cleanPhone(body.pharmacist && body.pharmacist.phone); if (!pp) { fail(400, 'bad_pharmacist'); break; } h.pharmacist = { name: pn || 'Pharmacist', phone: pp }; }
@@ -1216,6 +1244,77 @@ export class AlertHub {
         const i = h.rules.findIndex((r) => r.id === body.id);
         if (i < 0) { fail(404, 'no_rule'); break; }
         h.rules.splice(i, 1); delete h.rulesFired[body.id];
+        break;
+      }
+      case 'xlate': { // say an Orbit-written sentence in the person's language (checked: numbers must survive)
+        if (who.role === 'api') { fail(403, 'not_allowed'); break; }
+        this.xl = (this.xl || []).filter((t) => now - t < 600000);
+        if (this.xl.length >= 60) { fail(429, 'slow_down'); break; }
+        this.xl.push(now);
+        const src = cleanName(body.text, 600), lg = cleanLang(body.lang);
+        if (!src || !lg) { fail(400, 'bad_request'); break; }
+        const out = await translateGuarded(this.env, src, lg);
+        extra.text = out || src; extra.translated = !!out && out !== src;
+        break;
+      }
+      case 'packread': { // look at a photo of the tablet pack and count what is left; the person confirms the number
+        if (!isPatient) { fail(403, 'patient_only'); break; }
+        this.pk = (this.pk || []).filter((t) => now - t < 3600000);
+        if (this.pk.length >= 12) { fail(429, 'slow_down'); break; }
+        if (typeof body.img !== 'string' || body.img.length > 450000 || !IMG_RE.test(body.img)) { fail(400, 'bad_image'); break; }
+        this.pk.push(now);
+        const r = await countTabletsWithAI(this.env, body.img);
+        const sup = supplyInfo(h);
+        extra.seen = r.ok ? r.seen : null; extra.confident = !!(r.ok && r.confident); extra.why = r.ok ? (r.seen === null ? 'cannot_count' : '') : r.error;
+        extra.expected = sup ? sup.remaining : null;
+        break;
+      }
+      case 'proofreq': { // a caregiver asks for a photo of today's tablets
+        if (who.role !== 'caregiver') { fail(403, 'caregiver_only'); break; }
+        h.proofLog = (h.proofLog || []).filter((t) => now - t < 86400000);
+        if (h.proof && h.proof.status === 'asked') { extra.already = true; break; }
+        if (h.proofLog.length >= 3) { fail(429, 'too_many_requests'); break; }
+        h.proofLog.push(now);
+        const by = cleanName((h.caregivers.find((c) => c.id === who.id) || {}).name, 40) || 'A caregiver';
+        h.proof = { id: 'p' + now, at: now, by, byId: who.id, status: 'asked' };
+        try { await this.state.storage.delete('proofimg'); } catch (e) { /* none */ }
+        this.ev(h, now, 'proof', 'asked', 'caregiver:' + who.id);
+        h.notices = h.notices || []; h.notices.push({ id: 'p' + now, t: now, kind: 'proof', text: by + ' asked for a photo of your tablets.' }); if (h.notices.length > 30) h.notices = h.notices.slice(-30);
+        const pe = this.subsFor(h, (x) => x.role === 'patient');
+        await this.deliver(h, pe, { title: 'Orbit-X: photo please', body: by + ' asked for a photo of your tablets. Open Orbit-X and tap Take photo.', tag: 'orbit-proof' }, now, 'proof_ask', 'patient');
+        break;
+      }
+      case 'proofsend': { // the person sends the photo (or says not now)
+        if (!isPatient) { fail(403, 'patient_only'); break; }
+        if (!h.proof || h.proof.status !== 'asked' || h.proof.id !== body.id) { fail(409, 'no_request'); break; }
+        const ce = this.subsFor(h, (x) => x.role === 'caregiver' && (!h.proof.byId || x.id === h.proof.byId));
+        const nm = h.name || 'They';
+        if (body.decline === true) {
+          h.proof.status = 'declined'; h.proof.sentAt = now;
+          this.ev(h, now, 'proof', 'declined', 'patient');
+          await this.deliver(h, ce, { title: 'Orbit-X: photo not sent', body: nm + ' could not send the photo just now. A call may help.', tag: 'orbit-proof' }, now, 'proof_no', 'caregiver');
+          break;
+        }
+        if (typeof body.img !== 'string' || body.img.length > 450000 || !IMG_RE.test(body.img)) { fail(400, 'bad_image'); break; }
+        const cnt = Number.isInteger(body.count) && body.count >= 0 && body.count <= 500 ? body.count : null, sup = supplyInfo(h);
+        await this.state.storage.put('proofimg', { id: h.proof.id, t: now, img: body.img });
+        h.proof.status = 'sent'; h.proof.sentAt = now;
+        h.proof.result = { seen: cnt, expected: sup ? sup.remaining : null };
+        this.ev(h, now, 'proof', 'sent', 'patient');
+        await this.deliver(h, ce, { title: 'Orbit-X: photo received', body: nm + ' sent a photo of their tablets. Open Orbit-X to see it.', tag: 'orbit-proof' }, now, 'proof_sent', 'caregiver');
+        break;
+      }
+      case 'proofget': { // the person or their caregivers can see the photo for 2 days
+        if (who.role !== 'patient' && who.role !== 'caregiver') { fail(403, 'not_allowed'); break; }
+        const pi = h.proof && h.proof.status === 'sent' ? await this.state.storage.get('proofimg') : null;
+        if (!pi || !h.proof || pi.id !== h.proof.id) { fail(404, 'no_photo'); break; }
+        extra.img = pi.img; extra.t = pi.t; extra.result = h.proof.result || null; extra.by = h.proof.by;
+        break;
+      }
+      case 'proofdel': {
+        if (!isPatient) { fail(403, 'patient_only'); break; }
+        try { await this.state.storage.delete('proofimg'); } catch (e) { /* none */ }
+        if (h.proof) { h.proof.status = 'deleted'; h.proof.result = null; }
         break;
       }
       case 'insight': { // a short plain-words summary of the last 7 days. Code finds every number; the model may only reword them.
@@ -1436,10 +1535,10 @@ async function handleHousehold(req, env, url, cors) {
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
-    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'docphone', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc'].includes(m[2]);
+    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'docphone', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc', 'xlate', 'packread', 'proofreq', 'proofsend', 'proofget', 'proofdel'].includes(m[2]);
     if (!get && !post) return json({ error: 'Not found' }, 404, cors);
     const text = post ? await req.text() : undefined;
-    if (text && text.length > (m[2] === 'rtc' ? 14000 : 4000)) return json({ error: 'too_large' }, 413, cors);
+    if (text && text.length > (m[2] === 'rtc' ? 14000 : (m[2] === 'packread' || m[2] === 'proofsend') ? 480000 : 4000)) return json({ error: 'too_large' }, 413, cors);
     return relay(await forward(hub(env, 'h:' + m[1]), '/h/' + m[2], req, text), cors);
   }
   return json({ error: 'Not found' }, 404, cors);
