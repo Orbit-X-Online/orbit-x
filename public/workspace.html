@@ -11,12 +11,27 @@
 <div class="wrap">
   <div class="hdr">
     <div><b>Orbit-X</b> <span class="sub" id="who"></span><div class="sub">Health information you can understand, trace and share</div></div>
-    <div class="links"><span id="aib"></span><a href="/developer.html" id="devlink">Developer tools (API)</a><a href="/?guardian=1">Family &amp; alerts</a><a href="/guide.html">Guide</a></div>
+    <div class="links"><span id="aib"></span><a href="/developer.html" id="devlink">Developer tools (API)</a><a href="/?guardian=1">Family &amp; alerts</a><a href="/guide.html">Guide</a><span id="lgp"></span></div>
   </div>
   <div class="tabs" role="tablist" id="tabs"></div>
   <div id="view" aria-live="polite"><div class="empty"><span class="spin"></span>Loading your workspace</div></div>
 </div>
+<script src="/lang.js"></script>
 <script src="/ox.js"></script>
+<script>
+(function(){ /* language picker for My records: the whole page, including Orbit's explanations, switches language */
+  var box = document.getElementById('lgp'); if (!box || !window.OXLang) return;
+  box.innerHTML = '<select id="wsl" data-notr aria-label="Language" style="background:transparent;color:inherit;border:1px solid #2b5a9c;border-radius:999px;padding:4px 8px;font-size:12.5px;max-width:150px">' + OXLang.options() + '</select>';
+  var sel = document.getElementById('wsl');
+  sel.onchange = function(){
+    var v = sel.value; if (v === '__o') { v = (prompt('Type a language, for example Twi or Italian') || '').trim(); if (!OXLang.valid(v)) { sel.value = OXLang.get() || 'English'; return; } }
+    v = OXLang.set(v);
+    var s = null; try { s = JSON.parse(localStorage.getItem('orbitx.session.v1') || 'null'); } catch (e) {}
+    var go = function(){ location.reload(); };
+    if (s && s.role === 'patient' && s.pid) fetch('/api/h/' + s.pid + '/profile', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + s.token }, body: JSON.stringify({ lang: v }) }).then(go, go); else go();
+  };
+})();
+</script>
 <script src="/docread.js"></script>
 <script>
 (function(){
