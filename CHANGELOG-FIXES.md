@@ -120,3 +120,14 @@ Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio ha
 84. Caregiver view reads in the third person; service worker v9 caches lang.js.
 85. Sign-up is now one question (your name). New patients land straight on the blood-pressure home screen and the help guide introduces the app (a new 'Your medicine times' step points to Settings). Phone and medicine times are set later in Settings.
 86. One phone holds one Orbit-X role: joining as a caregiver on a phone signed in to your own account is now refused with an explanation (it used to replace your own account silently); joining a second person as caregiver asks first.
+
+## Safety, voice, language and PWA pass (latest)
+- New src/safety.js: rule-based pre-check (emergency / self-harm / advice requests get fixed replies, no model call, works with no AI key) and one wide output guard used by assistant, explain, weekly summary, document explainer and workspace Ask.
+- Assistant prompt rewritten: information only, no causes, no self-care, no medicines.
+- data.js symptom guide: self-care steps and cause links removed; 112 warning signs kept. Removed "sit down and rest", "stay calm", "take it when you can".
+- New public/voice.js: one remembered voice for all languages, sentence-chunk playback, interrupt (face tap / mic / leaving page), specific mic errors with one retry. Used by index, workspace, demo.
+- Language: the phone's OXLang choice is authoritative; caregiver phones are never overwritten; language chosen before sign-up is sent to the server; RTL; speech tag for custom languages; lang.js on every page.
+- /api/ai/status: live test shared and limited to one real call per 5 minutes; model list needs ADMIN_TOKEN (header X-Admin-Token).
+- _headers: Content-Security-Policy + Permissions-Policy. sw.js cache v12 with voice.js, maskable icons, demo page.
+- Added maskable icons and screenshots; fixed demo.html banner squashing the app on phones.
+- Tests: test/safety.test.mjs added; npm test, npm run check and test/ui-smoke.py pass. NOT tested: real microphone/speech, real Muse Spark/Baseten calls, CSP in a live browser session.
