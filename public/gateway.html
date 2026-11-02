@@ -31,13 +31,13 @@ a{color:var(--cy)}
     <label for="k">Orbit-X device key</label>
     <input id="k" placeholder="ox_..." autocomplete="off" spellcheck="false">
     <p class="small">Make a key on the doctor page: Connect, "Send readings and alerts". It stays on this device only.</p>
-    <button class="g" id="ksave">Save key</button><div class="small" id="kmsg"></div>
+    <button class="g" id="ksave">Save key</button> <button class="g" id="kdel">Remove key from this device</button><div class="small" id="kmsg"></div>
   </div>
 
   <div class="card">
     <b>2. Connect the cuff</b>
     <p class="small">Switch the cuff on, then choose it from the list. Needs Chrome on Android or a computer, with Bluetooth on.</p>
-    <button id="go">Connect a cuff</button>
+    <button id="go">Connect a cuff</button> <button class="g" id="gx" style="display:none">Disconnect cuff</button>
     <div class="small" id="st" role="status"></div>
   </div>
 
@@ -72,16 +72,19 @@ function send(r, name){
       $('log').insertAdjacentHTML('afterbegin', '<div class="row"><span>' + r.sys + '/' + r.dia + (r.pulse ? ' &middot; pulse ' + r.pulse : '') + '</span><span class="' + (ok ? 'ok' : 'bad') + '">' + (ok ? 'sent' : 'failed') + ' &middot; ' + new Date().toLocaleTimeString() + '</span></div>');
     }).catch(function(){ $('band').innerHTML = '<span class="tag bad">No internet. Not saved.</span>'; });
 }
+$('kdel').onclick = function(){ key = ''; $('k').value = ''; try { localStorage.removeItem(KEY); } catch(e){} $('kmsg').textContent = 'Key removed from this device.'; };
+var curDev = null;
+$('gx').onclick = function(){ try { if (curDev && curDev.gatt.connected) curDev.gatt.disconnect(); } catch(e){} curDev = null; $('gx').style.display = 'none'; $('st').textContent = 'Cuff disconnected.'; };
 $('test').onclick = function(){ send({ sys: 120, dia: 80, pulse: 70 }, 'Gateway test'); seen = {}; };
 $('go').onclick = function(){
   if (!navigator.bluetooth) { $('st').innerHTML = '<span class="bad">This browser cannot use Bluetooth. Use Chrome on Android or a computer.</span>'; return; }
   $('st').textContent = 'Choose your cuff from the list...';
   var dev;
   navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ['blood_pressure', 'battery_service', 'device_information'] })
-    .then(function(d){ dev = d; devName = d.name || 'Bluetooth cuff'; $('st').textContent = 'Connecting to ' + devName + '...'; d.addEventListener('gattserverdisconnected', function(){ $('st').innerHTML = '<span class="warn">Cuff disconnected. Tap Connect a cuff to pair again.</span>'; }); return d.gatt.connect(); })
+    .then(function(d){ dev = d; curDev = d; devName = d.name || 'Bluetooth cuff'; $('st').textContent = 'Connecting to ' + devName + '...'; d.addEventListener('gattserverdisconnected', function(){ if (curDev === d) { $('st').innerHTML = '<span class="warn">Cuff disconnected. Tap Connect a cuff to pair again.</span>'; curDev = null; } $('gx').style.display = 'none'; }); return d.gatt.connect(); })
     .then(function(g){ return g.getPrimaryServices().then(function(list){ if (!list.some(function(x){ return /00001810/.test(x.uuid); })) { try { g.disconnect(); } catch(e){} throw { name: 'NoBp', found: list.map(function(x){ return x.uuid.slice(4, 8).toUpperCase(); }) }; } return g.getPrimaryService('blood_pressure'); }); })
     .then(function(svc){ return svc.getCharacteristic('blood_pressure_measurement'); })
-    .then(function(ch){ return ch.startNotifications().then(function(){ ch.addEventListener('characteristicvaluechanged', function(e){ var r; try { r = parseBpm(e.target.value); } catch(x){ r = null; } if (r && r.sys >= 50 && r.sys <= 300 && r.dia >= 30 && r.dia <= 200 && r.sys > r.dia) send(r); else $('st').innerHTML = '<span class="warn">The cuff sent something I could not read. Measure again.</span>'; }); $('st').innerHTML = '<span class="ok">Connected to ' + esc(devName) + '.</span> Measure now.'; }); })
+    .then(function(ch){ return ch.startNotifications().then(function(){ ch.addEventListener('characteristicvaluechanged', function(e){ var r; try { r = parseBpm(e.target.value); } catch(x){ r = null; } if (r && r.sys >= 50 && r.sys <= 300 && r.dia >= 30 && r.dia <= 200 && r.sys > r.dia) send(r); else $('st').innerHTML = '<span class="warn">The cuff sent something I could not read. Measure again.</span>'; }); $('gx').style.display = ''; $('st').innerHTML = '<span class="ok">Connected to ' + esc(devName) + '.</span> Measure now.'; }); })
     .catch(function(e){
       if (e && e.name === 'NotFoundError') $('st').innerHTML = '<span class="bad">No device chosen. Switch the cuff on, keep it close, and make sure Location is on.</span>';
       else if (e && e.name === 'NoBp') $('st').innerHTML = '<span class="bad">' + esc(devName) + ' does not use the standard blood-pressure service (it offers: ' + esc(e.found.join(', ') || 'nothing') + '). Use the cuff maker\'s app instead.</span>';
