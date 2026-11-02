@@ -175,3 +175,32 @@ export async function readPhotoWithAI(env, dataUrl) {
     return { ok: false, error: vision ? 'vision_unsupported' : reason(e), detail: m.slice(0, 160), ms: Date.now() - t0 };
   }
 }
+
+
+/* ------------------------------------------------------------------ photo of a tablet pack -> how many tablets are still in it
+   The model only COUNTS. The person sees the number, can correct it, and nothing is changed until they confirm. */
+const PACK_SYSTEM = `You look at ONE photo of a tablet pack. Count how many tablets are still in the pack.
+Blister strip or card: count the blisters that still hold a tablet. Opened, punched or empty blisters do not count.
+Output ONLY one JSON object: {"kind":"blister"|"loose"|"bottle"|"none","tablets":integer or null,"confident":true or false}
+Rules: if you cannot count with certainty (a closed bottle, blurry, cut off, no tablets visible), tablets must be null. Never guess. Do not read, name or interpret any drug name, dose or instruction.`;
+export async function countTabletsWithAI(env, dataUrl) {
+  if (aiMode(env) === 'mock') return { ok: false, error: 'mock_no_vision' };
+  if (aiMode(env) !== 'live') return { ok: false, error: 'not_configured' };
+  const t0 = Date.now();
+  try {
+    const model = await resolveModel(env);
+    const out = await metaChat(env, { model, temperature: 0, maxTokens: 300, timeoutMs: 45000, messages: [
+      { role: 'system', content: PACK_SYSTEM },
+      { role: 'user', content: [{ type: 'text', text: 'Count the tablets still in this pack.' }, { type: 'image_url', image_url: { url: dataUrl } }] },
+    ] });
+    const d = parseJson(out);
+    if (!d) return { ok: false, error: 'malformed_json', model, ms: Date.now() - t0 };
+    const kind = ['blister', 'loose', 'bottle', 'none'].includes(d.kind) ? d.kind : 'none';
+    const n = Number.isInteger(d.tablets) && d.tablets >= 0 && d.tablets <= 200 ? d.tablets : null;
+    return { ok: true, seen: kind === 'bottle' || kind === 'none' ? null : n, kind, confident: d.confident === true && n !== null, model, ms: Date.now() - t0 };
+  } catch (e) {
+    const m = String(e && e.message || ''), st = e && e.status;
+    const vision = st !== 402 && st !== 401 && st !== 429 && st !== 504 && /image|vision|multimodal|multi-modal|modalit|content.*(string|type)|image_url/i.test(m);
+    return { ok: false, error: vision ? 'vision_unsupported' : reason(e), ms: Date.now() - t0 };
+  }
+}
