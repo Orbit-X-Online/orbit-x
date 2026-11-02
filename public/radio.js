@@ -102,8 +102,8 @@ window.OXRadio = (function () {
     var sup = btSupported();
     return '<label class="l">Panic button and radio (works without internet)</label>' +
       '<div class="small">Text messages work with no internet. A Bluetooth panic button or a Meshtastic radio lets you ask for help from across the room or with no phone signal. Needs Chrome on Android.</div>' +
-      '<div class="cg"><b>Bluetooth panic button</b><div class="small" id="oxpst">' + esc(panic.status) + '</div><div class="acts"><button id="oxpp"' + (sup ? '' : ' disabled') + '>' + (panic.on ? 'Pair another' : 'Pair a button') + '</button>' + (panic.dev ? '<button id="oxpu">Remove</button>' : '') + '</div></div>' +
-      '<div class="cg"><b>Radio (LoRa, Meshtastic)</b><div class="small" id="oxmst">' + esc(mesh.status) + ' (experimental)</div><div class="acts"><button id="oxmp"' + (sup ? '' : ' disabled') + '>' + (radioReady() ? 'Pair another' : 'Connect a radio') + '</button>' + (mesh.dev ? '<button id="oxmu">Disconnect</button>' : '') + '</div></div>' +
+      '<div class="cg"><b>Bluetooth panic button</b><div class="small" id="oxpst">' + esc(panic.status) + '</div><div class="acts"><button id="oxpp"' + (sup ? '' : ' disabled') + '>' + (panic.on ? 'Pair another' : 'Pair a button') + '</button>' + '<button id="oxpu"' + (panic.dev ? '' : ' style="display:none"') + '>Remove</button>' + '</div></div>' +
+      '<div class="cg"><b>Radio (LoRa, Meshtastic)</b><div class="small" id="oxmst">' + esc(mesh.status) + ' (experimental)</div><div class="acts"><button id="oxmp"' + (sup ? '' : ' disabled') + '>' + (radioReady() ? 'Pair another' : 'Connect a radio') + '</button>' + '<button id="oxmu"' + (mesh.dev ? '' : ' style="display:none"') + '>Disconnect</button>' + '</div></div>' +
       (sup ? '' : '<div class="small">This browser cannot use Bluetooth here, so only text messages are available.</div>');
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
@@ -114,7 +114,7 @@ window.OXRadio = (function () {
     if ((b = q('oxmp'))) b.onclick = connectMesh;
     if ((b = q('oxmu'))) b.onclick = disconnectMesh;
     listeners = listeners.filter(function (f) { return !f.__s; });
-    var f = function () { var a = q('oxpst'), m = q('oxmst'); if (a) a.textContent = panic.status; if (m) m.textContent = mesh.status + ' (experimental)'; }; f.__s = 1; listeners.push(f);
+    var f = function () { var a = q('oxpst'), m = q('oxmst'), u = q('oxpu'), w = q('oxmu'), pp = q('oxpp'), mp = q('oxmp'); if (a) a.textContent = panic.status; if (m) m.textContent = mesh.status + ' (experimental)'; if (u) u.style.display = panic.dev ? '' : 'none'; if (w) w.style.display = mesh.dev ? '' : 'none'; if (pp) pp.textContent = panic.on ? 'Pair another' : 'Pair a button'; if (mp) mp.textContent = radioReady() ? 'Pair another' : 'Connect a radio'; }; f.__s = 1; listeners.push(f);
   }
   return { smsHref: smsHref, helpText: helpText, locate: locate, pairPanic: pairPanic, setPanicHandler: function (f) { panic.cb = f; }, connectMesh: connectMesh, sendRadio: sendRadio, radioReady: radioReady, broadcast: broadcast, settingsHtml: settingsHtml, bindSettings: bindSettings, onChange: onChange, supported: btSupported, panicOn: function () { return panic.on; }, _encodeText: encodeText };
 })();
