@@ -25,4 +25,9 @@ for (const f of pages) { const s = fs.readFileSync(path.join(dir, f), 'utf8'); a
 ok('no secret-looking strings in front-end files');
 assert.ok(!fs.existsSync(new URL('../index.html', import.meta.url)), 'a stray index.html sits in the project root. The app page must live ONLY at public/index.html');
 assert.match(idx, /Trend and why Orbit said this/); assert.match(idx, /data-rm/); assert.match(idx, /class="cg2"/); ok('public/index.html is the current version (History trend graph, caregiver Remove, new Family cards)');
+for (const sc of man.screenshots || []) assert.ok(fs.existsSync(path.join(dir, sc.src.replace(/^\//, ''))), 'screenshot missing ' + sc.src);
+assert.ok(man.screenshots.length >= 2 && man.id && man.start_url && man.display === 'standalone' && man.prefer_related_applications === false); assert.ok(man.icons.some((i) => i.purpose === 'maskable' && i.sizes === '512x512') && man.icons.some((i) => i.purpose === 'any' && i.sizes === '512x512'));
+ok('manifest has the fields an Android app builder needs (id, start_url, standalone, screenshots, 512 icons incl. maskable)');
+assert.match(sw, /redirected/); ok('service worker never serves a redirected answer for a page load');
+for (const f of ['gateway.html', 'index.html']) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /Disconnect cuff/); assert.match(fs.readFileSync(path.join(dir, 'radio.js'), 'utf8'), /id="oxmu"/); ok('cuff, panic button and radio can all be disconnected');
 console.log('ALL STATIC FRONT-END TESTS PASSED (' + n + ')');
