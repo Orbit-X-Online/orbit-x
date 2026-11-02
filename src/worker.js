@@ -45,6 +45,43 @@ async function translateGuarded(env, text, lang) {
   } catch (e) { console.error('translate error:', e && e.message); return null; }
 }
 
+/* Many short screen texts at once. Each one comes back translated only if every [#n] number marker survived and nothing else was added. */
+async function translateBatch(env, items, lang) {
+  lang = cleanLang(lang);
+  if (!lang || isEnglish(lang)) return items.map(() => null);
+  const out = await metaChat(env, { temperature: 0, maxTokens: Math.min(7000, 600 + items.join('').length * 3), timeoutMs: 45000, messages: [
+    { role: 'system', content: 'You translate short texts from an app for older adults into ' + lang + '. The user sends a JSON array of strings. Reply with ONLY a JSON array of the same length, in the same order, where each item is the translation of the string at that position. Rules: translate faithfully and completely; do not add, remove, explain or soften anything; keep every marker like [#0] or [#1] exactly as written and in a natural place; keep "Orbit-X", "Orbit", "112" and "Muse Spark" unchanged; use simple, clear words.' },
+    { role: 'user', content: JSON.stringify(items) }] });
+  let arr = null; const a = String(out || '').indexOf('['), b = String(out || '').lastIndexOf(']');
+  if (a >= 0 && b > a) { try { arr = JSON.parse(String(out).slice(a, b + 1)); } catch { arr = null; } }
+  if (!Array.isArray(arr) || arr.length !== items.length) return items.map(() => null);
+  const mk = (x) => (String(x).match(/\[#\d+\]/g) || []).sort().join(',');
+  return items.map((src, i) => {
+    const t = typeof arr[i] === 'string' ? arr[i].trim() : '';
+    if (!t || t.length > src.length * 3 + 60 || /https?:|www\./i.test(t) || mk(t) !== mk(src) || /\d/.test(t.replace(/\[#\d+\]/g, ''))) return null;
+    return t;
+  });
+}
+const XL_HITS = new Map();
+function xlLimited(req) {
+  const ip = req.headers.get('CF-Connecting-IP') || 'anon', now = Date.now(), win = 600000;
+  const list = (XL_HITS.get(ip) || []).filter((t) => now - t < win);
+  if (list.length >= 40) { XL_HITS.set(ip, list); return Math.ceil((win - (now - list[0])) / 1000); }
+  list.push(now); XL_HITS.set(ip, list);
+  if (XL_HITS.size > 2000) for (const k of XL_HITS.keys()) { if (!(XL_HITS.get(k) || []).some((t) => now - t < win)) XL_HITS.delete(k); }
+  return 0;
+}
+async function handleXlate(req, env, cors) {
+  const wait = xlLimited(req); if (wait) return json({ ok: false, error: 'rate_limited', retryAfterSeconds: wait }, 429, { ...cors, 'Retry-After': String(wait) });
+  const raw = await req.text(); if (raw.length > 12000) return json({ ok: false, error: 'too_large' }, 413, cors);
+  let body; try { body = JSON.parse(raw); } catch { return json({ ok: false, error: 'invalid_request' }, 400, cors); }
+  const lang = cleanLang(body && body.lang), items = Array.isArray(body && body.items) ? body.items : null;
+  if (!lang || !items || !items.length || items.length > 30 || items.some((x) => typeof x !== 'string' || x.length < 1 || x.length > 600)) return json({ ok: false, error: 'invalid_request' }, 400, cors);
+  if (!env.MODEL_API_KEY && !env.MODEL2_API_KEY) return json({ ok: false, error: 'not_configured' }, 503, cors);
+  try { return json({ ok: true, items: await translateBatch(env, items.map((x) => x.replace(/[\u0000-\u001f\u007f<>]/g, ' ')), lang) }, 200, cors); }
+  catch (e) { console.error('xlate error:', e && e.message); return json({ ok: false, error: 'unavailable' }, 502, cors); }
+}
+
 function guardReply(text) {
   const t = String(text || '').trim();
   if (!t || t.length > 1200 || UNSAFE.test(t)) return SAFE_FALLBACK;
@@ -1620,6 +1657,7 @@ export default {
     if (url.pathname === '/api/health' && req.method === 'GET') {
       return json({ ok: true, app: 'orbit-x', time: new Date().toISOString(), metaKeyConfigured: Boolean(env.MODEL_API_KEY), aiMode: aiMode(env) }, 200, cors);
     }
+    if (url.pathname === '/api/xlate' && req.method === 'POST') return handleXlate(req, env, cors);
     if (url.pathname === '/api/ai/status' && req.method === 'GET') return handleAiStatus(req, env, url, cors);
     if ((url.pathname === '/api/assistant' || url.pathname === '/api/explain') && req.method === 'POST') { // public AI routes spend AI credit: limit each address
       const w = aiLimited(req); if (w) return json({ error: 'slow_down', retryAfterSeconds: w }, 429, { ...cors, 'Retry-After': String(w) });
