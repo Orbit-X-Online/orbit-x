@@ -24,7 +24,7 @@ const SYSTEM_PROMPT =
   'Always end a symptom answer by saying to tell their doctor or nurse. Keep answers under 80 words.';
 
 const SAFE_FALLBACK = "I can't give medical advice. Please ask your doctor or pharmacist. If this is urgent, call 112 now.";
-const UNSAFE = /\b(diagnos\w*|prescri\w*|dos(e|es|age|ing)|you (have|probably have|likely have|might have|may have|are suffering)|(take|taking) (an? |some |your )?(extra|double|more|less|another|\d+)|(double|halve|skip|stop|reduce|raise|lower|increase|decrease|change|adjust) (your |the |that )?(tablet|tablets|pill|pills|medicine|medication|drug|drugs)|stop taking|you should (take|stop|start|increase|decrease|skip)|\d+\s?(mg|mcg|ml|g)\b)/i;
+const UNSAFE = /\b(diagnos\w*|treat(ment|ments|ing)?|cure[sd]?|antibiotics?|painkillers?|ibuprofen|paracetamol|acetaminophen|aspirin|amlodipine|lisinopril|losartan|metformin|prescri\w*|dos(e|es|age|ing)|you (have|probably have|likely have|might have|may have|are suffering)|(take|taking) (an? |some |your )?(extra|double|more|less|another|\d+)|(double|halve|skip|stop|reduce|raise|lower|increase|decrease|change|adjust) (your |the |that )?(tablet|tablets|pill|pills|medicine|medication|drug|drugs)|stop taking|you should (take|stop|start|increase|decrease|skip)|\d+\s?(mg|mcg|ml|g)\b)/i;
 function guardReply(text) {
   const t = String(text || '').trim();
   if (!t || t.length > 1200 || UNSAFE.test(t)) return SAFE_FALLBACK;
@@ -224,10 +224,11 @@ function validateRule(r) {
       conditions.push({ type: 'symptom', mode, terms, withinHours });
     } else return bad('Unknown condition type.');
   }
-  return { ok: true, rule: { name, severity: r.severity, logic, conditions } };
+  return { ok: true, rule: { name, severity: r.severity, logic, conditions, notifyDoctor: r.notifyDoctor === true || (r.notifyDoctor === undefined && r.severity === 'emergency') } };
 }
 
 function dayWord(n) { return n + ' day' + (n === 1 ? '' : 's'); }
+function docWanted(r) { return r.notifyDoctor === true || (r.notifyDoctor === undefined && r.severity === 'emergency'); }
 function readback(rule) {
   const parts = rule.conditions.map((c) => {
     if (c.type === 'reading') {
@@ -238,7 +239,8 @@ function readback(rule) {
     return 'the person reports ' + list + ' within the last ' + c.withinHours + ' hour' + (c.withinHours === 1 ? '' : 's');
   });
   const lead = rule.conditions.length === 1 ? 'When ' : (rule.logic === 'any' ? 'When ANY of these is true: ' : 'When ALL of these are true: ');
-  const what = rule.severity === 'emergency' ? 'ACTION: rings the caregivers like a call and tells the person to call 112.' : 'ACTION: sends a phone alert and a text message to the caregivers, and a phone alert to the clinician. It does not ring.';
+  const doc = docWanted(rule) ? ' It also texts the clinician.' : '';
+  const what = rule.severity === 'emergency' ? 'ACTION: rings the caregivers like a call and tells the person to call 112.' + doc : 'ACTION: sends a phone alert and a text message to the caregivers, and a phone alert to the clinician.' + doc + ' It does not ring.';
   return lead + parts.join('; ') + '. ' + what;
 }
 
@@ -628,9 +630,22 @@ export class AlertHub {
     for (const c of list.slice(0, 6)) { const r = await sendSms(this.env, c.phone, text); this.ev(h, now, 'sms', r.state, c.id, r.http); }
   }
 
+  // A rule the doctor wrote can also text the doctor. Once per rule per 12 hours (same guard as the rule itself).
+  async textDoctors(h, o, now) {
+    const docs = (h.caregivers || []).filter((c) => c.role === 'clinician' && c.phone);
+    const name = h.name || 'Your patient', ev = (o.evidence || []).map((e) => e.text).filter(Boolean).join('; ');
+    const text = 'ORBIT-X: your rule "' + o.name + '" matched for ' + name + '.' + (ev ? ' ' + ev + '.' : '') + (o.severity === 'emergency' ? ' The family is being rung. If it is an emergency, call 112.' : ' Please review.');
+    const ehs = this.subsFor(h, (x) => x.role === 'clinician');
+    if (ehs.length) await this.deliver(h, ehs, { title: 'Orbit-X: your rule matched', body: name + ': ' + o.name + '.', tag: 'orbit-rule-doc', urgent: o.severity === 'emergency' }, now, 'rule', 'clinician');
+    if (!docs.length) { this.ev(h, now, 'sms', 'no_doctor_phone', 'clinician'); return; }
+    if (!smsConfigured(this.env)) { this.ev(h, now, 'rule', 'sms_not_configured', 'clinician'); return; }
+    for (const c of docs.slice(0, 3)) { const r = await sendSms(this.env, c.phone, text); this.ev(h, now, 'sms', r.state, 'clinician:' + c.id, r.http); }
+  }
+
   async flushOutbox(h, now) {
     const box = h.outbox || []; h.outbox = [];
-    for (const o of box.slice(0, 5)) {
+    for (const o of box.slice(0, 6)) {
+      if (o.kind === 'rule_doc') { await this.textDoctors(h, o, now); continue; }
       if (o.kind === 'rule' && (h.caregivers || []).length) {
         const name = h.name || 'Someone', ev = (o.evidence || []).map((e) => e.text).filter(Boolean).slice(0, 2).join('; ');
         const body = (o.test ? 'TEST: ' : '') + name + ' matched the rule "' + o.name + '".' + (ev ? ' ' + ev : '') + ' Please check on them.';
@@ -818,7 +833,7 @@ export class AlertHub {
   stateView(h, who, now) {
     return {
       ok: true, now, role: who.role, pid: h.pid,
-      me: who.role === 'caregiver' || who.role === 'clinician' ? { id: who.id, name: (h.caregivers.find((c) => c.id === who.id) || {}).name, role: who.role } : null,
+      me: who.role === 'caregiver' || who.role === 'clinician' ? { id: who.id, name: (h.caregivers.find((c) => c.id === who.id) || {}).name, role: who.role, phone: who.role === 'clinician' ? ((h.caregivers.find((c) => c.id === who.id) || {}).phone || '') : undefined } : null,
       profile: { supply: supplyInfo(h), pharmacist: h.pharmacist || null, name: h.name, slots: h.slots, doseQty: h.doseQty || {}, phone: h.phone || '', createdAt: h.createdAt, createdDate: h.createdDate, accountType: h.accountType || 'legacy', org: h.org || '', tabletAlerts: h.tabletAlerts !== false, tz: h.tz || 0, tzName: h.tzName || '', alertsOn: (h.pushSubs || []).some((x) => x.role === who.role && (x.id || null) === (who.id || null)), push: pushDiag(h, (x) => x.role === who.role && (x.id || null) === (who.id || null)), nextReminderAt: h.alarmAt || null },
       caregivers: who.role === 'patient' ? h.caregivers.map((c) => ({ id: c.id, name: c.name, order: c.order, joined: !!c.tokenHash, status: c.tokenHash ? 'joined' : (c.invitedAt && now - c.invitedAt > INVITE_TTL_MS ? 'expired' : 'invited'), invitedAt: c.invitedAt || null, joinedAt: c.joinedAt || null, role: c.role || 'caregiver', phone: c.phone || '', alertsOn: (h.pushSubs || []).some((x) => x.id === c.id), push: pushDiag(h, (x) => x.id === c.id) })) : undefined,
       events: who.role === 'patient' ? (h.events || []).slice(-20) : undefined,
@@ -841,6 +856,7 @@ export class AlertHub {
       const res = evaluateRule(r, ctx);
       if (!res.fired) continue;
       h.rulesFired[r.id] = now; matched.push(r.name);
+      if (docWanted(r)) { h.outbox = h.outbox || []; h.outbox.push({ kind: 'rule_doc', ruleId: r.id, name: r.name, severity: r.severity, evidence: res.evidence.slice(0, 2), t: now }); }
       if (r.severity === 'emergency') {
         const prev = h.alert, last = h.readings[h.readings.length - 1];
         const a = startAlert(h, { why: 'Rule: ' + r.name, sys: last && r.conditions.some((c) => c.type === 'reading') ? last.sys : null, dia: last && r.conditions.some((c) => c.type === 'reading') ? last.dia : null }, now);
@@ -1177,6 +1193,15 @@ export class AlertHub {
         }
         break;
       }
+      case 'docphone': { // the doctor sets their own number for rule texts
+        if (who.role !== 'clinician') { fail(403, 'clinician_only'); break; }
+        const me = h.caregivers.find((c) => c.id === who.id);
+        if (!me) { fail(404, 'no_clinician'); break; }
+        const ph = body.phone ? cleanPhone(body.phone) : '';
+        if (body.phone && !ph) { fail(400, 'bad_phone'); break; }
+        me.phone = ph;
+        break;
+      }
       case 'ruletest': {
         if (who.role !== 'clinician') { fail(403, 'clinician_only'); break; }
         const r = h.rules.find((x) => x.id === body.id);
@@ -1411,7 +1436,7 @@ async function handleHousehold(req, env, url, cors) {
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
-    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc'].includes(m[2]);
+    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'docphone', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc'].includes(m[2]);
     if (!get && !post) return json({ error: 'Not found' }, 404, cors);
     const text = post ? await req.text() : undefined;
     if (text && text.length > (m[2] === 'rtc' ? 14000 : 4000)) return json({ error: 'too_large' }, 413, cors);
@@ -1483,6 +1508,11 @@ export default {
     const url = new URL(req.url);
     const cors = corsHeaders(env, req);
 
+    if (url.pathname === '/.well-known/assetlinks.json' && env.TWA_PACKAGE && env.TWA_SHA256) { // Android app link: set in the dashboard after PWABuilder gives you the fingerprint
+      const fp = String(env.TWA_SHA256).split(/[\s,;]+/).map(x => x.trim().toUpperCase()).filter(x => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(x));
+      const pk = String(env.TWA_PACKAGE).trim();
+      if (fp.length && /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(pk)) return new Response(JSON.stringify([{ relation: ['delegate_permission/common.handle_all_urls'], target: { namespace: 'android_app', package_name: pk, sha256_cert_fingerprints: fp } }]), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache', 'Access-Control-Allow-Origin': '*' } });
+    }
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS ? env.ASSETS.fetch(req) : new Response('Not found', { status: 404 });
     }
