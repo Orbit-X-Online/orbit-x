@@ -148,6 +148,7 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 .stage .chip{position:absolute;max-width:36%;padding:7px 9px;font-size:12px;line-height:1.3;z-index:2}
 .stage .chip b{font-size:14px;line-height:1.25}.stage .chip .rtag{font-size:11px;padding:1px 7px;margin-top:3px}
 .hint:empty{display:none}
+#prb .supa{display:flex;gap:8px;margin-top:8px}#prb .supa button{flex:1;margin:0;padding:9px 8px;font-size:13.5px;border-radius:999px;border:1px solid #2b5a9c;background:none;color:#cfe6ff;cursor:pointer}#prb .supa #prt{background:#2563EB;border-color:#2563EB;color:#fff}
 #supb .supa{display:flex;gap:8px;margin-top:8px}#supb .supa .btn,#supb .supa button{flex:1;margin:0;padding:9px 8px;font-size:13.5px;border-radius:999px;border:1px solid #7a5a12;background:none;color:#FCD34D;cursor:pointer;text-decoration:none;text-align:center}#supb .supa a.btn{background:#7a5a12;color:#fff}
 #c1{left:0;top:2px;bottom:auto}#c2{right:0;top:2px;bottom:auto}
 #face{position:absolute;left:50%;top:62%;transform:translate(-50%,-50%);height:104%;overflow:visible;width:auto;aspect-ratio:1;z-index:1}
@@ -212,12 +213,45 @@ var voiceOn = true, listening = false, rec = null;
 function faceTalk(on){ var f = $('mouth'); if (f) f.classList.toggle('talk', on); var s = $('stat'); if (s) s.textContent = on ? 'Speaking' : (listening ? 'Listening' : 'Ready'); }
 function setCaption(text, proof){ var c = $('cap'); if (!c) return; c.textContent = text; c.classList.toggle('proof', !!proof); c.dataset.proof = proof ? '1' : ''; }
 function hint(t){ var h = $('hint'); if (h) h.textContent = t; }
-function say(text, cb){
-  setCaption(text);
+/* ---------- any language: Orbit writes in English (checked), then the server translates it for the person ---------- */
+var LANGS = [['English', 'en-NG'], ['Nigerian Pidgin', 'en-NG'], ['Yoruba', 'yo-NG'], ['Hausa', 'ha-NG'], ['Igbo', 'ig-NG'], ['French', 'fr-FR'], ['Spanish', 'es-ES'], ['Portuguese', 'pt-PT'], ['Arabic', 'ar-SA'], ['Swahili', 'sw-KE'], ['Hindi', 'hi-IN'], ['Chinese (Mandarin)', 'zh-CN'], ['German', 'de-DE'], ['Amharic', 'am-ET'], ['Zulu', 'zu-ZA'], ['Twi', 'ak-GH']];
+function isEng(l){ return !l || /^(english|en)\b/i.test(l); }
+function langName(){
+  var l = st && st.profile && st.profile.lang ? st.profile.lang : (sess ? lsGet('oxlang-' + sess.pid) : '');
+  if (l === null || l === undefined) { // nothing chosen yet: follow the phone's own language
+    try { var nl = (navigator.language || 'en').split('-')[0]; if (nl !== 'en') l = new Intl.DisplayNames(['en'], { type: 'language' }).of(nl) || ''; } catch (e) { l = ''; }
+  }
+  return isEng(l) ? '' : String(l);
+}
+function langTag(l){
+  for (var i = 0; i < LANGS.length; i++) if (LANGS[i][0].toLowerCase() === String(l).toLowerCase()) return LANGS[i][1];
+  try { var nl = (navigator.language || '').split('-')[0]; if (nl && new Intl.DisplayNames(['en'], { type: 'language' }).of(nl) === l) return navigator.language; } catch (e) {}
+  return '';
+}
+var TXC = {};
+function hsh(t){ var h = 5381; for (var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
+function tx(text){
+  var l = langName();
+  if (!l || !text || text.length < 4 || text.length > 600 || !sess || sess.role !== 'patient') return Promise.resolve(text);
+  var k = 'oxtx:' + hsh(l + '|' + text);
+  if (TXC[k]) return Promise.resolve(TXC[k]);
+  var c = lsGet(k); if (c) { TXC[k] = c; return Promise.resolve(c); }
+  return withTimeout(hApi('xlate', { text: text, lang: l }), 9000).then(function(j){
+    if (j && j.ok && j.text) { TXC[k] = j.text; if (j.translated) lsSet(k, j.text); return j.text; }
+    return text;
+  }, function(){ return text; });
+}
+var sayN = 0;
+function say(text, cb, raw){
+  var id = ++sayN; setCaption(text);
+  if (!raw && langName()) { tx(text).then(function(t2){ if (id !== sayN) return; if (t2 !== text) setCaption(t2); speak(t2, cb); }); return; }
+  speak(text, cb);
+}
+function speak(text, cb){
   if (!voiceOn || !('speechSynthesis' in window)) { faceTalk(true); setTimeout(function(){ faceTalk(false); cb && cb(); }, Math.min(3500, 600 + text.length * 35)); return; }
   try {
     speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(text); u.rate = 0.95;
+    var u = new SpeechSynthesisUtterance(text); u.rate = 0.95; var tg = langTag(langName()); if (tg) u.lang = tg;
     u.onstart = function(){ faceTalk(true); }; u.onend = u.onerror = function(){ faceTalk(false); cb && cb(); };
     speechSynthesis.speak(u);
   } catch(e){ faceTalk(false); }
@@ -227,7 +261,7 @@ function listen(onText){
   if (!SR) { hint('Voice input is not available on this browser. Please type.'); var t = $('txt'); if (t) t.focus(); return; }
   if (listening) { try { rec.stop(); } catch(e){} return; }
   try {
-    rec = new SR(); rec.lang = 'en-NG'; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec = new SR(); rec.lang = langTag(langName()) || 'en-NG'; rec.interimResults = false; rec.maxAlternatives = 1;
     rec.onstart = function(){ listening = true; $('mic').classList.add('on'); hint('Listening...'); faceTalk(false); };
     rec.onend = function(){ listening = false; $('mic').classList.remove('on'); hint(''); };
     rec.onerror = function(){ listening = false; $('mic').classList.remove('on'); hint('I could not hear that. Please type or tap a button.'); };
@@ -395,7 +429,7 @@ function patientApp(){
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:17px">Orbit-X</b><span class="tr"><a class="rec" href="/workspace.html">My records</a><button class="qm" id="hlp" aria-label="How to use Orbit-X">?</button><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></span></div>' +
   '<div class="stage"><div class="chip" id="c1"><span>Last reading</span><b id="c1v">-</b><span class="rtag" id="c1t" style="display:none"></span></div>' + faceSvg() + '<div class="chip" id="c2"><span>This week</span><b id="c2v">-</b></div></div>' +
-  '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div><div class="banner" id="supb" style="border-color:#7a5a12;background:#241b06;color:#FCD34D"></div><div class="banner" id="offb" style="display:none;border-color:#1e3a8a;background:#0b1530;color:#bfdbfe"></div>' +
+  '<div class="caption" id="cap"></div><div class="hint" id="hint"></div><div class="banner" id="ban"></div><div class="banner" id="supb" style="border-color:#7a5a12;background:#241b06;color:#FCD34D"></div><div class="banner" id="prb" style="border-color:#2b5a9c;background:#0b1a33;color:#cfe6ff"></div><div class="banner" id="offb" style="display:none;border-color:#1e3a8a;background:#0b1530;color:#bfdbfe"></div>' +
   '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">Log tablet</button><button id="hist" aria-haspopup="dialog">History</button></div>' +
   '<div class="inputbar"><input id="txt" placeholder="Type to Orbit" autocomplete="off" enterkeyhint="send"><button id="send">Send</button><button id="mic" aria-label="Talk to Orbit">&#127908;</button></div>' +
   '<div class="row" style="margin-top:12px"><button id="fam">Family</button><button id="fel">How I feel</button><button id="set">Settings</button></div>' +
@@ -458,6 +492,65 @@ function refreshCards(){
       var ss = $('supset'); if (ss) ss.onclick = function(){ window.__supShown[key] = false; sb.classList.remove('on'); showSettings(); };
     } else sb.classList.remove('on');
   }
+  var pb = $('prb'), pr = st.proof;
+  if (pb) {
+    if (pr && pr.status === 'asked') {
+      pb.innerHTML = '<div>' + esc(pr.by) + ' asked for a photo of your tablets.</div><div class="supa"><button id="prt">Take photo</button><button id="prn">Not now</button></div>';
+      pb.classList.add('on');
+      $('prt').onclick = function(){ packFlow('proof', pr.id); };
+      $('prn').onclick = function(){ hApi('proofsend', { id: pr.id, decline: true }).then(function(j){ if (take(j)) refreshCards(); }); };
+      window.__prSaid = window.__prSaid || {};
+      if (!window.__prSaid[pr.id]) { window.__prSaid[pr.id] = 1; say(pr.by + ' asked for a photo of your tablets. Tap Take photo when you are ready.'); }
+    } else pb.classList.remove('on');
+  }
+}
+/* ---------- photo of the tablet pack: count what is left, compare with what was logged, optionally send to a caregiver ---------- */
+function shrinkPhoto(file, cb){
+  var r = new FileReader();
+  r.onload = function(){ var im = new Image(); im.onload = function(){
+    var sc = Math.min(1, 1000 / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = Math.round(im.width * sc); c.height = Math.round(im.height * sc);
+    c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+    var q = 0.7, d; do { d = c.toDataURL('image/jpeg', q); q -= 0.1; } while (d.length > 420000 && q > 0.2);
+    cb(d.length > 450000 ? null : d);
+  }; im.onerror = function(){ cb(null); }; im.src = r.result; };
+  r.onerror = function(){ cb(null); }; r.readAsDataURL(file);
+}
+function pickPhoto(cb){
+  var i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.setAttribute('capture', 'environment');
+  i.onchange = function(){ var f = i.files && i.files[0]; if (f) shrinkPhoto(f, cb); };
+  i.click();
+}
+function packCompare(n, e){
+  if (e === null || e === undefined || !(n >= 0)) return '';
+  if (n === e) return 'That matches what you logged.';
+  if (n < e) return 'That is ' + (e - n) + ' fewer than I expected from the tablets you logged. A tablet may have been taken without being logged.';
+  return 'That is ' + (n - e) + ' more than I expected. A logged tablet may not have been taken, or tablets were added.';
+}
+function packFlow(mode, reqId){
+  pickPhoto(function(img){
+    if (!img) { say('I could not use that photo. Please try again.'); return; }
+    var o = $('evo'); o.innerHTML = '<h2>' + (mode === 'proof' ? 'Your tablet photo' : 'Check my pack') + '</h2><div class="small center">Looking at the photo...</div>'; o.classList.add('on');
+    hApi('packread', { img: img }).then(function(j){
+      var seen = j && j.ok && j.seen !== null && j.seen !== undefined ? j.seen : null, exp = j && j.ok && j.expected !== null && j.expected !== undefined ? j.expected : null;
+      var msg = seen !== null ? 'I can see about ' + seen + ' tablet' + (seen === 1 ? '' : 's') + ' left in this pack. Please check the photo and correct the number if I am wrong.' : 'I could not count the tablets from this photo. You can count them and type the number' + (mode === 'proof' ? ', or just send the photo.' : '.');
+      o.innerHTML = '<h2>' + (mode === 'proof' ? 'Your tablet photo' : 'Check my pack') + '</h2><img alt="Your photo" src="' + img + '" style="width:100%;max-height:230px;object-fit:contain;border-radius:12px;background:#000">' +
+        '<div class="small" style="margin:10px 0 4px">' + esc(msg) + '</div><label class="l" for="pcn">Tablets left in the pack</label><input class="field" id="pcn" type="number" inputmode="numeric" min="0" max="500" value="' + (seen !== null ? seen : '') + '">' +
+        '<div class="small" id="pcm" role="status" aria-live="polite" style="min-height:18px"></div><div class="err" id="pce"></div>' +
+        (mode === 'proof' ? '<button class="btn" id="pcs">Send photo</button>' : '<button class="btn" id="pcu">Use this as my count</button>') + '<button class="btn ghost" id="pcc">' + (mode === 'proof' ? 'Cancel' : 'Close') + '</button>';
+      function val(){ var v = $('pcn').value.trim(); return /^\d{1,3}$/.test(v) ? parseInt(v, 10) : null; }
+      function upd(){ var n = val(); $('pcm').textContent = n === null ? '' : packCompare(n, exp); }
+      $('pcn').oninput = upd; upd();
+      $('pcc').onclick = function(){ o.classList.remove('on'); };
+      if (mode === 'proof') $('pcs').onclick = function(){
+        var b = $('pcs'); b.disabled = true; b.textContent = 'Sending...';
+        hApi('proofsend', { id: reqId, img: img, count: val() }).then(function(r2){ if (take(r2)) { o.classList.remove('on'); refreshCards(); say('Sent. Thank you.'); } else { b.disabled = false; b.textContent = 'Send photo'; $('pce').textContent = r2 && r2.error === 'no_request' ? 'This request is no longer open.' : 'Could not send. Please check your internet and try again.'; } });
+      };
+      else $('pcu').onclick = function(){
+        var n = val(); if (n === null) { $('pce').textContent = 'Please type how many tablets are left.'; return; }
+        hApi('profile', { supplyLeft: n }).then(function(r2){ if (take(r2)) { o.classList.remove('on'); refreshCards(); say('Done. I will count down from ' + n + '.'); } else $('pce').textContent = 'Could not save. Please try again.'; });
+      };
+    });
+  });
 }
 function schedulePatient(){
   stopTimer();
@@ -793,7 +886,7 @@ function showHistory(){
       b.disabled = false; b.textContent = 'Write it again';
       if (!j || !j.insight) { $('inst').textContent = 'Could not write it now. Please try again.'; return; }
       var i = j.insight;
-      $('inst').innerHTML = '<div style="font-size:15px;color:var(--txt);line-height:1.5">' + esc(i.text) + '</div><div class="small" style="margin-top:6px">' + (i.source === 'meta' ? 'Written by Muse Spark from your numbers. Checked by code.' : 'Written by Orbit from your numbers.') + ' Not medical advice.</div>';
+      tx(i.text).then(function(tt){ $('inst').innerHTML = '<div style="font-size:15px;color:var(--txt);line-height:1.5">' + esc(tt) + '</div><div class="small" style="margin-top:6px">' + (i.source === 'meta' ? 'Written by Muse Spark from your numbers. Checked by code.' : 'Written by Orbit from your numbers.') + ' Not medical advice.</div>' + (tt !== i.text ? '<div class="small">Translated by Orbit. The English original is what your doctor sees.</div>' : ''); });
     });
   };
 }
@@ -1010,13 +1103,18 @@ function fallEnable(cb){
 function fallDisable(){ try { localStorage.removeItem(FKEY); } catch(e){} fallStop(); }
 
 /* settings */
+function langOptions(){
+  var cur = langName(), known = LANGS.some(function(x){ return x[0] === cur; });
+  return LANGS.map(function(x){ return '<option value="' + (x[0] === 'English' ? '' : esc(x[0])) + '"' + (x[0] === cur || (x[0] === 'English' && !cur) ? ' selected' : '') + '>' + esc(x[0]) + '</option>'; }).join('') + '<option value="__o"' + (cur && !known ? ' selected' : '') + '>Other language...</option>';
+}
 function showSettings(){
   var o = $('seo'), sl = st.profile.slots;
   o.innerHTML = '<h2>Settings</h2><label class="l" for="sn">Your name</label><input class="field" id="sn" maxlength="40" value="' + esc(st.profile.name) + '">' +
     '<label class="l" for="sp">Your phone number</label><input class="field" id="sp" type="tel" maxlength="20" value="' + esc(st.profile.phone || '') + '"><div class="small" style="margin-top:4px">So your family can call you from an alert.</div>' +
     '<label class="l">Medicine times and tablets per time</label>' + slotRows(sl, st.profile.doseQty) + '<div class="small" style="margin-top:6px">Set how many tablets you usually take each time. You can still change the number whenever you log a dose.</div>' +
-    '<label class="l" for="sup">Tablets left in my pack</label><input class="field" id="sup" type="number" inputmode="numeric" min="0" max="2000" placeholder="e.g. 30" value="' + (st.profile.supply ? st.profile.supply.remaining : '') + '"><div class="small" style="margin-top:4px">' + (st.profile.supply && st.profile.supply.daily ? 'About ' + st.profile.supply.daysLeft + ' day(s) left at ' + st.profile.supply.daily + ' tablet(s) a day. ' : '') + 'Orbit-X counts down as you log tablets and warns you and your family before they run out.</div>' +
+    '<label class="l" for="sup">Tablets left in my pack</label><input class="field" id="sup" type="number" inputmode="numeric" min="0" max="2000" placeholder="e.g. 30" value="' + (st.profile.supply ? st.profile.supply.remaining : '') + '"><div class="small" style="margin-top:4px">' + (st.profile.supply && st.profile.supply.daily ? 'About ' + st.profile.supply.daysLeft + ' day(s) left at ' + st.profile.supply.daily + ' tablet(s) a day. ' : '') + 'Orbit-X counts down as you log tablets and warns you and your family before they run out.</div><button class="btn ghost" id="pkb">Check my pack with a photo</button><div class="small" style="margin-top:4px">Take a photo of your tablet card. I count what is left and tell you if it does not match what you logged. You confirm the number first.</div>' +
     '<label class="l" for="phn">My pharmacist (for refills)</label><input class="field" id="phn" maxlength="40" placeholder="Pharmacy name" value="' + esc(st.profile.pharmacist ? st.profile.pharmacist.name : '') + '"><input class="field" id="php" type="tel" maxlength="20" placeholder="Pharmacy phone number" value="' + esc(st.profile.pharmacist ? st.profile.pharmacist.phone : '') + '"><div class="small" style="margin-top:4px">When your tablets are nearly finished, Orbit-X texts them a short refill request with your name and number. Nothing else is shared.</div><div class="err" id="phe"></div>' +
+    '<label class="l" for="sl">Language Orbit speaks</label><select class="field" id="sl">' + langOptions() + '</select><input class="field" id="slo" maxlength="40" placeholder="Type any language" style="display:none;margin-top:6px"><div class="small" style="margin-top:4px">Orbit explains, answers and speaks in this language. Buttons stay in English. Numbers and emergency steps never change.</div>' +
     '<label class="check"><input type="checkbox" id="ta"' + (st.profile.tabletAlerts ? ' checked' : '') + '> Tell my caregivers if I have not logged a tablet</label><div class="small" style="margin-top:4px">I remind you first. If you still have not logged it a few hours later, your caregivers get a gentle heads-up. They are not rung.</div>' +
     '<button class="btn" id="sv">Save</button>' +
     '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
@@ -1031,8 +1129,13 @@ function showSettings(){
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   bindQty(o);
+  $('sl').onchange = function(){ $('slo').style.display = $('sl').value === '__o' ? '' : 'none'; };
+  var cl = langName(); if (cl && !LANGS.some(function(x){ return x[0] === cl; })) { $('sl').value = '__o'; $('slo').style.display = ''; $('slo').value = cl; }
+  if ($('pkb')) $('pkb').onclick = function(){ o.classList.remove('on'); packFlow('pack'); };
   $('sv').onclick = function(){ var rs = readSlots(); var sv0 = $('sup').value.trim(), supOld = st.profile.supply ? String(st.profile.supply.remaining) : '', body0 = { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: rs.slots, doseQty: rs.doseQty }; if (sv0 !== supOld) body0.supplyLeft = sv0 === '' ? null : parseInt(sv0, 10);
     var pn0 = $('phn').value.trim(), pp0 = $('php').value.trim(), pOld = st.profile.pharmacist;
+    var lg = $('sl').value === '__o' ? $('slo').value.trim() : $('sl').value; if (/[^\p{L}\p{M} ()'.\-]/u.test(lg)) { $('phe').textContent = 'Please type just the name of a language.'; return; }
+    body0.lang = lg; lsSet('oxlang-' + sess.pid, lg);
     if (pp0 && !/^\+?[0-9][0-9\s\-()]{6,18}$/.test(pp0)) { $('phe').textContent = 'Please enter a valid phone number for the pharmacy.'; return; }
     if ((pp0 || '') !== (pOld ? pOld.phone : '') || (pn0 || '') !== (pOld ? pOld.name : '')) body0.pharmacist = pp0 ? { name: pn0, phone: pp0 } : null;
     hApi('profile', body0).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
@@ -1083,6 +1186,11 @@ function cgPoll(){
     stopTimer(); timer = setTimeout(cgPoll, active ? 1500 : (st && st.profile && st.profile.alertsOn ? 20000 : 5000)); // push wakes the phone, so idle polling can be slow (saves free-plan requests)
   });
 }
+function forCg(t, who){ /* Orbit writes its sentences to the patient ("You missed..."); caregivers read them about the person */
+  var n = who || 'They';
+  return String(t || '').replace(/\s*(One miss happens\. )?Let(?:'|\u2019)?s?(?: us)? get back on track[^.]*\./i, '').replace(/\s*Keep going\./, '').replace(/I have not seen a reading for (\d+) days\. Shall we log one\?/, n + ' has not logged a reading for $1 days.')
+    .replace(/^You /, n + ' ').replace(/\bYou /g, 'They ').replace(/^Your /, n + "'s ").replace(/\bYour /g, 'Their ').replace(/\byour\b/g, 'their').trim();
+}
 function cgRender(){
   var el = $('cgv'); if (!el) return;
   var who = (st && st.profile.name) || sess.patientName || 'them';
@@ -1095,7 +1203,7 @@ function cgRender(){
   if (!st) { el.innerHTML = '<div class="idle"><b>Connecting...</b><br>Check your internet. Keep this page open.</div>'; return; }
   var a = st.alert, me = st.me && st.me.id, an = analysis();
   if (window.OXCall && OXCall.isRunning() && OXCall.role() === 'caller' && !(a && a.status === 'answered' && a.answeredBy === me)) { OXCall.stopQuiet(); lastCall = { text: '', kind: '' }; }
-  var summary = '<div class="sum"><small>' + esc(who) + '</small>' + (an.last ? 'Last reading ' + an.last.sys + '/' + an.last.dia + ' on ' + esc(D.fmtDate(an.lastDate)) + '.' : 'No readings yet.') + '<br>' + esc(an.sentence) + '</div>';
+  var summary = '<div class="sum"><small>' + esc(who) + '</small>' + (an.last ? 'Last reading ' + an.last.sys + '/' + an.last.dia + ' on ' + esc(D.fmtDate(an.lastDate)) + '.' : 'No readings yet.') + '<br>' + esc(forCg(an.sentence, who)) + '</div>';
   if (a && a.status === 'ringing' && a.target === me) {
     beep(); try { navigator.vibrate && navigator.vibrate([300, 150, 300]); } catch(e){}
     el.innerHTML = '<div id="ring" class="overlay on"><div style="color:#7DD3FC;margin-top:28px">Orbit-X alert</div><div class="who">' + esc(who) + '</div><div class="sub">' + (a.sys ? 'Very high blood pressure reading ' + a.sys + '/' + a.dia : 'Needs help now') + '</div><div class="av">&#129504;</div><div style="color:#6C7FA8;font-size:13px">' + (a.chainNames.length > 1 && a.chainNames[a.chainNames.length - 1] !== st.me.name ? 'No answer in ' + a.secondsLeft + 's? The next person is called' : 'Please answer now') + '</div><div class="cb"><button class="no" id="decl" aria-label="Decline">&#10005;</button><button class="yes" id="ans" aria-label="Answer">&#10003;</button></div></div>';
@@ -1104,7 +1212,7 @@ function cgRender(){
     return;
   }
   if (a && a.status === 'answered' && a.answeredBy === me) {
-    el.innerHTML = '<div class="center" style="margin-top:20px;font-weight:500">Orbit brief</div><div id="callbox"></div><div class="quote" style="margin-top:12px;text-align:center">' + (a.sys ? esc(a.sys + '/' + a.dia) + ' just now.' : 'Reason: ' + esc(a.why)) + '<br>' + esc(an.sentence) + '</div><div class="tl">' + a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('') + '</div>' + (st.careNumbers && st.careNumbers.patient ? '<a class="btn green" href="tel:' + esc(st.careNumbers.patient) + '">Call ' + esc(who) + ' on the phone</a>' : '') + '<a class="btn red" href="tel:112">Call 112</a><button class="btn" id="hd">Mark as handled</button>';
+    el.innerHTML = '<div class="center" style="margin-top:20px;font-weight:500">Orbit brief</div><div id="callbox"></div><div class="quote" style="margin-top:12px;text-align:center">' + (a.sys ? esc(a.sys + '/' + a.dia) + ' just now.' : 'Reason: ' + esc(a.why)) + '<br>' + esc(forCg(an.sentence, who)) + '</div><div class="tl">' + a.log.map(function(l){ return '<div>' + clock(l.t) + '  ' + esc(l.text) + '</div>'; }).join('') + '</div>' + (st.careNumbers && st.careNumbers.patient ? '<a class="btn green" href="tel:' + esc(st.careNumbers.patient) + '">Call ' + esc(who) + ' on the phone</a>' : '') + '<a class="btn red" href="tel:112">Call 112</a><button class="btn" id="hd">Mark as handled</button>';
     showCall('callbox', lastCall.text || 'Voice call not started yet.', lastCall.text ? lastCall.kind : 'idle', 'caller');
     $('hd').onclick = function(){ if (window.OXCall && OXCall.isRunning()) OXCall.end('Call ended.'); hApi('handled').then(function(j){ take(j); cgRender(); }); };
     return;
@@ -1123,8 +1231,22 @@ function cgRender(){
   var calls = pn ? '<a class="btn green" href="tel:' + esc(pn) + '">Call ' + esc(who) + '</a>' : '';
   var nts = (st.notices || []).filter(function(x){ return x.kind === 'missed_dose' || x.kind === 'high_bp'; }).slice(-3).reverse().map(function(x){ return '<div class="ev"><small>' + clock(x.t) + '</small><span>' + esc(x.text) + '</span></div>'; }).join('');
   var team = (st.team || []).filter(function(x){ return x.joined || true; }).map(function(x){ var dr = x.role === 'clinician', nm = dr ? String(x.name).replace(/^dr\.?\s+/i, '') : x.name; return '<div class="cg2"><div class="av2' + (dr ? ' dr' : '') + '">' + (dr ? 'Dr' : x.order) + '</div><div class="cgm"><div class="nm">' + (dr ? 'Dr ' : '') + esc(nm) + (x.you ? ' (you)' : '') + '</div><div class="pills"><span class="pill ' + (x.joined ? 'ok' : 'warn') + '">' + (x.joined ? 'Linked' : 'Invited') + '</span><span class="pill">' + (dr ? 'Doctor' : 'Caregiver') + '</span></div>' + (x.you ? '' : '<div class="acts"><button class="danger" data-rm="' + esc(x.id) + '">Remove</button></div>') + '</div></div>'; }).join('');
+  var pr = st.proof, prh = '';
+  if (pr && pr.status === 'asked') prh = '<div class="idle">You asked ' + esc(who) + ' for a photo of their tablets at ' + clock(pr.at) + '. Waiting for it.</div>';
+  else {
+    if (pr && pr.status === 'sent') prh = '<div class="ev"><small>' + clock(pr.sentAt) + '</small><span>' + esc(who) + ' sent a photo of their tablets.' + (pr.result && pr.result.seen !== null && pr.result.seen !== undefined ? ' They counted ' + pr.result.seen + ' left' + (pr.result.expected !== null && pr.result.expected !== undefined ? ' (Orbit expected about ' + pr.result.expected + ').' : '.') : '') + '</span></div><button class="btn" id="prv">View photo</button>';
+    else if (pr && pr.status === 'declined') prh = '<div class="ev"><small>' + clock(pr.sentAt) + '</small><span>' + esc(who) + ' could not send the photo just then. A call may help.</span></div>';
+    prh += '<button class="btn ghost" id="prq">Ask ' + esc(who) + ' for a photo of their tablets</button><div class="small center" id="prm" role="status"></div>';
+  }
   var teamBox = team ? '<details class="acc" id="tmd"' + (window.__tmOpen ? ' open' : '') + ' style="margin-top:14px"><summary><span>Care team</span><span class="cnt">' + st.team.length + '</span></summary><div class="accb">' + team + '<div class="err center" id="rmerr" role="status"></div></div></details>' : '';
-  el.innerHTML = note + summary + (nts ? '<div class="small" style="margin-top:10px">Recent notices</div>' + nts : '') + calls + status + teamBox + '<div class="small center" style="margin-top:14px">If this page is open you will also hear a ring.</div>';
+  el.innerHTML = note + summary + prh + (nts ? '<div class="small" style="margin-top:10px">Recent notices</div>' + nts : '') + calls + status + teamBox + '<div class="small center" style="margin-top:14px">If this page is open you will also hear a ring.</div>';
+  var prq = $('prq'); if (prq) prq.onclick = function(){ prq.disabled = true; hApi('proofreq', {}).then(function(j){ if (take(j)) { cgRender(); return; } prq.disabled = false; $('prm').textContent = j && j.error === 'too_many_requests' ? 'You can ask three times a day. Please try a call.' : 'Could not send the request. Please try again.'; }); };
+  var prv = $('prv'); if (prv) prv.onclick = function(){ prv.disabled = true; hApi('proofget', {}).then(function(j){
+    prv.disabled = false; if (!j || !j.ok || !j.img) { $('prm') && ($('prm').textContent = 'The photo is no longer available.'); return; }
+    var ov = document.createElement('div'); ov.className = 'overlay on'; var r = j.result || {};
+    ov.innerHTML = '<h2>Tablet photo from ' + esc(who) + '</h2><img alt="Tablet photo" src="' + j.img + '" style="width:100%;max-height:60vh;object-fit:contain;border-radius:12px;background:#000"><div class="small" style="margin:10px 0">Sent at ' + clock(j.t) + '. ' + (r.seen !== null && r.seen !== undefined ? 'They counted ' + r.seen + ' tablet' + (r.seen === 1 ? '' : 's') + ' left' + (r.expected !== null && r.expected !== undefined ? ', Orbit expected about ' + r.expected : '') + '. ' : '') + 'The count is only an estimate. Please look at the photo. It is deleted after 2 days.</div><button class="btn" id="pvc">Close</button>';
+    document.body.appendChild(ov); ov.querySelector('#pvc').onclick = function(){ ov.remove(); };
+  }); };
   var tmd = $('tmd'); if (tmd) tmd.addEventListener('toggle', function(){ window.__tmOpen = tmd.open; });
   el.querySelectorAll('[data-rm]').forEach(function(b){ b.onclick = function(){ var id = b.getAttribute('data-rm'), t = (st.team || []).filter(function(x){ return x.id === id; })[0]; if (!t || !confirm('Remove ' + t.name + ' from the care team? They will no longer be alerted.')) return; b.disabled = true; hApi('remove', { id: id }).then(function(j){ if (take(j)) { cgRender(); return; } b.disabled = false; var e = $('rmerr'); if (e) e.textContent = j && j.error === 'alert_active' ? 'You cannot remove anyone while an alert is active.' : 'Could not remove. Please try again.'; }); }; });
   var tp = $('tp'); if (tp) tp.onclick = function(){ var t0 = Date.now(), out = $('tpr'); out.textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ out.textContent = diagText(j); if (j && j.ok && j.diag && j.diag[0] && j.diag[0].state === 'accepted') watchDisplayed(t0, function(m){ out.textContent = m; }); }); };
