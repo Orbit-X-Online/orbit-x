@@ -622,8 +622,8 @@ function connectCuff(){
   var dev = null;
   // Many cuffs do not advertise the blood-pressure service, so list every nearby device and look inside after connecting.
   navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: ['blood_pressure', 'battery_service', 'device_information', 'current_time'] }).then(function(d){
-    dev = d; mg.textContent = 'Connecting to ' + (d.name || 'your device') + '...';
-    d.addEventListener('gattserverdisconnected', function(){ if ($('btm') && $('btm').dataset.live) $('btm').textContent = 'Cuff disconnected. Tap Connect a cuff to pair again.'; });
+    dev = d; window.__cuff = d; mg.textContent = 'Connecting to ' + (d.name || 'your device') + '...';
+    d.addEventListener('gattserverdisconnected', function(){ if ($('btm') && $('btm').dataset.live) { $('btm').textContent = 'Cuff disconnected. Tap Connect a cuff to pair again.'; $('btm').dataset.live = ''; } if ($('btx')) $('btx').style.display = 'none'; });
     return d.gatt.connect();
   }).then(function(g){
     return g.getPrimaryServices().then(function(list){
@@ -634,15 +634,21 @@ function connectCuff(){
   }).then(function(svc){ return svc.getCharacteristic('blood_pressure_measurement'); })
     .then(function(ch){ return ch.startNotifications().then(function(){
       ch.addEventListener('characteristicvaluechanged', function(e){ var r; try { r = parseBpm(e.target.value); } catch(x){ r = null; } gotCuff(r, 'bluetooth'); });
-      mg.dataset.live = '1'; mg.textContent = 'Connected to ' + ((dev && dev.name) || 'your cuff') + '. Take a measurement now. The reading will appear here.';
+      mg.dataset.live = '1'; if ($('btx')) $('btx').style.display = ''; mg.textContent = 'Connected to ' + ((dev && dev.name) || 'your cuff') + '. Take a measurement now. The reading will appear here.';
     }); })
     .catch(function(e){
-      mg.textContent = ''; mg.dataset.live = '';
+      mg.textContent = ''; mg.dataset.live = ''; if ($('btx')) $('btx').style.display = 'none';
       if (e && e.name === 'NotFoundError') er.textContent = 'No device was chosen. Make sure the cuff is on and close to the phone, and that Location is switched on.';
       else if (e && e.name === 'NoBpService') er.textContent = 'Connected, but ' + ((dev && dev.name) || 'this device') + ' does not use the standard Bluetooth blood-pressure service (it offers: ' + (e.found.join(', ') || 'nothing') + '). Many cuffs only work with their own app. Use that app and type the reading here, or send it through the API.';
       else if (e && e.name === 'NetworkError') er.textContent = 'The cuff did not respond. Switch it off and on, move closer, and try again.';
       else er.textContent = 'Could not connect to the cuff: ' + ((e && e.message) || 'error');
     });
+}
+function disconnectCuff(){
+  var d = window.__cuff; window.__cuff = null;
+  try { if (d && d.gatt && d.gatt.connected) d.gatt.disconnect(); } catch(e){}
+  if ($('btm')) { $('btm').dataset.live = ''; $('btm').textContent = 'Cuff disconnected. Nothing more will be saved from it.'; }
+  if ($('btx')) $('btx').style.display = 'none';
 }
 function gotCuff(r, src){
   if (!r || !(r.sys >= 50 && r.sys <= 300 && r.dia >= 30 && r.dia <= 200 && r.sys > r.dia)) { say('The cuff sent a reading I could not understand. Please measure again.'); return; }
@@ -1019,7 +1025,7 @@ function showSettings(){
     '<label class="l">No internet? Orbit-X keeps working</label><div class="small">Readings and tablets are saved on this phone and sent when signal returns. If you press help with no internet, I save the alert, show Call 112 and text buttons (with your location), and send the alert automatically the moment signal is back.</div>' +
     OXRadio.settingsHtml() +
     '<label class="l">Voice calls</label><div class="small">Checks that the call relay (TURN) is working, so a caregiver can talk to you after answering an alert.</div><button class="btn ghost" id="vct">Test voice calls</button><div class="small" id="vcr" style="margin-top:6px"></div>' +
-    '<label class="l">Bluetooth blood-pressure cuff</label><div class="small">Pair a cuff that uses the standard Bluetooth blood-pressure service (Chrome on Android). Each reading comes straight in, works with no internet, and you confirm it before it is saved.</div><div class="err" id="bte"></div><button class="btn ghost" id="btc">Connect a cuff</button><div class="small" id="btm"></div>' +
+    '<label class="l">Bluetooth blood-pressure cuff</label><div class="small">Pair a cuff that uses the standard Bluetooth blood-pressure service (Chrome on Android). Each reading comes straight in, works with no internet, and you confirm it before it is saved.</div><div class="err" id="bte"></div><button class="btn ghost" id="btc">Connect a cuff</button><button class="btn ghost" id="btx" style="display:none">Disconnect cuff</button><div class="small" id="btm"></div>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
     (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
@@ -1034,7 +1040,8 @@ function showSettings(){
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
   OXRadio.bindSettings(function(){ startHelp('Help button pressed'); });
-  $('btc').onclick = connectCuff;
+  $('btc').onclick = connectCuff; $('btx').onclick = disconnectCuff;
+  if (window.__cuff && window.__cuff.gatt && window.__cuff.gatt.connected) { $('btx').style.display = ''; $('btm').dataset.live = '1'; $('btm').textContent = 'Connected to ' + (window.__cuff.name || 'your cuff') + '.'; }
   $('vct').onclick = function(){
     var r = $('vcr'); r.textContent = 'Checking...';
     hApi('ice').then(function(j){
@@ -1135,6 +1142,7 @@ function boot(skipJoin){
 }
 window.__orbit = { handle: handle };
 if ('serviceWorker' in navigator && sess && sess.pid) { try { navigator.serviceWorker.register('/sw.js?p=' + sess.pid); } catch(e){} }
+else if ('serviceWorker' in navigator) { try { navigator.serviceWorker.getRegistration().then(function(r){ if (!r) navigator.serviceWorker.register('/sw.js'); }); } catch(e){} } /* installable before anyone signs in */
 boot();
 })();
 </script>
