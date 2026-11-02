@@ -162,3 +162,8 @@ FHIR R4 subset API, simulated EMR connector, provenance, duplicate/conflict dete
 ## License
 
 MIT. See `LICENSE`.
+
+## Android app (TWA)
+1. Open pwabuilder.com, enter the live URL, choose Android. Install the signed **.apk** from the download (not the .aab, which only Google Play can use). Remove any older Orbit-X install first.
+2. PWABuilder shows a package name and a SHA-256 fingerprint. In the Cloudflare dashboard, Workers, orbit-x, Settings, Variables, add `TWA_PACKAGE` and `TWA_SHA256` (several fingerprints may be separated by commas) and deploy. `/.well-known/assetlinks.json` is then served automatically and the address bar disappears.
+3. Moving to a custom domain later means building the Android app again for that domain.
