@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#070B16">
+<title>Orbit-X Health Workspace</title>
+<link rel="stylesheet" href="/ox.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="hdr">
+    <div><b>Orbit-X</b> <span class="sub" id="who"></span><div class="sub">Health information you can understand, trace and share</div></div>
+    <div class="links"><span id="aib"></span><a href="/developer.html" id="devlink">Developer tools (API)</a><a href="/?guardian=1">Family &amp; alerts</a><a href="/guide.html">Guide</a><span id="lgp"></span></div>
+  </div>
+  <div class="tabs" role="tablist" id="tabs"></div>
+  <div id="view" aria-live="polite"><div class="empty"><span class="spin"></span>Loading your workspace</div></div>
+</div>
+<script src="/voice.js"></script>
+<script src="/lang.js"></script>
+<script src="/ox.js"></script>
+<script>
+(function(){ /* language picker for My records: the whole page, including Orbit's explanations, switches language */
+  var box = document.getElementById('lgp'); if (!box || !window.OXLang) return;
+  box.innerHTML = '<select id="wsl" data-notr aria-label="Language" style="background:transparent;color:inherit;border:1px solid #2b5a9c;border-radius:999px;padding:4px 8px;font-size:12.5px;max-width:150px">' + OXLang.options() + '</select>';
+  var sel = document.getElementById('wsl');
+  sel.onchange = function(){
+    var v = sel.value; if (v === '__o') { v = (prompt('Type a language, for example Twi or Italian') || '').trim(); if (!OXLang.valid(v)) { sel.value = OXLang.get() || 'English'; return; } }
+    v = OXLang.set(v);
+    var s = null; try { s = JSON.parse(localStorage.getItem('orbitx.session.v1') || 'null'); } catch (e) {}
+    var go = function(){ location.reload(); };
+    if (s && s.role === 'patient' && s.pid) fetch('/api/h/' + s.pid + '/profile', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + s.token }, body: JSON.stringify({ lang: v }) }).then(go, go); else go();
+  };
+})();
+</script>
+<script src="/docread.js"></script>
+<script>
+(function(){
+var sess = OX.need('patient'); if (!sess) return;
+if (sess.accountType === 'individual') { var dl = document.getElementById('devlink'); if (dl) dl.textContent = 'API demo'; }
+var esc = OX.esc, S = null, tab = 'overview', docText = {}, askLog = [], busy = '';
+var TABS = [['overview','Overview'],['graph','Evidence Graph'],['memory','Health Memory'],['docs','Documents'],['timeline','Timeline'],['compare','Compare Reports'],['ask','Ask My Records'],['brief','Appointment Brief'],['sharing','Sharing & Permissions']];
+var QUESTIONS = ['What changed between these reports?','What is the most recent documented HbA1c?','Which medications are listed in my latest discharge summary?','Are any dates or values inconsistent between these documents?','Prepare a concise summary I can share with my clinician.'];
+
+document.getElementById('who').textContent = '· ' + (sess.name || '');
+function drawTabs(){
+  document.getElementById('tabs').innerHTML = TABS.map(function(t){ return '<button class="tab" role="tab" aria-selected="' + (t[0] === tab) + '" data-t="' + t[0] + '">' + t[1] + '</button>'; }).join('');
+  document.querySelectorAll('.tab').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-t'); try { history.replaceState(null, '', '#' + tab); } catch(e){} render(); window.scrollTo(0, 0); }; });
+}
+function paintBadge(ai){ var el = document.getElementById('aib'); if (!el) return; el.innerHTML = OX.aiBadge(ai); OX.bindBadge(); if (ai && ai.mode === 'live') OX.checkAI(function(){ el.innerHTML = OX.aiBadge(ai); OX.bindBadge(); }); }
+function load(){
+  return OX.w('wstate', null, 'GET').then(function(j){
+    if (j._status === 401 || j._status === 404) { try { localStorage.removeItem(OX.SKEY); } catch(e){} location.href = '/'; return; }
+    if (!j.ok) { document.getElementById('view').innerHTML = '<div class="empty">Could not load. Check your connection and reload.</div>'; return; }
+    S = j; document.getElementById('who').textContent = '· ' + j.patient; paintBadge(j.ai); render();
+  });
+}
+function take(j){ if (j && j.ok && j.facts) { S = j; paintBadge(j.ai); render(); return true; } return false; }
+function render(){ if (!S) return; drawTabs(); var v = document.getElementById('view'); v.innerHTML = VIEWS[tab](); BIND[tab] && BIND[tab](); }
+
+/* ---------- helpers ---------- */
+function fmt(n){ return String(Math.round(n * 1000) / 1000); }
+function factLabel(f){ return f.name + (f.value !== null && f.value !== undefined ? ' ' + fmt(f.value) + ' ' + (f.unit || '') : f.dose ? ' ' + f.dose : ''); }
+function srcChip(f){
+  if (f.source && f.source.type === 'connector') return '<span class="chip sim">EMR import' + (f.source.simulated ? ' · simulated' : '') + '</span>';
+  return '<span class="chip doc">' + esc(f.docName || f.docId) + '</span>';
+}
+function exChip(f){ var e = f.source && f.source.extractor; if (!e) return ''; var m = { 'meta-spark': 'Meta Spark', rules: 'rule parser', mock: 'MOCK' }; return '<span class="chip info">' + esc(m[e] || e) + '</span>'; }
+function stChip(f){ return f.status === 'low_confidence' ? '<span class="chip warn">low confidence · unverified</span>' : '<span class="chip documented">documented</span>'; }
+function cite(id){ return '<span class="chip cite" data-cite="' + esc(id) + '" tabindex="0" role="button">' + esc(shortId(id)) + '</span>'; }
+function shortId(id){ var f = S.facts.filter(function(x){ return x.id === id; })[0]; if (f) return 'source: ' + f.name.slice(0, 18); if (/^cmp_/.test(id)) { var c = S.comparisons.filter(function(x){ return x.id === id; })[0]; return 'calc: ' + (c ? c.label : 'change'); } var k = S.conflicts.filter(function(x){ return x.id === id; })[0]; return k ? 'conflict' : id; }
+function bindCites(root){ (root || document).querySelectorAll('[data-cite]').forEach(function(el){ var go = function(){ evidence(el.getAttribute('data-cite')); }; el.onclick = go; el.onkeydown = function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } }; }); }
+function getText(docId){ if (docText[docId] !== undefined) return Promise.resolve(docText[docId]); return OX.w('docget?id=' + encodeURIComponent(docId), null, 'GET').then(function(j){ docText[docId] = j.ok ? j.text : null; return docText[docId]; }); }
+function excerpt(text, quote){
+  if (!text) return '<div class="small">The original text is not stored for this source.</div>';
+  var words = quote.trim().split(/\s+/).map(function(w){ return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); });
+  var m = new RegExp(words.join('\\s+'), 'i').exec(text);
+  if (!m) return '<div class="small">Quote not found in the stored text.</div>';
+  var a = text.lastIndexOf('\n', m.index - 1); a = a < 0 ? 0 : a; var lines = 0, i = m.index; while (lines < 2 && a > 0) { a = text.lastIndexOf('\n', a - 1); lines++; } if (a < 0) a = 0;
+  var b = m.index + m[0].length; for (var k = 0; k < 2; k++) { var n = text.indexOf('\n', b + 1); if (n < 0) { b = text.length; break; } b = n; }
+  return '<pre>' + esc(text.slice(a, m.index)) + '<mark>' + esc(m[0]) + '</mark>' + esc(text.slice(m.index + m[0].length, b)) + '</pre>';
+}
+function factCard(f, withExcerpt){
+  var h = '<div class="card flat"><b>' + esc(factLabel(f)) + '</b> ' + (f.date ? '<span class="chip">' + esc(f.date) + '</span>' : '<span class="chip warn">no date</span>') + '<br>' + srcChip(f) + exChip(f) + stChip(f) +
+    (f.nv !== null && f.nv !== undefined && (f.nu !== f.unit) ? '<div class="small">Normalised by code: ' + fmt(f.nv) + ' ' + esc(f.nu) + ' (from ' + fmt(f.value) + ' ' + esc(f.unit) + ')</div>' : '') +
+    (f.flag ? '<div class="small">Source flagged: ' + esc(f.flag) + (f.refRange ? ' · reference ' + esc(f.refRange) : '') + '</div>' : '') +
+    (f.mapping ? '<div class="small">Test name matched to the fixed list by you.</div>' : '') +
+    (f.corroboratedBy && f.corroboratedBy.length ? '<div class="small">Also reported by: ' + f.corroboratedBy.map(function(c){ return esc(c.system) + (c.simulated ? ' (simulated)' : ''); }).join(', ') + '</div>' : '') +
+    '<div class="small" style="margin-top:6px">Extraction confidence ' + Math.round((f.confidence || 0) * 100) + '%</div>';
+  if (withExcerpt) h += '<div class="small" style="margin-top:6px">Exact text in the source:</div><div id="ex_' + esc(f.id) + '"><span class="spin"></span>loading</div>';
+  return h + '</div>';
+}
+function fillExcerpt(f){
+  var el = document.getElementById('ex_' + f.id); if (!el) return;
+  if (f.source && f.source.type === 'connector') { el.innerHTML = '<div class="small">Imported through Orbit Connect from a FHIR ' + esc(f.source.resourceType) + (f.source.resourceId ? ' (id ' + esc(f.source.resourceId) + ')' : '') + ' at ' + esc(f.source.importedAt || '') + (f.source.simulated ? '. <b>Simulated system.</b>' : '') + '</div>'; return; }
+  getText(f.docId).then(function(t){ el.innerHTML = excerpt(t, f.quote); });
+}
+function evidence(id){
+  var f = S.facts.filter(function(x){ return x.id === id; })[0], c = S.comparisons.filter(function(x){ return x.id === id; })[0], k = S.conflicts.filter(function(x){ return x.id === id; })[0], h = '';
+  if (f) { h = '<h2 style="margin-top:0">Source fact</h2>' + factCard(f, true); OX.openSheet(h); fillExcerpt(f); return; }
+  if (c) {
+    var a = S.facts.filter(function(x){ return x.id === c.from; })[0], b = S.facts.filter(function(x){ return x.id === c.to; })[0];
+    h = '<h2 style="margin-top:0">' + esc(c.label) + ': how this was calculated</h2><div class="banner green">Calculated by ordinary code, not by the AI.</div>' +
+      '<div class="card flat"><div>' + fmt(c.toValue) + ' − ' + fmt(c.fromValue) + ' = <b>' + (c.delta > 0 ? '+' : '') + fmt(c.delta) + ' ' + esc(c.unit) + '</b>' + (c.pct !== null ? ' (' + (c.pct > 0 ? '+' : '') + c.pct + '%)' : '') + '</div><div class="small">' + c.days + ' days between ' + esc(c.fromDate) + ' and ' + esc(c.toDate) + '. Size of change: ' + esc(c.magnitude) + '. ' + (c.converted ? 'Units were converted to ' + esc(c.unit) + ' first.' : '') + (c.toOutsideRef ? ' The later value is ' + esc(c.toOutsideRef) + ' the reference range printed in its source.' : '') + '</div></div>' +
+      '<h3>Earlier value</h3>' + (a ? factCard(a, true) : '') + '<h3>Later value</h3>' + (b ? factCard(b, true) : '') + '<div class="small">Orbit reports how big a change is. It does not say whether it matters for your health.</div>';
+    OX.openSheet(h); if (a) fillExcerpt(a); if (b) fillExcerpt(b); return;
+  }
+  if (k) {
+    var fs = k.evidence.map(function(i){ return S.facts.filter(function(x){ return x.id === i; })[0]; }).filter(Boolean);
+    h = '<h2 style="margin-top:0">' + esc(k.title) + '</h2><span class="chip ' + k.severity + '">' + esc(k.severity === 'info' ? 'for information' : k.severity + ' attention') + '</span><p>' + esc(k.detail) + '</p>' + fs.map(function(x){ return factCard(x, true); }).join('') +
+      '<div class="small">Orbit shows every version and never picks one for you. A review decision records that you looked at this; it does not change any source.</div>';
+    OX.openSheet(h); fs.forEach(fillExcerpt); return;
+  }
+  OX.openSheet('<p>That evidence item no longer exists.</p>');
+}
+function sev(k){ return k.severity === 'high' ? 'high' : k.severity === 'medium' ? 'medium' : 'info'; }
+
+
+/* ---------- add a document (sheet with Choose file / Take photo / paste) ---------- */
+function addDocForm(){
+  return '<h2 style="margin-top:0">Add a document</h2><div class="banner soft">Add your own documents. PDFs, Word and text files are read on your phone, and only the text is sent to the AI reader. Photos are sent to the AI only if the box below is ticked.</div>' +
+    '<div class="row"><button class="btn" id="pickf">Choose a file (PDF, Word, text, photo)</button><button class="btn g" id="pickp">Take a photo</button></div>' +
+    '<input type="file" id="df" accept=".pdf,.docx,.txt,.text,.md,.csv,application/pdf,image/*,text/plain" style="display:none"><input type="file" id="dp" accept="image/*" capture="environment" style="display:none">' +
+    '<label class="chk"><input type="checkbox" id="aiph"> <span>Let the AI read my photos. This is more accurate than reading on the phone. The picture is sent once to the AI and is not stored. Untick to read photos on this phone only.</span></label>' +
+    '<label class="l" for="dn">Name</label><input id="dn" maxlength="80" placeholder="e.g. Lab report, June"><label class="l" for="dt">Or paste the text of the document</label><textarea id="dt" placeholder="Paste text here"></textarea>' +
+    '<div class="err" id="der"></div><button class="btn" id="dadd">Analyse</button><span id="dmsg" class="small"></span>';
+}
+function openAddDoc(){ OX.openSheet(addDocForm()); bindAddDoc(); }
+function bindAddDoc(){
+  var g = function(i){ return document.getElementById(i); };
+  var KEY = 'orbitx.aiphoto'; try { g('aiph').checked = localStorage.getItem(KEY) !== '0'; } catch (e) { g('aiph').checked = true; }
+  g('aiph').onchange = function(){ try { localStorage.setItem(KEY, g('aiph').checked ? '1' : '0'); } catch (e) { /* private mode */ } };
+  var aiRead = function(dataUrl){ return OX.w('docphoto', { image: dataUrl }).then(function(j){ if (j && j.ok && j.text) { aiRead.unclear = j.unclear || 0; return j.text; } throw new Error((j && j.error) || 'failed'); }); };
+  function pick(inp){ var f = inp.files[0]; if (!f) return; g('der').textContent = ''; g('dadd').disabled = true; g('dmsg').innerHTML = '<span class="spin"></span>Opening ' + esc(f.name) + '...';
+    OXRead.read(f, function(m){ g('dmsg').innerHTML = '<span class="spin"></span>' + esc(m); }, { ai: g('aiph').checked ? aiRead : null }).then(function(r){
+      g('dt').value = r.text; if (!g('dn').value) g('dn').value = f.name.replace(/\.[a-z0-9]+$/i, '').slice(0, 80);
+      g('dmsg').textContent = (r.via === 'ai' ? 'Photo read by the AI (' + r.text.length + ' characters).' + (aiRead.unclear ? ' ' + aiRead.unclear + ' unclear spot(s) are marked [unclear]: please fix them.' : '') + ' Please check every number against your paper.' : r.via === 'phone' ? 'Photo read on this phone (' + r.text.length + ' characters).' + (r.note ? ' The AI could not read it, so this phone did.' : '') + ' Photo reading can make mistakes: please check every number against your paper.' : 'File read (' + r.text.length + ' characters).') + (r.truncated ? ' Long file: only the first 40,000 characters are used.' : '') + ' Fix anything wrong, then tap Analyse.'; g('dadd').disabled = false;
+    }, function(e){ g('dmsg').textContent = ''; g('der').textContent = (e && e.message) || 'Could not read that file.'; g('dadd').disabled = false; inp.value = ''; }); }
+  g('pickf').onclick = function(){ g('df').click(); }; g('pickp').onclick = function(){ g('dp').click(); };
+  g('df').onchange = function(){ pick(g('df')); }; g('dp').onchange = function(){ pick(g('dp')); };
+  g('dadd').onclick = function(){
+    var t = g('dt').value, n = g('dn').value, er = g('der'), b = g('dadd'); er.textContent = '';
+    if (t.trim().length < 20) { er.textContent = 'Please choose a file or paste the document text first.'; return; }
+    b.disabled = true; g('dmsg').innerHTML = '<span class="spin"></span>Reading the document. This can take up to 30 seconds when the AI is on.';
+    OX.w('docadd', { name: n, text: t }).then(function(j){
+      if (take(j)) { var m = document.getElementById('modal'); if (m) m.classList.remove('on'); tab = 'docs'; render(); return; }
+      b.disabled = false; g('dmsg').textContent = '';
+      er.textContent = j.error === 'duplicate_document' ? 'That document is already here.' : j.error === 'too_many_documents' ? 'The limit is 8 documents. Delete one first.' : 'Could not read that document (' + (j.error || 'error') + ').';
+    });
+  };
+}
+(function(){ var f = document.createElement('button'); f.id = 'fab'; f.textContent = '+'; f.setAttribute('aria-label', 'Add document'); f.title = 'Add document';
+  f.style.cssText = 'position:fixed;right:14px;bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:15;background:#2563EB;color:#fff;border:0;border-radius:999px;padding:14px 18px;font-size:15px;font-weight:600;box-shadow:0 6px 18px #000a;font-family:inherit;cursor:pointer';
+  f.onclick = function(){ openAddDoc(); }; document.body.appendChild(f); })();
+
+/* ---------- overview ---------- */
+function onboardingCard(){
+  return '<div class="card"><h2 style="margin-top:0">Add your first document</h2><p>Orbit-X reads your documents, keeps every fact tied to the exact words it came from, compares reports over time, and tells you what is unknown.</p>' +
+    '<div class="banner soft">Nothing is pre-filled. Everything you see here comes from documents you add.</div>' +
+    '<button class="btn" id="upl">Upload my own document</button></div>';
+}
+function easySteps(){
+  var d1 = S.docs.length > 0, d2 = askLog.length > 0;
+  function row(n, done, t, btn){ return '<div class="row" style="flex-wrap:nowrap;align-items:center;margin:6px 0"><span class="chip ' + (done ? 'ok' : 'info') + '" style="min-width:26px;text-align:center">' + (done ? '&#10003;' : n) + '</span><span style="flex:1">' + t + '</span>' + (btn || '') + '</div>'; }
+  return '<div class="card"><b>3 easy steps</b>' +
+    row(1, d1, 'Add the documents', d1 ? '' : '<button class="btn s" id="es1">Upload</button>') +
+    row(2, false, 'See what changed', d1 ? '<button class="btn g s" data-go="compare">Open</button>' : '') +
+    row(3, d2, 'Ask a question, then tap Read aloud', d1 ? '<button class="btn g s" data-go="ask">Open</button>' : '') +
+    '<div class="small"><a href="/guide.html">Need help? Read the 1-minute guide</a></div></div>';
+}
+VIEWS = {};
+var BIND = {};
+VIEWS.overview = function(){
+  if (!S.docs.length) return '<h1>Welcome, ' + esc(S.patient.split(' ')[0]) + '</h1>' + easySteps() + onboardingCard() + '<div class="card flat"><b>Or add your own text</b><p class="small">Go to Documents to paste or upload a text document. Orbit extracts only what is written and drops anything it cannot find in the text.</p></div>';
+  var open = S.conflicts.filter(function(c){ return c.type !== 'medication_difference' && !c.decision; }), notable = S.comparisons.filter(function(c){ return c.magnitude !== 'unchanged'; });
+  var ins = notable.slice().sort(function(a, b){ return Math.abs(b.pct || 0) - Math.abs(a.pct || 0); }).slice(0, 4);
+  var h = '<h1>Overview</h1>' + easySteps() + '<div class="grid"><div class="stat"><b>' + S.docs.length + '</b><span class="small">sources (documents and imports)</span></div><div class="stat"><b>' + S.facts.length + '</b><span class="small">facts, each tied to its source</span></div><div class="stat"><b>' + S.comparisons.length + '</b><span class="small">comparisons calculated</span></div><div class="stat"><b style="color:' + (open.length ? 'var(--amb)' : 'var(--grn)') + '">' + open.length + '</b><span class="small">open conflicts to confirm</span></div></div>';
+  h += '<h2>What stands out</h2>';
+  if (!ins.length && !open.length) h += '<div class="card flat small">Nothing notable yet. Add a second report to compare.</div>';
+  ins.forEach(function(c){ h += '<div class="card" data-open="' + esc(c.id) + '" style="cursor:pointer"><b>' + esc(c.label) + '</b> <span class="chip ' + (c.magnitude === 'notable' ? 'warn' : 'info') + '">' + esc(c.magnitude) + ' change</span><div>' + fmt(c.fromValue) + ' → ' + fmt(c.toValue) + ' ' + esc(c.unit) + (c.pct !== null ? ' (' + (c.pct > 0 ? '+' : '') + c.pct + '%)' : '') + ' <span class="small">' + esc(c.fromDate) + ' → ' + esc(c.toDate) + '</span></div><div class="small">Tap to open the evidence</div></div>'; });
+  open.slice(0, 4).forEach(function(k){ h += '<div class="card" data-open="' + esc(k.id) + '" style="cursor:pointer;border-color:#7f2a2a"><span class="chip conflict">sources disagree</span> <b>' + esc(k.title) + '</b><div class="small">' + esc(k.detail) + '</div></div>'; });
+  h += '<h2>Ask</h2><div class="row">' + QUESTIONS.slice(0, 3).map(function(q, i){ return '<button class="btn g s" data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>';
+  h += '<div class="card flat small" style="margin-top:14px"><b>How to read this.</b> <span class="chip documented">documented</span> is written in a source. <span class="chip interp">AI interpretation</span> is wording by the model, checked by code. <span class="chip unknown">unknown</span> means the documents do not say. Orbit never gives medical advice.</div>';
+  return h;
+};
+BIND.overview = function(){
+  var e1 = document.getElementById('es1'); if (e1) e1.onclick = openAddDoc; var up1 = document.getElementById('upl'); if (up1) up1.onclick = openAddDoc;
+  document.querySelectorAll('[data-go]').forEach(function(b){ b.onclick = function(){ tab = b.getAttribute('data-go'); render(); }; });
+  document.querySelectorAll('[data-open]').forEach(function(el){ el.onclick = function(){ evidence(el.getAttribute('data-open')); }; });
+  document.querySelectorAll('[data-q]').forEach(function(b){ b.onclick = function(){ tab = 'ask'; render(); runAsk(QUESTIONS[+b.getAttribute('data-q')]); }; });
+};
+
+/* ---------- evidence graph ---------- */
+VIEWS.graph = function(){
+  if (!S.docs.length) return '<h1>Evidence Graph</h1><div class="empty">Add documents to see how every insight traces back to its source.</div>';
+  return '<h1>Evidence Graph</h1><p class="small">Every finding links to the facts it came from, and every fact links to the exact source it was read from. Tap any box.</p>' + (S.comparisons.some(function(c){ return c.magnitude !== 'unchanged'; }) || S.conflicts.length ? '<div class="small">Swipe sideways on a phone to see all columns.</div>' : '<div class="banner soft">Findings appear when Orbit can compare two reports, for example the same test on two dates, or when two reports disagree. Add another report to see them. For now you can see which report each fact was read from.</div>') + '<div class="card" style="padding:6px;overflow:auto"><div id="gsvg"></div></div>' +
+    '<div class="small"><span class="chip doc">source</span><span class="chip fact">extracted fact</span><span class="chip warn">finding (calculated by code)</span><span class="chip conflict">conflict</span><span class="chip sim">handoff</span></div>';
+};
+BIND.graph = function(){
+  if (!S.docs.length) return;
+  var comps = S.comparisons.filter(function(c){ return c.magnitude !== 'unchanged'; }).sort(function(a, b){ return Math.abs(b.pct || 0) - Math.abs(a.pct || 0); }).slice(0, 7);
+  var confs = S.conflicts.filter(function(c){ return c.type !== 'medication_difference'; }).slice(0, 6);
+  var findings = comps.map(function(c){ return { id: c.id, label: c.label + ' ' + (c.pct > 0 ? '+' : '') + (c.pct === null ? '' : c.pct + '%'), kind: 'cmp', facts: [c.from, c.to] }; }).concat(confs.map(function(k){ return { id: k.id, label: k.title.slice(0, 26), kind: 'conf', facts: k.evidence, docs: k.docIds }; }));
+  var fset = {}; findings.forEach(function(f){ f.facts.forEach(function(i){ fset[i] = 1; }); });
+  var hoItems = S.handoffs.length ? (S.handoffs[0].summary ? S.handoffs[0].summary.items.map(function(i){ return i.factId; }) : []) : [];
+  hoItems.forEach(function(i){ if (S.facts.some(function(f){ return f.id === i; })) fset[i] = 1; });
+  var facts = S.facts.filter(function(f){ return fset[f.id]; });
+  // With a single report there are no findings yet. Still show where each fact came from: flagged results first, then the rest, up to 12 boxes.
+  if (facts.length < 12) { var rest = S.facts.filter(function(f){ return !fset[f.id] && f.kind !== 'encounter' && S.docs.some(function(d){ return d.id === f.docId; }); }).sort(function(a, b){ return (b.flag ? 1 : 0) - (a.flag ? 1 : 0); }).slice(0, 12 - facts.length); facts = facts.concat(rest); }
+  var dset = {}; facts.forEach(function(f){ dset[f.docId] = 1; }); findings.forEach(function(f){ (f.docs || []).forEach(function(d){ dset[d] = 1; }); });
+  var docs = S.docs.filter(function(d){ return dset[d.id]; });
+  var cols = [docs, facts, findings, S.handoffs.length ? [S.handoffs[0]] : []];
+  var hasF = findings.length > 0, hasH = cols[3].length > 0;
+  var rows = Math.max(docs.length, facts.length, findings.length, 1), H = rows * 34 + 50, pos = {};
+  var W = hasH ? 880 : hasF ? 720 : 356, X = hasH ? [10, 235, 520, 735] : hasF ? [10, 235, 520, 735] : [4, 146], BW = hasH ? [190, 255, 190, 135] : hasF ? [190, 255, 190, 135] : [130, 208];
+  function put(list, c, kindFn){ var gap = (H - 40) / Math.max(list.length, 1); list.forEach(function(n, i){ pos[kindFn(n)] = { x: X[c], y: 30 + i * gap + gap / 2 - 13, w: BW[c] }; }); }
+  put(docs, 0, function(n){ return 'd:' + n.id; }); put(facts, 1, function(n){ return 'f:' + n.id; }); put(findings, 2, function(n){ return 'k:' + n.id; }); if (cols[3].length) put(cols[3], 3, function(n){ return 'h:' + n.id; });
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="min-width:' + (hasF || hasH ? 680 : 0) + 'px" role="img" aria-label="Evidence graph">';
+  ['Sources', 'Extracted facts', hasF ? 'Findings' : '', hasH ? 'Handoff' : ''].forEach(function(t, i){ if (t) svg += '<text x="' + X[i] + '" y="16" fill="#8DA0C8" font-size="12">' + t + '</text>'; });
+  function edge(a, b, col){ var p = pos[a], q = pos[b]; if (!p || !q) return; var x1 = p.x + p.w, y1 = p.y + 13, x2 = q.x, y2 = q.y + 13, mx = (x1 + x2) / 2; svg += '<path d="M' + x1 + ' ' + y1 + ' C' + mx + ' ' + y1 + ' ' + mx + ' ' + y2 + ' ' + x2 + ' ' + y2 + '" fill="none" stroke="' + col + '" stroke-opacity=".55" stroke-width="1.4"/>'; }
+  facts.forEach(function(f){ edge('d:' + f.docId, 'f:' + f.id, '#2b5a9c'); });
+  findings.forEach(function(k){ k.facts.forEach(function(i){ edge('f:' + i, 'k:' + k.id, k.kind === 'conf' ? '#F87171' : '#FBBF24'); }); });
+  if (cols[3].length) hoItems.forEach(function(i){ edge('f:' + i, 'h:' + cols[3][0].id, '#FBBF24'); });
+  function node(key, text, stroke, id){ var p = pos[key]; if (!p) return; svg += '<g data-gid="' + esc(id) + '" style="cursor:pointer" tabindex="0" role="button"><rect x="' + p.x + '" y="' + p.y + '" width="' + p.w + '" height="26" rx="8" fill="#0E1730" stroke="' + stroke + '"/><text x="' + (p.x + 8) + '" y="' + (p.y + 17) + '" fill="#E6F0FF" font-size="11.5">' + esc(text.length > Math.floor(p.w / 6.1) ? text.slice(0, Math.floor(p.w / 6.1) - 1) + '…' : text) + '</text></g>'; }
+  docs.forEach(function(d){ node('d:' + d.id, (d.kind === 'connector' ? '⇄ ' : '') + d.name, d.kind === 'connector' ? '#FBBF24' : '#38BDF8', 'doc:' + d.id); });
+  facts.forEach(function(f){ node('f:' + f.id, factLabel(f), '#5EEAD4', f.id); });
+  findings.forEach(function(k){ node('k:' + k.id, k.label, k.kind === 'conf' ? '#F87171' : '#FBBF24', k.id); });
+  if (cols[3].length) node('h:' + cols[3][0].id, 'Handoff ' + cols[3][0].status, '#FBBF24', 'ho:' + cols[3][0].id);
+  svg += '</svg>';
+  document.getElementById('gsvg').innerHTML = svg;
+  document.querySelectorAll('[data-gid]').forEach(function(g){ var go = function(){ var id = g.getAttribute('data-gid'); if (id.indexOf('doc:') === 0) { var d = S.docs.filter(function(x){ return x.id === id.slice(4); })[0]; if (d) { tab = 'docs'; render(); viewDoc(d.id); } } else if (id.indexOf('ho:') === 0) { tab = 'sharing'; render(); } else evidence(id); }; g.onclick = go; g.onkeydown = function(e){ if (e.key === 'Enter') go(); }; });
+};
+
+/* ---------- health memory ---------- */
+VIEWS.memory = function(){
+  if (!S.facts.length) return '<h1>Health Memory</h1><div class="empty">Nothing here yet. Add a document first.</div>';
+  var groups = [['observation','Results'],['medication','Medicines'],['allergy','Allergies'],['condition','Diagnoses'],['encounter','Encounters']], h = '<h1>Health Memory</h1><p class="small">Everything Orbit knows, with where it came from. Tap a row to see the exact source text.</p>';
+  groups.forEach(function(g){
+    var rows = S.facts.filter(function(f){ return f.kind === g[0]; }); if (!rows.length) return;
+    h += '<h2>' + g[1] + ' (' + rows.length + ')</h2><div class="card" style="padding:4px 10px"><table><tbody>' + rows.map(function(f){ return '<tr class="click" data-open="' + esc(f.id) + '"><td><b>' + esc(f.name) + '</b>' + (f.dose ? '<div class="small">' + esc(f.dose) + '</div>' : '') + '</td><td>' + (f.value !== null && f.value !== undefined ? esc(fmt(f.value)) + ' ' + esc(f.unit || '') : '') + (f.flag ? ' <span class="chip warn">' + esc(f.flag) + '</span>' : '') + '</td><td class="small">' + esc(f.date || 'no date') + '</td><td>' + srcChip(f) + exChip(f) + (f.status === 'low_confidence' ? '<span class="chip warn">unverified</span>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+  });
+  return h;
+};
+BIND.memory = function(){ document.querySelectorAll('[data-open]').forEach(function(el){ el.onclick = function(){ evidence(el.getAttribute('data-open')); }; }); };
+
+/* ---------- documents ---------- */
+VIEWS.docs = function(){
+  var h = '<h1>Documents</h1>';
+  if (!S.docs.length) h += onboardingCard();
+  S.docs.forEach(function(d){
+    var ex = d.extraction || {}, ai = ex.mode === 'meta-spark', isConn = d.kind === 'connector';
+    h += '<div class="card"><div class="row" style="justify-content:space-between;align-items:flex-start"><b style="flex:1 1 200px">' + esc(d.name) + '</b><span>' + (d.meta && d.meta.docDate ? '<span class="chip">' + esc(d.meta.docDate) + '</span>' : '') + '<span class="chip ' + (isConn ? 'sim' : 'doc') + '">' + esc(isConn ? 'connector' : ((d.meta && d.meta.docType) || 'document').replace(/_/g, ' ')) + '</span></span></div>';
+    if (isConn) h += '<div class="small">Imported through Orbit Connect. ' + d.factCount + ' facts. Each fact keeps its FHIR resource id and import time.</div>';
+    else {
+      h += '<div class="small">' + d.factCount + ' fact' + (d.factCount === 1 ? '' : 's') + ' · read by ' + (ai ? '<span class="chip ok">Meta Muse Spark Open</span>' : ex.mode === 'mock' ? '<span class="chip warn">MOCK AI, not a Meta model</span>' : '<span class="chip info">built-in reader</span>') + (ai && ex.ms ? ' <span class="small">' + Math.round(ex.ms / 100) / 10 + ' s</span>' : '') + '</div>';
+      if (ex.aiError) h += '<div class="banner soft">' + esc(OX.friendlyAiError(ex.aiError)) + ' Orbit used its built-in reader, so nothing was lost. <button class="btn g s" data-retry="' + esc(d.id) + '">Read again with AI</button><details class="more"><summary>Technical detail</summary><div class="small">' + esc(String(ex.aiError).slice(0, 200)) + '</div></details></div>';
+      if (!ex.aiError && !d.factCount) h += '<div class="banner">Orbit could not find any results in this text. If it came from a photo or a scan, check the text under View source, or paste the text yourself.</div>';
+      if (ex.supplemented) h += '<div class="small">' + ex.supplemented + ' fact(s) the model missed were added by the built-in reader and are marked as such.</div>';
+      if (ex.rejected && ex.rejected.length) h += '<details class="small more"><summary>' + ex.rejected.length + ' model output(s) rejected by the checks</summary>' + ex.rejected.map(function(r){ return '<div>' + esc(r.name) + ': ' + esc(String(r.reason || '').replace(/_/g, ' ')) + '</div>'; }).join('') + '</details>';
+    }
+    h += '<div class="row" style="margin-top:8px">' + (d.factCount ? '<button class="btn s" data-explain="' + esc(d.id) + '">Explain in plain words</button>' : '') + (!isConn ? '<button class="btn g s" data-view="' + esc(d.id) + '">View source</button>' : '') + '<button class="btn r s" data-del="' + esc(d.id) + '">Delete</button></div></div>';
+  });
+  h += '<h2>Add a document</h2><div class="card"><p class="small">Upload a PDF, a photo of a report, a Word file or a text file, or paste text.</p><button class="btn" id="addbtn">Upload or paste a document</button></div>';
+  if (S.docs.length) h += '<div class="row" style="margin-top:14px"><button class="btn r s" id="wipe">Remove everything in this workspace</button></div>';
+  return h;
+};
+BIND.docs = function(){
+  document.querySelectorAll('[data-view]').forEach(function(b){ b.onclick = function(){ viewDoc(b.getAttribute('data-view')); }; });
+  document.querySelectorAll('[data-explain]').forEach(function(b){ b.onclick = function(){ explainDoc(b.getAttribute('data-explain')); }; });
+  document.querySelectorAll('[data-retry]').forEach(function(b){ b.onclick = function(){ b.disabled = true; b.textContent = 'Reading...'; OX.w('docretry', { id: b.getAttribute('data-retry') }).then(function(j){ if (!take(j)) { b.disabled = false; b.textContent = 'Read again with AI'; alert(j && j.error === 'ai_still_unavailable' ? 'The AI is still not available. Tap the AI badge at the top to see why.' : 'Could not read it again.'); } }); }; });
+  document.querySelectorAll('[data-del]').forEach(function(b){ b.onclick = function(){ if (confirm('Delete this source and the facts read from it?')) OX.w('docdel', { id: b.getAttribute('data-del') }).then(take); }; });
+  var wp = document.getElementById('wipe'); if (wp) wp.onclick = function(){ if (confirm('Remove all documents, facts, imports and handoffs from this workspace?')) OX.w('wipe', {}).then(take); };
+  var ab = document.getElementById('addbtn'); if (ab) ab.onclick = openAddDoc; var up = document.getElementById('upl'); if (up) up.onclick = openAddDoc;
+};
+
+/* ---------- plain-language explanation of one document ---------- */
+function explainDoc(id){
+  OX.openSheet('<h2 style="margin-top:0">Explained in plain words</h2><div class="empty"><span class="spin"></span>Preparing a simple explanation. This can take up to 30 seconds.</div>');
+  OX.w('docexplain', { id: id }).then(function(j){
+    var box = document.getElementById('sheet'); if (!box) return;
+    if (!j || !j.ok) { OX.openSheet('<h2 style="margin-top:0">Explained in plain words</h2><div class="banner red">Could not prepare the explanation (' + esc((j && j.error) || 'error') + ').</div>'); return; }
+    var h = '<h2 style="margin-top:0">' + esc(j.name) + '</h2>' +
+      '<div class="banner soft">General explanations of terms, not medical advice. Orbit cannot tell you what a result means for your health. Your clinician can.</div>' +
+      (j.aiError ? '<div class="small">Explained with Orbit\'s built-in word list (' + esc(OX.friendlyAiError(j.aiError)) + ')</div>' : j.mode === 'live' ? '<div class="small">Worded by ' + esc(j.model || 'Meta Muse Spark Open') + ', checked by code.</div>' : '') +
+      '<p>' + esc(j.summary) + '</p>';
+    if (j.items && j.items.length) {
+      h += '<h3>What your document says</h3><div class="card flat" style="padding:4px 10px"><table><tbody>' + j.items.map(function(f){ return '<tr><td><b>' + esc(f.name) + '</b>' + (f.dose ? '<div class="small">' + esc(f.dose) + '</div>' : '') + '</td><td>' + (f.value !== null && f.value !== undefined ? esc(fmt(f.value)) + ' ' + esc(f.unit || '') : '') + '</td><td>' + (f.flag ? '<span class="chip ' + (f.flag === 'H' || f.flag === 'L' ? 'warn' : 'info') + '">flagged ' + esc(f.flag === 'H' ? 'high' : f.flag === 'L' ? 'low' : f.flag) + ' in the source</span>' : '') + (f.refRange ? '<div class="small">source range ' + esc(f.refRange) + '</div>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+    }
+    if (j.terms && j.terms.length) h += '<h3>What the words mean</h3><dl class="terms">' + j.terms.map(function(t){ return '<dt>' + esc(t.name) + '</dt><dd>' + esc(t.meaning) + '</dd>'; }).join('') + '</dl>';
+    h += '<h3>Questions you could ask your clinician</h3><ul class="qs">' + j.questions.map(function(q){ return '<li>' + esc(q) + '</li>'; }).join('') + '</ul>' +
+      '<div class="row"><button class="btn g s" id="exsay">&#128266; Read aloud</button></div>';
+    OX.openSheet(h);
+    var sb = document.getElementById('exsay'); if (sb) sb.onclick = function(){ var was = voiceOn; voiceOn = true; sayText(j.summary + ' ' + (j.terms || []).slice(0, 6).map(function(t){ return t.name + '. ' + t.meaning; }).join(' ') + ' This is not medical advice.'); voiceOn = was; };
+  });
+}
+function viewDoc(id){ getText(id).then(function(t){ var d = S.docs.filter(function(x){ return x.id === id; })[0]; OX.openSheet('<h2 style="margin-top:0">' + esc(d ? d.name : 'Document') + '</h2><pre>' + esc(t || 'No text stored.') + '</pre>'); }); }
+
+/* ---------- timeline ---------- */
+VIEWS.timeline = function(){
+  if (!S.timeline.length) return '<h1>Timeline</h1><div class="empty">The timeline fills in as documents and imports arrive.</div>';
+  var h = '<h1>Timeline</h1><p class="small">Oldest first. Documents, hospital stays, results and medicines in one line, from every source.</p>', last = '';
+  S.timeline.forEach(function(e){ if (e.date !== last) { h += '<h3 style="margin-top:14px">' + esc(e.date) + '</h3>'; last = e.date; }
+    var col = { observation: 'fact', document: 'doc', encounter: 'unknown', medication: 'interp', allergy: 'conflict', condition: 'interp' }[e.type] || 'info';
+    h += '<div class="card flat" ' + (e.factId ? 'data-open="' + esc(e.factId) + '" style="cursor:pointer"' : '') + '><span class="chip ' + col + '">' + esc(e.type) + '</span> <b>' + esc(e.title) + '</b> ' + (e.detail ? '<span class="small">' + esc(e.detail) + '</span>' : '') + (e.source && e.source.type === 'connector' ? '<span class="chip sim">EMR import' + (e.source.simulated ? ' · simulated' : '') + '</span>' : (e.docName ? '<span class="small"> · ' + esc(e.docName) + '</span>' : '')) + '</div>'; });
+  return h;
+};
+BIND.timeline = function(){ document.querySelectorAll('[data-open]').forEach(function(el){ el.onclick = function(){ evidence(el.getAttribute('data-open')); }; }); };
+
+/* ---------- compare ---------- */
+VIEWS.compare = function(){
+  if (!S.docs.length) return '<h1>Compare Reports</h1><div class="empty">Add two reports to compare them.</div>';
+  var h = '<h1>Compare Reports</h1><p class="small">Every number below was calculated by code after converting units. The AI never does the math.</p>';
+  h += S.comparisons.length ? '<div class="card" style="padding:4px 8px;overflow:auto"><table><thead><tr><th>Test</th><th>Earlier</th><th>Later</th><th>Change</th><th></th></tr></thead><tbody>' + S.comparisons.map(function(c){ return '<tr class="click" data-open="' + esc(c.id) + '"><td><b>' + esc(c.label) + '</b><div class="small">' + c.days + ' days</div></td><td>' + fmt(c.fromValue) + '<div class="small">' + esc(c.fromDate) + '</div></td><td>' + fmt(c.toValue) + ' ' + esc(c.unit) + '<div class="small">' + esc(c.toDate) + '</div></td><td>' + (c.delta > 0 ? '+' : '') + fmt(c.delta) + (c.pct !== null ? ' (' + (c.pct > 0 ? '+' : '') + c.pct + '%)' : '') + '</td><td><span class="chip ' + (c.magnitude === 'notable' ? 'warn' : 'info') + '">' + esc(c.magnitude) + '</span>' + (c.converted ? '<span class="chip info">units converted</span>' : '') + (c.toOutsideRef ? '<span class="chip warn">later: ' + esc(c.toOutsideRef) + ' ref.</span>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="card flat small">No test appears in two documents on different dates yet.</div>';
+  h += '<h2>Conflicts and things to confirm</h2>';
+  var cs = S.conflicts; if (!cs.length) h += '<div class="card flat small">No conflicts found in what Orbit has read.</div>';
+  cs.forEach(function(k){ h += '<div class="card" style="' + (k.severity === 'high' && !k.decision ? 'border-color:#7f2a2a' : '') + '"><span class="chip ' + sev(k) + '">' + (k.severity === 'info' ? 'for information' : esc(k.severity)) + '</span>' + (k.decision ? '<span class="chip ok">' + esc(k.decision.decision) + '</span>' : '') + ' <b>' + esc(k.title) + '</b><div class="small">' + esc(k.detail) + '</div><div class="row" style="margin-top:6px">' + (k.evidence.length ? '<button class="btn g s" data-open="' + esc(k.id) + '">Open evidence</button>' : '') + (!k.decision ? '<button class="btn g s" data-dec="ack:' + esc(k.id) + '">I will confirm this</button><button class="btn g s" data-dec="dis:' + esc(k.id) + '">Not a problem</button>' : '') + '</div></div>'; });
+  h += '<div class="small">Choosing an option records that you reviewed it. Orbit never changes or picks between source values on its own.</div><h2>Test names Orbit did not recognise</h2><div id="unm"></div>';
+  return h;
+};
+BIND.compare = function(){
+  document.querySelectorAll('[data-open]').forEach(function(el){ el.onclick = function(){ evidence(el.getAttribute('data-open')); }; });
+  document.querySelectorAll('[data-dec]').forEach(function(b){ b.onclick = function(){ var p = b.getAttribute('data-dec').split(':'); OX.w('decide', { id: p[1], decision: p[0] === 'ack' ? 'acknowledged' : 'dismissed' }).then(take); }; });
+  var unm = S.facts.filter(function(f){ return f.kind === 'observation' && !f.canon; }), box = document.getElementById('unm');
+  if (!unm.length) { box.innerHTML = '<div class="card flat small">Every test name matched the fixed list.</div>'; return; }
+  box.innerHTML = '<div class="card flat">' + unm.map(function(f){ return '<div>' + esc(f.name) + ' <span class="small">(' + esc(f.docName) + ')</span></div>'; }).join('') + '<button class="btn g s" id="sg">Ask the AI to suggest matches</button><div id="sgo"></div><div class="small">Suggestions are never applied until you confirm each one.</div></div>';
+  document.getElementById('sg').onclick = function(){ var o = document.getElementById('sgo'); o.innerHTML = '<span class="spin"></span>asking'; OX.w('suggest', {}).then(function(j){
+    if (!j.suggestions || !j.suggestions.length) { o.innerHTML = '<div class="small">' + (j.ai && !j.ai.used ? 'AI suggestions unavailable (' + esc(j.ai.error) + ').' : 'No confident suggestion.') + '</div>'; return; }
+    o.innerHTML = j.suggestions.map(function(m, i){ return '<div class="row"><span><b>' + esc(m.name) + '</b> → ' + esc(m.key) + ' <span class="chip interp">AI suggestion ' + Math.round(m.confidence * 100) + '%</span></span><button class="btn s" data-mc="' + i + '">Confirm</button></div>'; }).join('');
+    o.querySelectorAll('[data-mc]').forEach(function(b){ b.onclick = function(){ var m = j.suggestions[+b.getAttribute('data-mc')]; var f = unm.filter(function(x){ return x.name === m.name; })[0]; if (f) OX.w('mapconfirm', { factId: f.id, key: m.key, suggestedBy: j.ai && j.ai.model }).then(take); }; });
+  }); };
+};
+
+/* ---------- ask ---------- */
+VIEWS.ask = function(){
+  var h = '<h1>Ask My Records</h1><p class="small">Answers come from your own documents only. Facts are found and calculated by code; the AI only helps with wording, and its output is checked against the evidence.</p>' +
+    faceHtml() + '<div class="row">' + QUESTIONS.map(function(q, i){ return '<button class="btn g s" data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>' +
+    '<div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="aq" maxlength="300" placeholder="Ask about your records" aria-label="Question"><button class="btn g" id="amic" title="Speak your question" aria-label="Speak your question">&#127908;</button><button class="btn" id="ago">Ask</button></div><div id="aout">';
+  if (!S.docs.length) h += '<div class="empty">Add documents first.</div>';
+  askLog.slice().reverse().forEach(function(a){ h += renderAnswer(a); });
+  return h + '</div>';
+};
+function renderAnswer(a){
+  if (a.pending) return '<div class="card"><b>' + esc(a.q) + '</b><div class="small"><span class="spin"></span>Checking your records' + (S.ai && S.ai.mode !== 'off' ? ' and asking the model for a plain-language explanation' : '') + '</div></div>';
+  if (!a.ok) return '<div class="card"><b>' + esc(a.q) + '</b><div class="err">Could not answer (' + esc(a.error || 'error') + ').</div></div>';
+  var kindChip = { documented: '<span class="chip documented">documented fact</span>', conflict: '<span class="chip conflict">conflict</span>', unknown: '<span class="chip unknown">unknown</span>', interpretation: '<span class="chip interp">AI interpretation</span>' };
+  var h = '<div class="card"><b>' + esc(a.q) + '</b>';
+  h += '<h3>Evidence <span class="small">(found and calculated by code)</span></h3>' + a.statements.map(function(s){ return '<div class="ev ' + s.kind + '">' + (kindChip[s.kind] || '') + esc(s.text) + '<div>' + s.cites.map(cite).join('') + '</div></div>'; }).join('');
+  if (a.explanation) h += '<h3>Plain-language explanation <span class="small">(' + (a.ai.mode === 'mock' ? 'MOCK AI, not a Meta model' : esc(a.ai.model || 'Meta Muse Spark Open')) + ', validated)</span></h3>' + a.explanation.map(function(s){ return '<div class="ev ' + (s.kind === 'interpretation' ? 'interp' : s.kind) + '">' + (kindChip[s.kind] || '') + esc(s.text) + '<div>' + s.cites.map(cite).join('') + '</div></div>'; }).join('') + (a.ai.dropped && a.ai.dropped.length ? '<div class="small">' + a.ai.dropped.length + ' statement(s) from the model were removed because they failed a check (' + esc(a.ai.dropped.map(function(d){ return d.reason.replace(/_/g, ' '); }).join(', ')) + ').</div>' : '');
+  else if (S.ai && S.ai.mode !== 'off') h += '<div class="banner">AI explanation unavailable' + (a.ai && a.ai.error ? ' (' + esc(a.ai.error.replace(/_/g, ' ')) + ')' : '') + '. The evidence above is complete without it.</div>';
+  else h += '<div class="small">The AI is not connected, so this answer is evidence only.</div>';
+  return h + '<div class="row"><button class="btn g s" data-say="' + esc(a.q) + '">&#128266; Read aloud</button></div><div class="small">Tap a blue chip to open the exact source. Orbit does not give medical advice.</div></div>';
+}
+/* ---------- voice (browser speech; reads only the validated answer text) ---------- */
+var voiceOn = true;
+function faceHtml(){
+  return '<div class="vface"><svg id="vf" viewBox="0 0 120 120" width="76" height="76" role="img" aria-label="Orbit voice"><circle cx="60" cy="60" r="54" fill="#0A1630" stroke="#38BDF8" stroke-width="2"/><circle cx="42" cy="50" r="7" fill="#38BDF8"/><circle cx="78" cy="50" r="7" fill="#38BDF8"/><ellipse id="vmouth" cx="60" cy="82" rx="16" ry="3" fill="#38BDF8"/></svg><div><b>Orbit</b><div class="small" id="vstat">Ready. Ask by voice or text.</div></div><button class="btn g s" id="vmute">Voice: on</button></div>';
+}
+function faceTalk(on){ var m = document.getElementById('vmouth'); if (m) m.classList.toggle('talk', on); var t = document.getElementById('vstat'); if (t && on) t.textContent = 'Speaking'; else if (t) t.textContent = 'Ready. Ask by voice or text.'; }
+function answerSpeech(a){
+  if (!a || !a.ok) return '';
+  var parts = (a.explanation || a.statements || []).map(function(x){ return x.text; });
+  return parts.slice(0, 6).join(' ') + ' This is not medical advice.';
+}
+function sayText(text){
+  if (!voiceOn || !text) return;
+  if (!window.OXVoice || !OXVoice.supported()) { var t = document.getElementById('vstat'); if (t) t.textContent = 'Voice is not supported in this browser.'; return; }
+  var go = function(x){ OXVoice.speak(x, { onstart: function(){ faceTalk(true); }, onend: function(){ faceTalk(false); } }); };
+  if (window.OXLang && OXLang.get()) { OXLang.t(text).then(go, function(){ go(text); }); } else go(text); // speak in the same language as the screen
+}
+BIND.ask = function(){
+  document.querySelectorAll('[data-q]').forEach(function(b){ b.onclick = function(){ runAsk(QUESTIONS[+b.getAttribute('data-q')]); }; });
+  document.getElementById('ago').onclick = function(){ runAsk(document.getElementById('aq').value); };
+  document.getElementById('aq').onkeydown = function(e){ if (e.key === 'Enter') runAsk(e.target.value); };
+  bindCites(document.getElementById('aout'));
+  bindVoice();
+};
+function bindVoice(){
+  var mu = document.getElementById('vmute'); if (mu) { mu.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off'); mu.onclick = function(){ voiceOn = !voiceOn; if (!voiceOn && window.OXVoice) OXVoice.stop(); faceTalk(false); mu.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off'); }; }
+  document.querySelectorAll('[data-say]').forEach(function(b){ b.onclick = function(){ var q = b.getAttribute('data-say'); var a = askLog.filter(function(x){ return x.q === q && x.ok; }).pop(); var was = voiceOn; voiceOn = true; sayText(answerSpeech(a)); voiceOn = was; }; });
+  var mic = document.getElementById('amic'); if (!mic) return;
+  if (!window.OXVoice || !OXVoice.recSupported()) { mic.disabled = true; mic.title = 'Voice input is not supported in this browser'; return; }
+  mic.onclick = function(){
+    var t = document.getElementById('vstat');
+    OXVoice.listen({
+      onstart: function(){ if (t) t.textContent = 'Listening...'; },
+      onend: function(){ if (t && t.textContent === 'Listening...') t.textContent = 'Ready. Ask by voice or text.'; },
+      onresult: function(q){ document.getElementById('aq').value = q; runAsk(q, true); },
+      onerror: function(m){ if (t) t.textContent = m; }
+    });
+  };
+}
+function runAsk(q, byVoice){
+  q = String(q || '').trim(); if (q.length < 3) return;
+  var item = { q: q, pending: true }; askLog.push(item); if (tab === 'ask') { document.getElementById('aout').innerHTML = askLog.slice().reverse().map(renderAnswer).join(''); }
+  OX.w('ask', { q: q }).then(function(j){ Object.keys(item).forEach(function(k){ delete item[k]; }); Object.assign(item, j, { q: q }); if (tab === 'ask') { document.getElementById('aout').innerHTML = askLog.slice().reverse().map(renderAnswer).join(''); bindCites(document.getElementById('aout')); bindVoice(); if (byVoice) sayText(answerSpeech(item)); } });
+}
+
+/* ---------- brief ---------- */
+VIEWS.brief = function(){
+  var b = S.brief, h = '<h1>Appointment Brief</h1><p class="small">A summary you can edit and share with your clinician. Every line is built from your documents and marked with its source.</p>';
+  if (!S.docs.length) return h + '<div class="empty">Add documents first.</div>';
+  h += '<button class="btn" id="bgen">' + (b ? 'Rebuild from my records' : 'Prepare my brief') + '</button>';
+  if (b) h += '<label class="l" for="btx">Edit it. Add your own questions.</label><textarea id="btx" style="min-height:420px">' + esc(b.text) + '</textarea><div class="row"><button class="btn" id="bsave">Save my edits</button><button class="btn g" id="bcopy">Copy</button><button class="btn g" id="bdl">Download .txt</button></div><h2>Share with a clinician</h2><div class="card flat small">A share link lets anyone who has it read this brief text (not your documents) until it expires. You can turn it off any time, and every view is recorded.</div><div class="row"><select id="bhrs" style="width:auto"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option></select><button class="btn" id="bshare">Create link</button></div><div id="bnew"></div>' +
+    (S.bshares.length ? '<h3>Active links</h3>' + S.bshares.map(function(s){ return '<div class="row"><span class="small">Expires ' + OX.ago(s.exp) + '</span><button class="btn r s" data-rv="' + esc(s.id) + '">Turn off</button></div>'; }).join('') : '');
+  return h;
+};
+BIND.brief = function(){
+  var g = document.getElementById('bgen'); if (g) g.onclick = function(){ g.disabled = true; OX.w('brief', {}).then(function(j){ if (j.ok) { S.brief = j.brief; render(); } }); };
+  var sv = document.getElementById('bsave'); if (!sv) return;
+  sv.onclick = function(){ OX.w('brief', { save: true, text: document.getElementById('btx').value }).then(function(j){ if (j.ok) { S.brief = j.brief; sv.textContent = 'Saved'; setTimeout(function(){ sv.textContent = 'Save my edits'; }, 1200); } }); };
+  document.getElementById('bcopy').onclick = function(){ OX.copy(document.getElementById('btx').value, this); };
+  document.getElementById('bdl').onclick = function(){ var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([document.getElementById('btx').value], { type: 'text/plain' })); a.download = 'appointment-brief.txt'; a.click(); };
+  document.getElementById('bshare').onclick = function(){ OX.w('brief', { save: true, text: document.getElementById('btx').value }).then(function(){ return OX.w('briefshare', { hours: +document.getElementById('bhrs').value }); }).then(function(j){ if (!j.ok) return; var u = location.origin + j.link; document.getElementById('bnew').innerHTML = '<div class="card"><div class="small">Link (shown once here, copy it now):</div><pre>' + esc(u) + '</pre><button class="btn g s" id="blc">Copy link</button></div>'; document.getElementById('blc').onclick = function(){ OX.copy(u, this); }; load2(); }); };
+  document.querySelectorAll('[data-rv]').forEach(function(b){ b.onclick = function(){ OX.w('briefrevoke', { id: b.getAttribute('data-rv') }).then(load); }; });
+};
+function load2(){ OX.w('wstate', null, 'GET').then(function(j){ if (j.ok) S = j; }); }
+
+/* ---------- sharing ---------- */
+VIEWS.sharing = function(){
+  var c = S.consent, cats = [['allergies','Documented allergies'],['medications','Medicines listed in my records'],['conditions','Documented diagnoses'],['readings','Most recent results and readings']];
+  var h = '<h1>Sharing &amp; Permissions</h1><p class="small">You decide what an authorised emergency application can receive. Nothing is shared unless you turn it on.</p>' +
+    '<div class="card"><label class="tgl"><input type="checkbox" id="cem"' + (c.emergencyHandoff ? ' checked' : '') + '><span><b>Allow emergency information handoff</b><div class="small">When an authorised app reports an emergency, Orbit may prepare a summary of the items below for a receiving system. Off by default.</div></span></label>' +
+    cats.map(function(k){ return '<label class="tgl"><input type="checkbox" data-cat="' + k[0] + '"' + (c.categories[k[0]] ? ' checked' : '') + '><span>' + k[1] + '</span></label>'; }).join('') + '<div class="small" style="margin-top:6px">Handoffs show where each item came from and how old it is. They are not verified by a clinician and are not medical advice.</div></div>';
+  h += '<h2>Emergency handoffs</h2>' + (S.handoffs.length ? S.handoffs.map(function(x){ var order = ['accepted','generated','sent','received','acknowledged'], at = order.indexOf(x.status); return '<div class="card"><b>' + esc(x.id) + '</b> <span class="chip sim">simulated delivery</span><div class="steps">' + order.map(function(s, i){ return '<div class="st ' + (i <= at ? 'on' : 'next') + '">' + s + '</div>'; }).join('') + '</div><div class="small">Requested by ' + esc((x.requester && x.requester.organization) || 'unknown') + ' · ' + OX.ago(x.createdAt) + ' · content hash ' + esc((x.contentHash || '').slice(0, 16)) + '… · ' + (x.summary ? x.summary.items.length : 0) + ' items</div>' + (x.receipt ? '<a href="' + esc(x.receipt) + '" target="_blank" rel="noopener">Open integrity receipt</a>' : '') + '</div>'; }).join('') : '<div class="card flat small">None yet. Use the Developer workspace to simulate one.</div>');
+  h += '<h2>Who did what (activity log)</h2><div id="aud"><span class="spin"></span></div>';
+  return h;
+};
+BIND.sharing = function(){
+  function save(){ var cats = {}; document.querySelectorAll('[data-cat]').forEach(function(i){ cats[i.getAttribute('data-cat')] = i.checked; }); OX.w('consent', { emergencyHandoff: document.getElementById('cem').checked, categories: cats }).then(take); }
+  document.getElementById('cem').onchange = save; document.querySelectorAll('[data-cat]').forEach(function(i){ i.onchange = save; });
+  OX.w('auditlog', null, 'GET').then(function(j){ var el = document.getElementById('aud'); if (!el) return; el.innerHTML = j.events && j.events.length ? '<div class="card" style="padding:4px 8px;max-height:360px;overflow:auto"><table><tbody>' + j.events.slice(0, 60).map(function(e){ return '<tr><td class="small">' + OX.ago(e.t) + '</td><td>' + esc(e.actor) + '</td><td>' + esc(e.action) + '</td><td><span class="chip ' + (e.outcome === 'ok' ? 'ok' : 'bad') + '">' + esc(e.outcome) + '</span></td><td class="small">' + esc(e.detail) + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<div class="card flat small">No activity yet.</div>'; });
+};
+
+/* ---------- boot ---------- */
+var h0 = (location.hash || '').slice(1); if (TABS.some(function(t){ return t[0] === h0; })) tab = h0;
+drawTabs(); load();
+})();
+var VIEWS;
+</script>
+</body>
+</html>
