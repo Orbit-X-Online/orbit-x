@@ -30,4 +30,7 @@ assert.ok(man.screenshots.length >= 2 && man.id && man.start_url && man.display 
 ok('manifest has the fields an Android app builder needs (id, start_url, standalone, screenshots, 512 icons incl. maskable)');
 assert.match(sw, /redirected/); ok('service worker never serves a redirected answer for a page load');
 for (const f of ['gateway.html', 'index.html']) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /Disconnect cuff/); assert.match(fs.readFileSync(path.join(dir, 'radio.js'), 'utf8'), /id="oxmu"/); ok('cuff, panic button and radio can all be disconnected');
+assert.ok(fs.existsSync(path.join(dir, 'lang.js'))); new vm.Script(fs.readFileSync(path.join(dir, 'lang.js'), 'utf8')); assert.match(sw, /\/lang\.js/);
+for (const f of ['index.html', 'workspace.html', 'guide.html']) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /lang\.js/, f + ' must load lang.js');
+ok('whole-app translation script exists, parses, is cached offline and is loaded by the app, My records and the guide');
 console.log('ALL STATIC FRONT-END TESTS PASSED (' + n + ')');
