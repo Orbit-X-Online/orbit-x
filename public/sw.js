@@ -9,8 +9,8 @@ function mine(){
   });
 }
 /* Offline shell: the app opens with no internet. Pages are fetched fresh when online (so updates arrive) and kept for when the signal drops. */
-var SHELL = 'orbitx-shell-v5';
-var FILES = ['/', '/index.html', '/ox.css', '/data.js', '/call.js', '/radio.js', '/ox.js', '/docread.js', '/workspace.html', '/guide.html', '/manifest.webmanifest', '/icon-192.png'];
+var SHELL = 'orbitx-shell-v7';
+var FILES = ['/', '/index.html', '/ox.css', '/data.js', '/call.js', '/radio.js', '/ox.js', '/docread.js', '/workspace.html', '/guide.html', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
 self.addEventListener('install', function(e){
   e.waitUntil(caches.open(SHELL).then(function(c){ return Promise.all(FILES.map(function(f){ return c.add(f).catch(function(){}); })); }).then(function(){ return self.skipWaiting(); }));
 });
@@ -26,6 +26,7 @@ self.addEventListener('fetch', function(e){
     var t = setTimeout(function(){ fromCache(r).then(function(m){ if (m && !done) { done = true; resolve(m); } }); }, 4000); // weak signal: use the saved copy
     fetch(r).then(function(res){
       clearTimeout(t); if (done) return; done = true;
+      if (res && res.redirected) { res = new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers }); } /* a redirected answer cannot be shown for a page load */
       if (res && res.ok) { var cp = res.clone(); caches.open(SHELL).then(function(c){ c.put(r, cp); }); }
       resolve(res);
     }, function(){
