@@ -164,6 +164,7 @@ details.acc>summary:focus-visible{outline:3px solid #38BDF8;outline-offset:-3px}
 <body>
 <div class="app" id="app"></div>
 <script src="data.js"></script>
+<script src="lang.js"></script>
 <script src="call.js"></script>
 <script src="radio.js"></script>
 <script>
@@ -194,7 +195,7 @@ function api(method, path, body){
     .catch(function(){ return { ok: false, _status: 0, error: 'offline' }; });
 }
 function hApi(action, body){ return api(action === 'state' ? 'GET' : 'POST', '/api/h/' + sess.pid + '/' + action, body === undefined && action !== 'state' ? {} : body); }
-function take(j){ if (j && j.ok && j.profile) { st = j; rememberState(j); try { renderStart(); } catch (e) {} return true; } return false; }
+function take(j){ if (j && j.ok && j.profile) { st = j; rememberState(j); try { if (j.profile.lang && sess && window.OXLang && OXLang.get().toLowerCase() !== (OXLang.isEng(j.profile.lang) ? '' : j.profile.lang.toLowerCase())) { OXLang.set(j.profile.lang); OXLang.rescan(); } } catch (e) {} try { renderStart(); } catch (e) {} return true; } return false; }
 function gone(j){ return j && (j._status === 401 || j._status === 404); }
 
 /* ---------- face + voice ---------- */
@@ -214,32 +215,24 @@ function faceTalk(on){ var f = $('mouth'); if (f) f.classList.toggle('talk', on)
 function setCaption(text, proof){ var c = $('cap'); if (!c) return; c.textContent = text; c.classList.toggle('proof', !!proof); c.dataset.proof = proof ? '1' : ''; }
 function hint(t){ var h = $('hint'); if (h) h.textContent = t; }
 /* ---------- any language: Orbit writes in English (checked), then the server translates it for the person ---------- */
-var LANGS = [['English', 'en-NG'], ['Nigerian Pidgin', 'en-NG'], ['Yoruba', 'yo-NG'], ['Hausa', 'ha-NG'], ['Igbo', 'ig-NG'], ['French', 'fr-FR'], ['Spanish', 'es-ES'], ['Portuguese', 'pt-PT'], ['Arabic', 'ar-SA'], ['Swahili', 'sw-KE'], ['Hindi', 'hi-IN'], ['Chinese (Mandarin)', 'zh-CN'], ['German', 'de-DE'], ['Amharic', 'am-ET'], ['Zulu', 'zu-ZA'], ['Twi', 'ak-GH']];
-function isEng(l){ return !l || /^(english|en)\b/i.test(l); }
-function langName(){
-  var l = st && st.profile && st.profile.lang ? st.profile.lang : (sess ? lsGet('oxlang-' + sess.pid) : '');
-  if (l === null || l === undefined) { // nothing chosen yet: follow the phone's own language
-    try { var nl = (navigator.language || 'en').split('-')[0]; if (nl !== 'en') l = new Intl.DisplayNames(['en'], { type: 'language' }).of(nl) || ''; } catch (e) { l = ''; }
-  }
-  return isEng(l) ? '' : String(l);
+function langName(){ return window.OXLang ? OXLang.get() : ''; }
+function langTag(){ return window.OXLang ? OXLang.tag() : ''; }
+function tx(text){ return window.OXLang ? OXLang.t(text) : Promise.resolve(text); }
+/* Choose a language: remember it here, save it to the account when signed in, then reload so every screen is translated. */
+function chooseLang(name, after){
+  name = OXLang.set(name);
+  var go = function(){ location.reload(); };
+  if (sess && sess.role === 'patient') hApi('profile', { lang: name }).then(go, go); else go();
 }
-function langTag(l){
-  for (var i = 0; i < LANGS.length; i++) if (LANGS[i][0].toLowerCase() === String(l).toLowerCase()) return LANGS[i][1];
-  try { var nl = (navigator.language || '').split('-')[0]; if (nl && new Intl.DisplayNames(['en'], { type: 'language' }).of(nl) === l) return navigator.language; } catch (e) {}
-  return '';
-}
-var TXC = {};
-function hsh(t){ var h = 5381; for (var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
-function tx(text){
-  var l = langName();
-  if (!l || !text || text.length < 4 || text.length > 600 || !sess || sess.role !== 'patient') return Promise.resolve(text);
-  var k = 'oxtx:' + hsh(l + '|' + text);
-  if (TXC[k]) return Promise.resolve(TXC[k]);
-  var c = lsGet(k); if (c) { TXC[k] = c; return Promise.resolve(c); }
-  return withTimeout(hApi('xlate', { text: text, lang: l }), 9000).then(function(j){
-    if (j && j.ok && j.text) { TXC[k] = j.text; if (j.translated) lsSet(k, j.text); return j.text; }
-    return text;
-  }, function(){ return text; });
+function langPicker(id){ return '<div class="center" style="margin:10px 0 2px"><select class="field" id="' + id + '" data-notr aria-label="Language" style="max-width:250px;margin:0 auto">' + OXLang.options() + '</select><input class="field" id="' + id + 'o" maxlength="40" placeholder="Type any language" style="display:none;max-width:250px;margin:6px auto 0" data-notr></div>'; }
+function bindLangPicker(id){ var a = $(id), b = $(id + 'o'); if (a && b) { bindLangSelect(a, b); if (a.value === '__o') { b.style.display = ''; b.value = langName(); } } }
+function bindLangSelect(sel, other){
+  sel.onchange = function(){
+    if (sel.value === '__o') { other.style.display = ''; other.focus(); return; }
+    other.style.display = 'none'; chooseLang(sel.value);
+  };
+  other.onkeydown = function(e){ if (e.key === 'Enter') { var v = other.value.trim(); if (OXLang.valid(v)) chooseLang(v); else other.setCustomValidity && other.setCustomValidity('Please type just the name of a language.'); } };
+  other.onchange = function(){ var v = other.value.trim(); if (OXLang.valid(v)) chooseLang(v); };
 }
 var sayN = 0;
 function say(text, cb, raw){
@@ -281,13 +274,14 @@ function welcome(msg){
   '<div class="center" style="font-size:20px;line-height:1.35;margin:2px 8px 4px">Hello. I am Orbit.</div>' +
   '<div class="center small" style="margin:0 10px 12px;font-size:14px">I help you keep track of your blood pressure and tablets, and I make sure your family knows if you need help. I never give medical advice.</div>' +
   (msg ? '<div class="err center">' + esc(msg) + '</div>' : '') +
+  langPicker('wl') +
   '<div class="small" style="margin:4px 2px 0">Who are you?</div>' +
   '<button class="btn" id="go">I want to look after my own health</button>' +
   '<button class="btn ghost" id="cgv">I am a family member or caregiver (I have an invite)</button>' +
   '<button class="btn ghost" id="pro">I am a doctor, clinic or organisation</button>' +
   '<div class="center" style="margin-top:12px"><a class="link" href="/guide.html" style="text-decoration:none">How Orbit-X works, in simple words</a> <button class="link" id="rst">Restore my account</button></div>' +
   '<div class="small center" style="margin-top:10px">Built with Muse Spark Open. Orbit-X is not a medical device.</div>';
-  $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = function(){ codeScreen('restore'); };
+  bindLangPicker('wl'); $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = function(){ codeScreen('restore'); };
 }
 /* ---------- tablets per time: a small stepper used when setting times and when logging a dose ---------- */
 var SLOT_ROWS = [['morning', 'Morning', 'sm'], ['afternoon', 'Afternoon', 'sa'], ['evening', 'Evening', 'se'], ['night', 'Night', 'sg']];
@@ -298,20 +292,16 @@ function slotRows(sel, usual){ return SLOT_ROWS.map(function(r){ return '<div cl
 function readSlots(){ var slots = [], dq = {}; SLOT_ROWS.forEach(function(r){ if ($(r[2]).checked) { slots.push(r[0]); dq[r[0]] = getQty('q_' + r[0]); } }); return { slots: slots, doseQty: dq }; }
 function parseQty(t){ var W = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }; var m = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:tablets?|pills?|capsules?)\b/i.exec(String(t || '')); if (!m) return 0; var n = isNaN(m[1]) ? W[m[1].toLowerCase()] : +m[1]; return n >= 1 && n <= 10 ? n : 0; }
 function onboard(){
-  app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><h2 style="font-weight:500;font-size:20px;margin:18px 0 0">Let us set you up</h2>' +
-  '<label class="l" for="nm">What should I call you?</label><input class="field" id="nm" maxlength="40" autocomplete="given-name" placeholder="Your name">' +
-  '<label class="l" for="ph">Your phone number (optional)</label><input class="field" id="ph" type="tel" maxlength="20" autocomplete="tel" placeholder="+234 801 234 5678"><div class="small" style="margin-top:4px">So your family can call you straight from an alert.</div>' +
-  '<label class="l">When do you take regular medicine, and how many tablets?</label>' + slotRows([], {}) +
-  '<div class="small" style="margin-top:6px">Tick each time you take medicine and set how many tablets you usually take. Leave all unticked if you take no regular medicine. I will remind you at these times. You can change this later.</div>' +
-  '<div class="small" style="margin-top:14px">Your readings stay private to you and the family members you invite. Orbit-X is not a doctor and does not give medical advice. If you feel very unwell, call 112.</div>' +
+  app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><div class="stage" style="height:170px;margin-bottom:0">' + faceSvg() + '</div><h2 style="font-weight:500;font-size:20px;margin:6px 0 0;text-align:center">One quick thing</h2>' +
+  '<label class="l" for="nm">What should I call you?</label><input class="field" id="nm" maxlength="40" autocomplete="given-name" placeholder="Your name" enterkeyhint="go">' +
+  '<div class="small" style="margin-top:12px">Next you will see your blood pressure screen, and I will show you around in under a minute. Your readings stay private to you and the family you invite. Orbit-X is not a doctor and does not give medical advice. If you feel very unwell, call 112.</div>' +
   '<div class="err" id="er"></div><button class="btn" id="st">Start</button>';
-  bindQty(app);
   $('bk').onclick = function(){ welcome(); };
+  $('nm').onkeydown = function(e){ if (e.key === 'Enter') $('st').click(); };
   $('st').onclick = function(){
     var name = $('nm').value.trim(); if (!name) { $('er').textContent = 'Please tell me your name.'; return; }
-    var rs = readSlots(), slots = rs.slots;
     $('st').disabled = true; $('er').textContent = '';
-    api('POST', '/api/create', { name: name, slots: slots, doseQty: rs.doseQty, phone: $('ph').value, today: todayStr(), tz: tzNow(), tzName: tzName(), accountType: 'individual' }).then(function(j){
+    api('POST', '/api/create', { name: name, slots: [], doseQty: {}, phone: '', today: todayStr(), tz: tzNow(), tzName: tzName(), accountType: 'individual' }).then(function(j){
       if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
       sess = { role: 'patient', pid: j.pid, token: j.token, firstRun: true, accountType: 'individual' }; saveSession(sess); location.href = '/?guardian=1';
     });
@@ -351,6 +341,9 @@ function codeScreen(kind){
   };
 }
 function doJoin(code, fail){
+  var cur = loadSession(); /* one phone holds one Orbit-X role: never replace someone's own account by accident */
+  if (cur && cur.token && cur.role === 'patient') { fail('This phone is signed in to your own Orbit-X account, and a phone can hold only one role. Open the invite on another phone or browser. Or sign out here first (Settings, Sign out): your recovery key brings your own account back later.'); return; }
+  if (cur && cur.token && (cur.role === 'caregiver' || cur.role === 'clinician') && !confirm('This phone is already set up to help ' + (cur.patientName || 'someone') + '. Joining replaces that. If this is a new invite for the same person, that is fine. Continue?')) { fail('Not joined. Nothing changed.'); return; }
   api('POST', '/api/join', { code: code }).then(function(j){
     if (!j.ok) { fail(j._status === 0 ? 'No internet connection. Please try again.' : 'That invite code is not valid, or it was already used on another phone. Ask the person to open Family and tap New invite.'); return; }
     sess = { role: j.role === 'clinician' ? 'clinician' : 'caregiver', pid: j.pid, token: j.token, id: j.id, name: j.name, patientName: j.patientName }; saveSession(sess);
@@ -460,7 +453,7 @@ function firstLoad(){
   var a = analysis(), pend = pendingToday();
   var txt;
   if (sess.firstRun) {
-    txt = 'Hello ' + st.profile.name + '. ' + a.sentence + ' You can add a family member who will be alerted if you need help. Tap Family.';
+    txt = 'Hello ' + st.profile.name + '. Tap Log BP to record your first reading. Tap Settings to set your medicine times, and Family to add someone I can alert.';
     sess.firstRun = false; saveSession(sess);
   } else {
     var first = String(a.short || '').split(/(?<=\.)\s+/)[0]; // the full story is in History; the home screen only says the headline
@@ -947,6 +940,7 @@ function showTour(i){
   var o = $('tro');
   var S = [
     { e: '&#128075;', h: 'Welcome to Orbit-X', p: 'Orbit-X keeps your blood pressure and tablets in one place, and tells the people you trust if something is wrong. This takes 30 seconds.' },
+    { e: '&#128138;', h: 'Your medicine times', p: 'Tap Settings to tell me when you take your tablets and how many. I will remind you, and let your family know gently if you forget. If you take no regular medicine, you can skip this.' },
     { e: '&#129658;', h: 'Log BP, Log tablet, How I feel', p: 'Tap Log BP and say or type a reading like "150 over 95". Tap Log tablet each time you take your medicine. Tap How I feel if you have a headache, dizziness or anything else. Your care team can see it.' },
     { e: '&#128106;', h: 'Family', p: 'Add a child, spouse or neighbour with their phone number. If your pressure is high or low, or you miss a tablet, they get a message. If you press help, they ring in turn like a phone call. Your doctor can be added here too.' },
     { e: '&#128202;', h: 'History', p: 'History shows your blood pressure trend, missed tablets and past alerts, so you and your doctor can see how you are doing.' },
@@ -1103,10 +1097,6 @@ function fallEnable(cb){
 function fallDisable(){ try { localStorage.removeItem(FKEY); } catch(e){} fallStop(); }
 
 /* settings */
-function langOptions(){
-  var cur = langName(), known = LANGS.some(function(x){ return x[0] === cur; });
-  return LANGS.map(function(x){ return '<option value="' + (x[0] === 'English' ? '' : esc(x[0])) + '"' + (x[0] === cur || (x[0] === 'English' && !cur) ? ' selected' : '') + '>' + esc(x[0]) + '</option>'; }).join('') + '<option value="__o"' + (cur && !known ? ' selected' : '') + '>Other language...</option>';
-}
 function showSettings(){
   var o = $('seo'), sl = st.profile.slots;
   o.innerHTML = '<h2>Settings</h2><label class="l" for="sn">Your name</label><input class="field" id="sn" maxlength="40" value="' + esc(st.profile.name) + '">' +
@@ -1114,7 +1104,7 @@ function showSettings(){
     '<label class="l">Medicine times and tablets per time</label>' + slotRows(sl, st.profile.doseQty) + '<div class="small" style="margin-top:6px">Set how many tablets you usually take each time. You can still change the number whenever you log a dose.</div>' +
     '<label class="l" for="sup">Tablets left in my pack</label><input class="field" id="sup" type="number" inputmode="numeric" min="0" max="2000" placeholder="e.g. 30" value="' + (st.profile.supply ? st.profile.supply.remaining : '') + '"><div class="small" style="margin-top:4px">' + (st.profile.supply && st.profile.supply.daily ? 'About ' + st.profile.supply.daysLeft + ' day(s) left at ' + st.profile.supply.daily + ' tablet(s) a day. ' : '') + 'Orbit-X counts down as you log tablets and warns you and your family before they run out.</div><button class="btn ghost" id="pkb">Check my pack with a photo</button><div class="small" style="margin-top:4px">Take a photo of your tablet card. I count what is left and tell you if it does not match what you logged. You confirm the number first.</div>' +
     '<label class="l" for="phn">My pharmacist (for refills)</label><input class="field" id="phn" maxlength="40" placeholder="Pharmacy name" value="' + esc(st.profile.pharmacist ? st.profile.pharmacist.name : '') + '"><input class="field" id="php" type="tel" maxlength="20" placeholder="Pharmacy phone number" value="' + esc(st.profile.pharmacist ? st.profile.pharmacist.phone : '') + '"><div class="small" style="margin-top:4px">When your tablets are nearly finished, Orbit-X texts them a short refill request with your name and number. Nothing else is shared.</div><div class="err" id="phe"></div>' +
-    '<label class="l" for="sl">Language Orbit speaks</label><select class="field" id="sl">' + langOptions() + '</select><input class="field" id="slo" maxlength="40" placeholder="Type any language" style="display:none;margin-top:6px"><div class="small" style="margin-top:4px">Orbit explains, answers and speaks in this language. Buttons stay in English. Numbers and emergency steps never change.</div>' +
+    '<label class="l" for="sl" data-notr>Language / Langue / Ede / Harshe</label><select class="field" id="sl" data-notr>' + OXLang.options() + '</select><input class="field" id="slo" maxlength="40" placeholder="Type any language" style="display:none;margin-top:6px" data-notr><div class="small" style="margin-top:4px">The whole app, your records and Orbit\'s voice change to this language the moment you pick it. Numbers never change. Medical text from your documents stays as written.</div>' +
     '<label class="check"><input type="checkbox" id="ta"' + (st.profile.tabletAlerts ? ' checked' : '') + '> Tell my caregivers if I have not logged a tablet</label><div class="small" style="margin-top:4px">I remind you first. If you still have not logged it a few hours later, your caregivers get a gentle heads-up. They are not rung.</div>' +
     '<button class="btn" id="sv">Save</button>' +
     '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
@@ -1129,13 +1119,11 @@ function showSettings(){
     '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   bindQty(o);
-  $('sl').onchange = function(){ $('slo').style.display = $('sl').value === '__o' ? '' : 'none'; };
-  var cl = langName(); if (cl && !LANGS.some(function(x){ return x[0] === cl; })) { $('sl').value = '__o'; $('slo').style.display = ''; $('slo').value = cl; }
+  bindLangSelect($('sl'), $('slo')); if ($('sl').value === '__o') { $('slo').style.display = ''; $('slo').value = langName(); }
   if ($('pkb')) $('pkb').onclick = function(){ o.classList.remove('on'); packFlow('pack'); };
   $('sv').onclick = function(){ var rs = readSlots(); var sv0 = $('sup').value.trim(), supOld = st.profile.supply ? String(st.profile.supply.remaining) : '', body0 = { name: $('sn').value, phone: $('sp').value, tabletAlerts: $('ta').checked, tz: tzNow(), tzName: tzName(), slots: rs.slots, doseQty: rs.doseQty }; if (sv0 !== supOld) body0.supplyLeft = sv0 === '' ? null : parseInt(sv0, 10);
     var pn0 = $('phn').value.trim(), pp0 = $('php').value.trim(), pOld = st.profile.pharmacist;
-    var lg = $('sl').value === '__o' ? $('slo').value.trim() : $('sl').value; if (/[^\p{L}\p{M} ()'.\-]/u.test(lg)) { $('phe').textContent = 'Please type just the name of a language.'; return; }
-    body0.lang = lg; lsSet('oxlang-' + sess.pid, lg);
+
     if (pp0 && !/^\+?[0-9][0-9\s\-()]{6,18}$/.test(pp0)) { $('phe').textContent = 'Please enter a valid phone number for the pharmacy.'; return; }
     if ((pp0 || '') !== (pOld ? pOld.phone : '') || (pn0 || '') !== (pOld ? pOld.name : '')) body0.pharmacist = pp0 ? { name: pn0, phone: pp0 } : null;
     hApi('profile', body0).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
@@ -1175,8 +1163,8 @@ function keepAwake(){ try { if (navigator.wakeLock) navigator.wakeLock.request('
 document.addEventListener('visibilitychange', function(){ if (!document.hidden && armed) keepAwake(); if (!document.hidden) qFlush(); if (!document.hidden && sess && sess.pid && sess.role === 'patient' && document.getElementById('c2')) { hApi('state').then(function(j){ if (take(j)) { refreshCards(); renderEmergency(); } }); } });
 function caregiverApp(){
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + '</span></div><div id="cgv" style="position:relative;flex:1"></div><audio id="rtcaudio" autoplay playsinline></audio>';
-  cgRender(); cgPoll(); quietResync();
+  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + '</span></div><div id="cgv" style="position:relative;flex:1"></div>' + langPicker('cl') + '<audio id="rtcaudio" autoplay playsinline></audio>';
+  bindLangPicker('cl'); cgRender(); cgPoll(); quietResync();
 }
 function cgPoll(){
   hApi('state').then(function(j){
