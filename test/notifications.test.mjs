@@ -319,6 +319,58 @@ pushHandler = async () => new Response('', { status: 201 });
 delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
 r = await call('POST', IN + 'insight', {}, ins.token); const kk = (await call('POST', IN + 'apikey', { label: 'k', scopes: ['events:read'] }, ins.token)).key; r = await call('POST', '/api/h/' + ins.pid + '/insight', {}, kk); assert.ok(r._s === 403 || r._s === 401); ok('an API key cannot request a summary');
 
+// ---------- J8. photo proof, pack count, any language
+{
+  clock = at(31, 9);
+  const pf = await call('POST', '/api/create', { name: 'Ada', slots: ['morning', 'evening'], doseQty: { morning: 1, evening: 1 }, today: '2026-10-31', tz: 0, accountType: 'individual' });
+  const PF = '/api/h/' + pf.pid + '/';
+  await call('POST', PF + 'profile', { supplyLeft: 20 }, pf.token);
+  const inv = await call('POST', PF + 'invite', { name: 'Kemi', phone: '+2348011111111' }, pf.token); const cg = await call('POST', '/api/join', { code: inv.code });
+  const inv2 = await call('POST', PF + 'invite', { name: 'Doc', phone: '+2348022222222', role: 'clinician' }, pf.token); const dr = await call('POST', '/api/join', { code: inv2.code });
+  const IMG = 'data:image/jpeg;base64,' + 'A'.repeat(2000);
+  let q = await call('POST', PF + 'proofreq', {}, pf.token); assert.equal(q._s, 403); q = await call('POST', PF + 'proofreq', {}, dr.token); assert.equal(q._s, 403);
+  q = await call('POST', PF + 'proofreq', {}, cg.token); assert.equal(q.ok, true); assert.equal(q.proof.status, 'asked'); const rid = q.proof.id;
+  q = await call('POST', PF + 'proofreq', {}, cg.token); assert.equal(q.already, true);
+  let st0 = await call('GET', PF + 'state', null, pf.token); assert.equal(st0.proof.status, 'asked'); assert.equal(st0.proof.by, 'Kemi'); ok('a caregiver can ask for a tablet photo; the patient sees the request; clinicians and the patient cannot start one');
+  q = await call('POST', PF + 'proofsend', { id: 'wrong', img: IMG }, pf.token); assert.equal(q._s, 409);
+  q = await call('POST', PF + 'proofsend', { id: rid, img: 'data:text/html;base64,AAAA' }, pf.token); assert.equal(q._s, 400);
+  q = await call('POST', PF + 'proofsend', { id: rid, img: IMG }, cg.token); assert.equal(q._s, 403); ok('photo must match the open request, be a real image, and only the patient can send it');
+  // pack count with a fake vision model
+  Object.assign(env, { MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.test/v1', MODEL_TEXT: 'm' });
+  pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"kind":"blister","tablets":14,"confident":true}' } }] }), { status: 200 });
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, 14); assert.equal(q.expected, 20); assert.equal(q.confident, true);
+  pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"kind":"bottle","tablets":30,"confident":true}' } }] }), { status: 200 });
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, null);
+  pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'sorry' } }] }), { status: 200 });
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, null); assert.equal(q.ok, true);
+  q = await call('POST', PF + 'packread', { img: IMG }, cg.token); assert.equal(q._s, 403); ok('the model only counts: a bottle or unreadable answer gives no number, and caregivers cannot use the pack reader');
+  pushHandler = async () => new Response('', { status: 201 });
+  delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
+  q = await call('POST', PF + 'proofsend', { id: rid, img: IMG, count: 13 }, pf.token); assert.equal(q.ok, true); assert.equal(q.proof.status, 'sent'); assert.equal(q.proof.result.seen, 13); assert.equal(q.proof.result.expected, 20);
+  q = await call('POST', PF + 'proofget', {}, cg.token); assert.equal(q.img, IMG); assert.equal(q.result.seen, 13);
+  q = await call('POST', PF + 'proofget', {}, dr.token); assert.equal(q._s, 403);
+  let cs = await call('GET', PF + 'state', null, cg.token); assert.equal(cs.proof.status, 'sent'); assert.ok(!JSON.stringify(cs).includes(IMG)); ok('the photo reaches the caregiver on request only (never inside the normal state), with the confirmed count and what Orbit expected');
+  clock += 49 * 3600000; q = await call('POST', PF + 'proofget', {}, cg.token); assert.equal(q._s, 404); assert.equal((await store(pf.pid).get('proofimg')), undefined); ok('the photo is deleted after 2 days');
+  clock = at(31, 10);
+  for (let i = 0; i < 2; i++) { q = await call('POST', PF + 'proofreq', {}, cg.token); assert.equal(q.proof.status, 'asked'); await call('POST', PF + 'proofsend', { id: q.proof.id, decline: true }, pf.token); }
+  q = await call('POST', PF + 'proofreq', {}, cg.token); assert.equal(q._s, 429); ok('a caregiver can ask three times a day at most; "not now" is passed on kindly');
+  q = await call('POST', PF + 'proofdel', {}, pf.token); assert.equal(q.ok, true);
+  // language
+  q = await call('POST', PF + 'profile', { lang: 'Yoruba' }, pf.token); assert.equal(q.profile.lang, 'Yoruba'); q = await call('POST', PF + 'profile', { lang: 'x<script>' }, pf.token); assert.equal(q.profile.lang, '');
+  q = await call('POST', PF + 'xlate', { text: 'You took 2 tablets today.', lang: 'French' }, pf.token); assert.equal(q.text, 'You took 2 tablets today.'); assert.equal(q.translated, false); ok('without an AI key, translation falls back to the English text');
+  Object.assign(env, { MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.test/v1', MODEL_TEXT: 'm' });
+  pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Vous avez pris 2 comprimés aujourd\'hui.' } }] }), { status: 200 });
+  q = await call('POST', PF + 'xlate', { text: 'You took 2 tablets today.', lang: 'French' }, pf.token); assert.equal(q.translated, true); assert.match(q.text, /2 comprim/);
+  pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Vous avez pris 3 comprimés aujourd\'hui.' } }] }), { status: 200 });
+  q = await call('POST', PF + 'xlate', { text: 'You took 2 tablets today.', lang: 'French' }, pf.token); assert.equal(q.translated, false); assert.equal(q.text, 'You took 2 tablets today.');
+  pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'Visitez http://evil.test 2' } }] }), { status: 200 });
+  q = await call('POST', PF + 'xlate', { text: 'Call 2', lang: 'Hausa' }, pf.token); assert.equal(q.translated, false); ok('a translation is used only when every number is kept and no web link is added; otherwise the English text stays');
+  q = await call('POST', PF + 'xlate', { text: 'Hi there', lang: '12345' }, pf.token); assert.equal(q._s, 400);
+  const ak = (await call('POST', PF + 'apikey', { label: 'k', scopes: ['events:read'] }, pf.token)).key; q = await call('POST', PF + 'xlate', { text: 'Hi there', lang: 'French' }, ak); assert.ok(q._s === 403 || q._s === 401); ok('bad language names and API keys are refused');
+  pushHandler = async () => new Response('', { status: 201 });
+  delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
+}
+
 // ---------- K. invalid input
 r = await call('POST', Q + 'bp', { sys: 300, dia: 400, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
 r = await call('POST', Q + 'bp', { sys: 80, dia: 90, date: '2026-10-28' }, p.token); assert.equal(r._s, 400);
