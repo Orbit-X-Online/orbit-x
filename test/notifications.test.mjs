@@ -367,6 +367,27 @@ r = await call('POST', IN + 'insight', {}, ins.token); const kk = (await call('P
   q = await call('POST', PF + 'xlate', { text: 'Call 2', lang: 'Hausa' }, pf.token); assert.equal(q.translated, false); ok('a translation is used only when every number is kept and no web link is added; otherwise the English text stays');
   q = await call('POST', PF + 'xlate', { text: 'Hi there', lang: '12345' }, pf.token); assert.equal(q._s, 400);
   const ak = (await call('POST', PF + 'apikey', { label: 'k', scopes: ['events:read'] }, pf.token)).key; q = await call('POST', PF + 'xlate', { text: 'Hi there', lang: 'French' }, ak); assert.ok(q._s === 403 || q._s === 401); ok('bad language names and API keys are refused');
+  // whole-screen translation (public route, batches, number markers)
+  {
+    delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
+    const X = (items, lang = 'Yoruba') => call('POST', '/api/xlate', { lang, items });
+    let x = await X(['Hello there']); assert.equal(x._s, 503); assert.equal(x.error, 'not_configured');
+    Object.assign(env, { MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.test/v1', MODEL_TEXT: 'm' });
+    pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: '["Bawo ni, [#0] ọjọ","Ẹ kú àárọ̀"]' } }] }), { status: 200 });
+    x = await X(['Hello, [#0] days', 'Good morning']); assert.equal(x.ok, true); assert.deepEqual(x.items, ['Bawo ni, [#0] ọjọ', 'Ẹ kú àárọ̀']);
+    pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: '["Bawo ni, ọjọ","Ẹ kú 5 àárọ̀"]' } }] }), { status: 200 });
+    x = await X(['Hello, [#0] days', 'Good morning']); assert.deepEqual(x.items, [null, null]);
+    pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'not json' } }] }), { status: 200 });
+    x = await X(['Hello', 'Bye']); assert.deepEqual(x.items, [null, null]);
+    pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: '["see http://evil.test"]' } }] }), { status: 200 });
+    x = await X(['Hello']); assert.deepEqual(x.items, [null]);
+    x = await X(['Hello'], 'English'); assert.deepEqual(x.items, [null]);
+    x = await X(['Hello'], '12345'); assert.equal(x._s, 400); x = await X(Array(31).fill('Hi there')); assert.equal(x._s, 400); x = await X([]); assert.equal(x._s, 400);
+    ok('screen translation: number markers must survive, no digits or links added, bad answers keep the English text, bad input refused');
+    for (let i = 0; i < 45; i++) x = await X(['Hello']); assert.equal(x._s, 429); ok('screen translation is rate-limited per address');
+    pushHandler = async () => new Response('', { status: 201 });
+    delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
+  }
   pushHandler = async () => new Response('', { status: 201 });
   delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
 }
