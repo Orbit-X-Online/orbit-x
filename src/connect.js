@@ -229,8 +229,11 @@ async function docget(ctx, D) {
 }
 
 /* ------------------------------------------------------------------ ask, brief, review */
+/* the only look-ups the app offers (public/workspace.html QUESTIONS); anything else is refused, so there is no free-text question path */
+const FIXED_LOOKUPS = new Set(['what changed between these reports', 'what is the most recent documented hba1c', 'which medications are listed in my latest discharge summary', 'are any dates or values inconsistent between these documents', 'prepare a concise summary i can share with my clinician']);
 async function ask(ctx, D) {
   const q = clean(ctx.body.q, 300); if (q.length < 3) return J({ ok: false, error: 'question_required' }, 400);
+  if (!FIXED_LOOKUPS.has(q.toLowerCase().replace(/\s+/g, ' ').replace(/[?.]$/, ''))) return J({ ok: false, error: 'fixed_lookups_only', message: 'Orbit-X only runs the fixed look-ups shown on the screen. It is not a chat.' }, 400);
   const pre = preCheck(q); // fixed rules first (emergency, self-harm, advice): no model call, works with no AI key
   if (pre) { await logAudit(ctx, D, 'patient', 'ask', 'safety', '[' + pre.type + ']'); return J({ ok: true, question: q, intent: 'safety', safety: pre.type, statements: [{ kind: 'unknown', text: pre.reply, cites: [] }], explanation: null, ai: { mode: aiMode(ctx.env), used: false }, refs: [] }); }
   const st = computeState(D, ctx); const ans = answerQuestion(q, st);
