@@ -197,10 +197,17 @@ async function vapidKeys(storage) {
   await storage.put('vapid', v);
   return v;
 }
+// Contact the push services can reach if the site misbehaves: VAPID_SUBJECT (mailto: or https:), else the first https site in ALLOWED_ORIGINS.
+function vapidSubject(env) {
+  const s = String(env.VAPID_SUBJECT || '').trim();
+  if (/^(mailto:[^\s@]+@[^\s@]+|https:\/\/[^\s]+)$/.test(s)) return s;
+  const o = String(env.ALLOWED_ORIGINS || '').split(',').map((x) => x.trim()).find((x) => /^https:\/\/[^\s/]+$/.test(x));
+  return o || 'https://localhost';
+}
 async function vapidAuth(v, endpoint, env) {
   const enc = (o) => b64u(new TextEncoder().encode(JSON.stringify(o)));
   const head = enc({ typ: 'JWT', alg: 'ES256' });
-  const claims = enc({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: env.VAPID_SUBJECT || 'mailto:alerts@orbit-x.online' });
+  const claims = enc({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: vapidSubject(env) });
   const key = await crypto.subtle.importKey('jwk', v.jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
   const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key, new TextEncoder().encode(head + '.' + claims));
   return 'vapid t=' + head + '.' + claims + '.' + b64u(sig) + ', k=' + v.pub;
@@ -1479,7 +1486,15 @@ async function limitedDurable(env, req, bucket, limit, winMs, fallback) {
   } catch (e) { console.error('rate store error:', e && e.message); }
   return fallback(req);
 }
-const CREATE_HITS = new Map();
+const CREATE_HITS = new Map(), CREATE_LIMIT = 20, CREATE_WIN_MS = 3600000;
+// fallback only (used when the durable store is unavailable): per-instance count of new accounts per address
+function createLimited(req) {
+  const ip = req.headers.get('CF-Connecting-IP'); if (!ip) return 0;
+  const now = Date.now(), l = (CREATE_HITS.get(ip) || []).filter((t) => now - t < CREATE_WIN_MS);
+  if (l.length >= CREATE_LIMIT) { CREATE_HITS.set(ip, l); return Math.ceil((CREATE_WIN_MS - (now - l[0])) / 1000); }
+  l.push(now); CREATE_HITS.set(ip, l); if (CREATE_HITS.size > 2000) CREATE_HITS.clear();
+  return 0;
+}
 async function handleAssistant(req, env, cors) {
   let body;
   try { body = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400, cors); }
@@ -1552,7 +1567,7 @@ async function handleHousehold(req, env, url, cors) {
   if (!env.ALERTS) return json({ error: 'Alert store not configured' }, 503, cors);
   const p = url.pathname;
   if (p === '/api/create' && req.method === 'POST') {
-    { const ip = req.headers.get('CF-Connecting-IP'), now0 = Date.now(); if (ip) { const l = (CREATE_HITS.get(ip) || []).filter((t) => now0 - t < 3600000); if (l.length >= 20) return json({ error: 'slow_down' }, 429, cors); l.push(now0); CREATE_HITS.set(ip, l); if (CREATE_HITS.size > 2000) CREATE_HITS.clear(); } } // at most 20 new accounts per hour from one address
+    { const wait = await limitedDurable(env, req, 'create', CREATE_LIMIT, CREATE_WIN_MS, createLimited); if (wait) return json({ error: 'slow_down', retryAfterSeconds: wait }, 429, { ...cors, 'Retry-After': String(wait) }); } // at most 20 new accounts per hour from one address, counted in the Durable Object so it holds across Worker instances
     let body = {}; try { body = (await req.json()) || {}; } catch { /* empty */ }
     const pid = rand(8);
     body.pid = pid;
