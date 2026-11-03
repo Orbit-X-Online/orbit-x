@@ -61,6 +61,17 @@ let last; for (let i = 0; i < 41; i++) last = await hit();
 assert.equal(last.status, 429); assert.equal(last.headers.get('Retry-After'), '77'); assert.ok(rlCalls >= 41);
 ok('translation route limit is enforced by the durable store (41st request in the window is refused with Retry-After)');
 
+// 7b. account creation is limited per address by the durable store too (21st create in the hour is refused)
+{
+  let n = 0;
+  const mkHit = () => worker.fetch(new Request('https://t.test/api/create', { method: 'POST', headers: { 'CF-Connecting-IP': '8.8.4.4' }, body: JSON.stringify({ name: 'Rate', slots: [], today: '2026-10-28' }) }), stubEnv);
+  let lastC; for (let i = 0; i < 21; i++) { lastC = await mkHit(); n++; }
+  assert.equal(lastC.status, 429); assert.equal((await lastC.json()).error, 'slow_down'); assert.equal(lastC.headers.get('Retry-After'), '77');
+  const other = await worker.fetch(new Request('https://t.test/api/create', { method: 'POST', headers: { 'CF-Connecting-IP': '8.8.8.8' }, body: JSON.stringify({ name: 'Rate', slots: [], today: '2026-10-28' }) }), stubEnv);
+  assert.notEqual(other.status, 429);
+  ok('account creation: 21st request from one address in an hour is refused (durable store, Retry-After); another address is not');
+}
+
 // 8. language coverage and lab units
 for (const t of ['Mo ni ìrora àyà', 'Mo dákú', 'chest dey pain me', 'I no fit breathe', 'Maumivu ya kifua', 'je n’arrive pas à respirer']) assert.equal(preCheck(t) && preCheck(t).type, 'emergency', t);
 assert.equal(preCheck('what does eGFR mean'), null);

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import worker, { resetAiStatusCache } from '../src/worker.js';
 import { forgetModel } from '../src/meta.js';
 
-const env = { MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.meta.ai/v1', WHATSAPP_VERIFY_TOKEN: 'tok',
-  ALLOWED_ORIGINS: 'https://orbit-x.online', ASSETS: { fetch: async () => new Response('<html>') } };
+const env = { ASSISTANT_CHAT: 'on', MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.meta.ai/v1', WHATSAPP_VERIFY_TOKEN: 'tok',
+  ALLOWED_ORIGINS: 'https://app.example.test', ASSETS: { fetch: async () => new Response('<html>') } };
 const call = (path, init) => worker.fetch(new Request('https://t.test' + path, init), env);
 const ask = () => call('/api/assistant', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }) });
 
@@ -33,14 +33,14 @@ r = await ask(); assert.equal(r.status, 429);
 r = await call('/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=tok&hub.challenge=abc'); assert.equal(await r.text(), 'abc');
 r = await call('/api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=bad&hub.challenge=abc'); assert.equal(r.status, 403);
 
-r = await call('/api/health', { headers: { Origin: 'https://orbit-x.online' } }); assert.equal(r.headers.get('Access-Control-Allow-Origin'), 'https://orbit-x.online');
+r = await call('/api/health', { headers: { Origin: 'https://app.example.test' } }); assert.equal(r.headers.get('Access-Control-Allow-Origin'), 'https://app.example.test');
 r = await call('/api/health', { headers: { Origin: 'https://evil.test' } }); assert.equal(r.headers.get('Access-Control-Allow-Origin'), null);
 
 console.log('ALL SMOKE TESTS PASSED');
 
 // Baseten: must sign in with "Api-Key", not "Bearer"; falls back to the other scheme on 403.
 {
-  const benv = { MODEL_API_KEY: 'bk', MODEL_BASE_URL: 'https://inference.baseten.co/v1', ASSETS: env.ASSETS };
+  const benv = { ASSISTANT_CHAT: 'on', MODEL_API_KEY: 'bk', MODEL_BASE_URL: 'https://inference.baseten.co/v1', ASSETS: env.ASSETS };
   const calls = [];
   globalThis.fetch = async (url, init) => { calls.push({ url, auth: init.headers.Authorization }); return new Response(JSON.stringify({ choices: [{ message: { content: 'hello' } }] })); };
   let rr = await worker.fetch(new Request('https://t.test/api/assistant', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }) }), benv);
@@ -55,7 +55,7 @@ console.log('ALL SMOKE TESTS PASSED');
 
 // Baseten with a hackathon key: /models may be refused, the model "reasons" before answering, and a payment problem must be named.
 {
-  const benv = { MODEL_API_KEY: 'bk', MODEL_BASE_URL: 'https://inference.baseten.co/v1', ASSETS: env.ASSETS };
+  const benv = { ASSISTANT_CHAT: 'on', MODEL_API_KEY: 'bk', MODEL_BASE_URL: 'https://inference.baseten.co/v1', ASSETS: env.ASSETS };
   const ask2 = () => worker.fetch(new Request('https://t.test/api/assistant', { method: 'POST', body: JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }) }), benv);
   // 1. /models refused (key limited to one model): chat still works with the known hackathon model name
   forgetModel(); let chatBody = null;

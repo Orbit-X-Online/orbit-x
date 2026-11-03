@@ -14,7 +14,7 @@ class Store { constructor(){ this.m = new Map(); this.alarm = null; }
   async getAlarm(){ return this.alarm; }
   async deleteAlarm(){ this.alarm = null; } }
 const hubs = new Map();
-const env = { ESCALATE_MS: '20000', ALLOWED_ORIGINS: '', ASSETS: { fetch: async () => new Response('<html>') },
+const env = { ASSISTANT_CHAT: 'on', ESCALATE_MS: '20000', ALLOWED_ORIGINS: '', ASSETS: { fetch: async () => new Response('<html>') },
   ALERTS: { idFromName: (n) => n, get: (n) => { if (!hubs.has(n)) hubs.set(n, new AlertHub({ storage: new Store() }, env)); const hub = hubs.get(n); return { fetch: (r) => hub.fetch(r) }; } } };
 const realNow = Date.now; let clock = Date.UTC(2026, 9, 28, 7, 0, 0);
 Date.now = () => clock;
