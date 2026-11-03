@@ -66,7 +66,8 @@ assert.ok(doc.extraction.rejected.length >= 1, 'invented Hemoglobin fact rejecte
 model = () => chat({ summary: 'This report lists kidney and salt tests.', terms: [{ name: 'Creatinine', meaning: 'a waste product the kidneys clear from the blood' }], questions: ['Ask your clinician what the creatinine result means for you.'] });
 r = await call('POST', W + 'docexplain', { id: doc.id }, pt.token); assert.ok(r.ok); assert.equal(r.mode, 'live'); assert.ok(r.items.length >= 2); ok('plain-words explanation of a report works');
 model = () => chat({ sections: [{ kind: 'unknown', text: 'The documents do not say.', cites: [] }] });
-r = await call('POST', W + 'ask', { q: 'What was my creatinine?' }, pt.token); assert.ok(r.ok); assert.ok(r.statements.length >= 1); ok('questions about your records are answered');
+r = await call('POST', W + 'ask', { q: 'What changed between these reports?' }, pt.token); assert.ok(r.ok); assert.ok(r.statements.length >= 1); ok('questions about your records are answered');
+r = await call('POST', W + 'ask', { q: 'What was my creatinine?' }, pt.token); assert.equal(r._s, 400); assert.equal(r.error, 'fixed_lookups_only'); ok('free-text questions to the records route are refused: fixed look-ups only')
 
 // ---- photo of a paper report: Baseten vision copies the words
 const PNG = 'data:image/jpeg;base64,' + 'A'.repeat(400);
