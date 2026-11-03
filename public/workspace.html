@@ -39,7 +39,7 @@
 var sess = OX.need('patient'); if (!sess) return;
 if (sess.accountType === 'individual') { var dl = document.getElementById('devlink'); if (dl) dl.textContent = 'API demo'; }
 var esc = OX.esc, S = null, tab = 'overview', docText = {}, askLog = [], busy = '';
-var TABS = [['overview','Overview'],['graph','Evidence Graph'],['memory','Health Memory'],['docs','Documents'],['timeline','Timeline'],['compare','Compare Reports'],['ask','Ask My Records'],['brief','Appointment Brief'],['sharing','Sharing & Permissions']];
+var TABS = [['overview','Overview'],['graph','Evidence Graph'],['memory','Health Memory'],['docs','Documents'],['timeline','Timeline'],['compare','Compare Reports'],['ask','Records Look-up'],['brief','Appointment Brief'],['sharing','Sharing & Permissions']];
 var QUESTIONS = ['What changed between these reports?','What is the most recent documented HbA1c?','Which medications are listed in my latest discharge summary?','Are any dates or values inconsistent between these documents?','Prepare a concise summary I can share with my clinician.'];
 
 document.getElementById('who').textContent = '· ' + (sess.name || '');
@@ -165,7 +165,7 @@ function easySteps(){
   return '<div class="card"><b>3 easy steps</b>' +
     row(1, d1, 'Add the documents', d1 ? '' : '<button class="btn s" id="es1">Upload</button>') +
     row(2, false, 'See what changed', d1 ? '<button class="btn g s" data-go="compare">Open</button>' : '') +
-    row(3, d2, 'Ask a question, then tap Read aloud', d1 ? '<button class="btn g s" data-go="ask">Open</button>' : '') +
+    row(3, d2, 'Tap a look-up, then Read aloud', d1 ? '<button class="btn g s" data-go="ask">Open</button>' : '') +
     '<div class="small"><a href="/guide.html">Need help? Read the 1-minute guide</a></div></div>';
 }
 VIEWS = {};
@@ -179,7 +179,7 @@ VIEWS.overview = function(){
   if (!ins.length && !open.length) h += '<div class="card flat small">Nothing notable yet. Add a second report to compare.</div>';
   ins.forEach(function(c){ h += '<div class="card" data-open="' + esc(c.id) + '" style="cursor:pointer"><b>' + esc(c.label) + '</b> <span class="chip ' + (c.magnitude === 'notable' ? 'warn' : 'info') + '">' + esc(c.magnitude) + ' change</span><div>' + fmt(c.fromValue) + ' → ' + fmt(c.toValue) + ' ' + esc(c.unit) + (c.pct !== null ? ' (' + (c.pct > 0 ? '+' : '') + c.pct + '%)' : '') + ' <span class="small">' + esc(c.fromDate) + ' → ' + esc(c.toDate) + '</span></div><div class="small">Tap to open the evidence</div></div>'; });
   open.slice(0, 4).forEach(function(k){ h += '<div class="card" data-open="' + esc(k.id) + '" style="cursor:pointer;border-color:#7f2a2a"><span class="chip conflict">sources disagree</span> <b>' + esc(k.title) + '</b><div class="small">' + esc(k.detail) + '</div></div>'; });
-  h += '<h2>Ask</h2><div class="row">' + QUESTIONS.slice(0, 3).map(function(q, i){ return '<button class="btn g s" data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>';
+  h += '<h2>Look up</h2><div class="row">' + QUESTIONS.slice(0, 3).map(function(q, i){ return '<button class="btn g s" data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>';
   h += '<div class="card flat small" style="margin-top:14px"><b>How to read this.</b> <span class="chip documented">documented</span> is written in a source. <span class="chip interp">AI interpretation</span> is wording by the model, checked by code. <span class="chip unknown">unknown</span> means the documents do not say. Orbit never gives medical advice.</div>';
   return h;
 };
@@ -332,9 +332,9 @@ BIND.compare = function(){
 
 /* ---------- ask ---------- */
 VIEWS.ask = function(){
-  var h = '<h1>Ask My Records</h1><p class="small">Answers come from your own documents only. Facts are found and calculated by code; the AI only helps with wording, and its output is checked against the evidence.</p>' +
-    faceHtml() + '<div class="row">' + QUESTIONS.map(function(q, i){ return '<button class="btn g s" data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>' +
-    '<div class="row" style="margin-top:8px;flex-wrap:nowrap"><input id="aq" maxlength="300" placeholder="Ask about your records" aria-label="Question"><button class="btn g" id="amic" title="Speak your question" aria-label="Speak your question">&#127908;</button><button class="btn" id="ago">Ask</button></div><div id="aout">';
+  var h = '<h1>Records Look-up</h1><p class="small">Tap one of the fixed look-ups. Each result lists what your own documents say, with the exact source. This is not a chat and gives no medical advice.</p>' +
+    '<div class="row">' + QUESTIONS.map(function(q, i){ return '<button class="btn g s" data-q="' + i + '">' + esc(q) + '</button>'; }).join('') + '</div>' +
+    '<div id="aout">';
   if (!S.docs.length) h += '<div class="empty">Add documents first.</div>';
   askLog.slice().reverse().forEach(function(a){ h += renderAnswer(a); });
   return h + '</div>';
@@ -353,9 +353,9 @@ function renderAnswer(a){
 /* ---------- voice (browser speech; reads only the validated answer text) ---------- */
 var voiceOn = true;
 function faceHtml(){
-  return '<div class="vface"><svg id="vf" viewBox="0 0 120 120" width="76" height="76" role="img" aria-label="Orbit voice"><circle cx="60" cy="60" r="54" fill="#0A1630" stroke="#38BDF8" stroke-width="2"/><circle cx="42" cy="50" r="7" fill="#38BDF8"/><circle cx="78" cy="50" r="7" fill="#38BDF8"/><ellipse id="vmouth" cx="60" cy="82" rx="16" ry="3" fill="#38BDF8"/></svg><div><b>Orbit</b><div class="small" id="vstat">Ready. Ask by voice or text.</div></div><button class="btn g s" id="vmute">Voice: on</button></div>';
+  return '<div class="vface"><svg id="vf" viewBox="0 0 120 120" width="76" height="76" role="img" aria-label="Orbit voice"><circle cx="60" cy="60" r="54" fill="#0A1630" stroke="#38BDF8" stroke-width="2"/><circle cx="42" cy="50" r="7" fill="#38BDF8"/><circle cx="78" cy="50" r="7" fill="#38BDF8"/><ellipse id="vmouth" cx="60" cy="82" rx="16" ry="3" fill="#38BDF8"/></svg><div><b>Orbit</b><div class="small" id="vstat">Ready. Tap Read aloud on a result.</div></div><button class="btn g s" id="vmute">Voice: on</button></div>';
 }
-function faceTalk(on){ var m = document.getElementById('vmouth'); if (m) m.classList.toggle('talk', on); var t = document.getElementById('vstat'); if (t && on) t.textContent = 'Speaking'; else if (t) t.textContent = 'Ready. Ask by voice or text.'; }
+function faceTalk(on){ var m = document.getElementById('vmouth'); if (m) m.classList.toggle('talk', on); var t = document.getElementById('vstat'); if (t && on) t.textContent = 'Speaking'; else if (t) t.textContent = 'Ready. Tap Read aloud on a result.'; }
 function answerSpeech(a){
   if (!a || !a.ok) return '';
   var parts = (a.explanation || a.statements || []).map(function(x){ return x.text; });
@@ -369,25 +369,12 @@ function sayText(text){
 }
 BIND.ask = function(){
   document.querySelectorAll('[data-q]').forEach(function(b){ b.onclick = function(){ runAsk(QUESTIONS[+b.getAttribute('data-q')]); }; });
-  document.getElementById('ago').onclick = function(){ runAsk(document.getElementById('aq').value); };
-  document.getElementById('aq').onkeydown = function(e){ if (e.key === 'Enter') runAsk(e.target.value); };
   bindCites(document.getElementById('aout'));
   bindVoice();
 };
 function bindVoice(){
   var mu = document.getElementById('vmute'); if (mu) { mu.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off'); mu.onclick = function(){ voiceOn = !voiceOn; if (!voiceOn && window.OXVoice) OXVoice.stop(); faceTalk(false); mu.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off'); }; }
   document.querySelectorAll('[data-say]').forEach(function(b){ b.onclick = function(){ var q = b.getAttribute('data-say'); var a = askLog.filter(function(x){ return x.q === q && x.ok; }).pop(); var was = voiceOn; voiceOn = true; sayText(answerSpeech(a)); voiceOn = was; }; });
-  var mic = document.getElementById('amic'); if (!mic) return;
-  if (!window.OXVoice || !OXVoice.recSupported()) { mic.disabled = true; mic.title = 'Voice input is not supported in this browser'; return; }
-  mic.onclick = function(){
-    var t = document.getElementById('vstat');
-    OXVoice.listen({
-      onstart: function(){ if (t) t.textContent = 'Listening...'; },
-      onend: function(){ if (t && t.textContent === 'Listening...') t.textContent = 'Ready. Ask by voice or text.'; },
-      onresult: function(q){ document.getElementById('aq').value = q; runAsk(q, true); },
-      onerror: function(m){ if (t) t.textContent = m; }
-    });
-  };
 }
 function runAsk(q, byVoice){
   q = String(q || '').trim(); if (q.length < 3) return;
