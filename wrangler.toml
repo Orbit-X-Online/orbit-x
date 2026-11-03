@@ -13,7 +13,8 @@ MODEL_TEXT = "meta-models/muse-spark-open-1026"
 ESCALATE_MS = "20000"
 ASSISTANT_CHAT = "off" # free-text AI chat is OFF (also off if this line is missing). Orbit answers only with fixed rules, logs and evidence from your own records.
 ALLOWED_ORIGINS = "https://orbit-x.alecedoh1994.workers.dev"
-# Secrets (set with `npx wrangler secret put NAME`, never here): MODEL_API_KEY, RECEIPT_SECRET, VAPID_SUBJECT (not secret; may go here), WHATSAPP_*
+# Secrets (set with `npx wrangler secret put NAME`, never here): MODEL_API_KEY, RECEIPT_SECRET, WHATSAPP_*
+# VAPID_SUBJECT is not secret: optionally add VAPID_SUBJECT = "mailto:you@your-email.example" above. If unset, the first https address in ALLOWED_ORIGINS is used.
 
 [[durable_objects.bindings]]
 name = "ALERTS"
@@ -26,7 +27,7 @@ new_sqlite_classes = ["AlertHub"]
 [observability]
 enabled = true
 
-# After Orbit-X.Online is in your Cloudflare account, uncomment:
+# If you later own a custom domain and add it to your Cloudflare account, uncomment and edit (and add it to ALLOWED_ORIGINS):
 # [[routes]]
-# pattern = "orbit-x.online"
+# pattern = "your-domain.example"
 # custom_domain = true
