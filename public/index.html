@@ -278,9 +278,10 @@ function welcome(msg){
   '<button class="btn" id="go">I want to look after my own health</button>' +
   '<button class="btn ghost" id="cgv">I am a family member or caregiver (I have an invite)</button>' +
   '<button class="btn ghost" id="pro">I am a doctor, clinic or organisation</button>' +
+  '<button class="btn green" id="rst2" style="margin-top:14px">I already have an account: sign in with my recovery key</button>' +
   '<div class="center" style="margin-top:12px"><a class="link" href="/guide.html" style="text-decoration:none">How Orbit-X works, in simple words</a> <button class="link" id="rst">Restore my account</button></div>' +
   '<div class="small center" style="margin-top:10px">Built with Muse Spark Open. Orbit-X is not a medical device.</div>';
-  bindLangPicker('wl'); $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = function(){ codeScreen('restore'); };
+  bindLangPicker('wl'); $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = $('rst2').onclick = function(){ codeScreen('restore'); };
 }
 /* ---------- tablets per time: a small stepper used when setting times and when logging a dose ---------- */
 var SLOT_ROWS = [['morning', 'Morning', 'sm'], ['afternoon', 'Afternoon', 'sa'], ['evening', 'Evening', 'se'], ['night', 'Night', 'sg']];
@@ -290,6 +291,18 @@ function bindQty(root){ root.querySelectorAll('.qty').forEach(function(q){ q.que
 function slotRows(sel, usual){ return SLOT_ROWS.map(function(r){ return '<div class="slotrow"><label class="slotl"><input type="checkbox" id="' + r[2] + '"' + (sel.indexOf(r[0]) > -1 ? ' checked' : '') + '> ' + r[1] + '</label>' + qtyCtl('q_' + r[0], (usual || {})[r[0]] || 1) + '</div>'; }).join(''); }
 function readSlots(){ var slots = [], dq = {}; SLOT_ROWS.forEach(function(r){ if ($(r[2]).checked) { slots.push(r[0]); dq[r[0]] = getQty('q_' + r[0]); } }); return { slots: slots, doseQty: dq }; }
 function parseQty(t){ var W = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }; var m = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:tablets?|pills?|capsules?)\b/i.exec(String(t || '')); if (!m) return 0; var n = isNaN(m[1]) ? W[m[1].toLowerCase()] : +m[1]; return n >= 1 && n <= 10 ? n : 0; }
+function keyScreen(next){
+  var k = sess.pid + '.' + sess.token;
+  app.innerHTML = '<div class="top"><b>Orbit-X</b></div><h2 style="font-weight:500;font-size:20px;margin:18px 0 0">Save your recovery key</h2>' +
+  '<div class="small" style="margin-top:6px;font-size:14px">This key is the only way to get back into YOUR account if you sign out or change phone. Without it, signing in again would start an empty new account. Save it now: take a screenshot, copy it into your notes, or send it to yourself.</div>' +
+  '<div class="code" id="kk" style="display:block;font-size:13px;margin-top:12px;user-select:all;word-break:break-all">' + esc(k) + '</div>' +
+  '<button class="btn" id="kc">Copy my key</button><div class="small center" id="km" role="status"></div>' +
+  '<label class="check" style="margin-top:12px"><input type="checkbox" id="ks"> I have saved my recovery key</label>' +
+  '<button class="btn green" id="kn" disabled>Continue</button><div class="center"><button class="link" id="kx">Skip for now. I will find it later in Settings</button></div>';
+  $('kc').onclick = function(){ try { navigator.clipboard.writeText(k).then(function(){ $('km').textContent = 'Copied. Now paste it somewhere safe.'; $('ks').focus(); }, function(){ $('km').textContent = 'Press and hold the key above to copy it.'; }); } catch(e){ $('km').textContent = 'Press and hold the key above to copy it.'; } };
+  $('ks').onchange = function(){ $('kn').disabled = !$('ks').checked; };
+  $('kn').onclick = $('kx').onclick = next;
+}
 function onboard(){
   app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><div class="stage" style="height:170px;margin-bottom:0">' + faceSvg() + '</div><h2 style="font-weight:500;font-size:20px;margin:6px 0 0;text-align:center">One quick thing</h2>' +
   '<label class="l" for="nm">What should I call you?</label><input class="field" id="nm" maxlength="40" autocomplete="given-name" placeholder="Your name" enterkeyhint="go">' +
@@ -302,7 +315,7 @@ function onboard(){
     $('st').disabled = true; $('er').textContent = '';
     api('POST', '/api/create', { name: name, slots: [], doseQty: {}, phone: '', today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'individual' }).then(function(j){
       if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
-      sess = { role: 'patient', pid: j.pid, token: j.token, firstRun: true, accountType: 'individual' }; saveSession(sess); location.href = '/?guardian=1';
+      sess = { role: 'patient', pid: j.pid, token: j.token, firstRun: true, accountType: 'individual' }; saveSession(sess); keyScreen(function(){ location.href = '/?guardian=1'; });
     });
   };
 }
@@ -318,7 +331,7 @@ function onboardPro(){
     $('st').disabled = true; $('er').textContent = '';
     api('POST', '/api/create', { name: name, org: og, slots: [], today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'provider' }).then(function(j){
       if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
-      sess = { role: 'patient', pid: j.pid, token: j.token, name: name, accountType: 'provider' }; saveSession(sess); location.href = '/developer.html';
+      sess = { role: 'patient', pid: j.pid, token: j.token, name: name, accountType: 'provider' }; saveSession(sess); keyScreen(function(){ location.href = '/developer.html'; });
     });
   };
 }
@@ -333,9 +346,18 @@ function codeScreen(kind){
     $('ok').disabled = true;
     if (join) doJoin(v, function(m){ $('ok').disabled = false; $('er').textContent = m; });
     else {
-      var p = v.split('.'); if (p.length !== 2) { $('ok').disabled = false; $('er').textContent = 'That key does not look right.'; return; }
+      v = v.replace(/[\s"'`]+/g, ''); var p = v.split('.'); if (p.length !== 2 || !p[0] || !p[1]) { $('ok').disabled = false; $('er').textContent = 'That key does not look right. It has two parts joined by a dot. Paste it exactly as shown.'; return; }
       sess = { role: 'patient', pid: p[0].toLowerCase(), token: p[1] };
-      hApi('state').then(function(j){ if (take(j)) { saveSession(sess); patientApp(); } else { sess = null; $('ok').disabled = false; $('er').textContent = 'I could not find that account.'; } });
+      hApi('state').then(function(j){
+        if (!j || !j.ok || !j.profile) { sess = null; $('ok').disabled = false; $('er').textContent = j && j._status === 0 ? 'No internet connection. Please try again.' : 'I could not find that account. Check the key and try again.'; return; }
+        var r = j.role, me = j.me || {};
+        if (r === 'caregiver' || r === 'clinician') sess = { role: r, pid: sess.pid, token: sess.token, id: me.id, name: me.name, patientName: j.profile.name };
+        else sess = { role: 'patient', pid: sess.pid, token: sess.token, name: j.profile.name, accountType: j.profile.accountType === 'provider' ? 'provider' : 'individual' };
+        saveSession(sess);
+        if (r === 'clinician') { location.href = '/studio.html'; return; }
+        if (r === 'caregiver') { caregiverApp(); return; }
+        location.href = sess.accountType === 'provider' ? '/developer.html' : '/?guardian=1';
+      });
     }
   };
 }
@@ -347,8 +369,7 @@ function doJoin(code, fail){
     if (!j.ok) { fail(j._status === 0 ? 'No internet connection. Please try again.' : 'That invite code is not valid, or it was already used on another phone. Ask the person to open Family and tap New invite.'); return; }
     sess = { role: j.role === 'clinician' ? 'clinician' : 'caregiver', pid: j.pid, token: j.token, id: j.id, name: j.name, patientName: j.patientName }; saveSession(sess);
     try { history.replaceState(null, '', location.pathname); } catch(e){}
-    if (sess.role === 'clinician') { location.href = '/studio.html'; return; }
-    caregiverApp();
+    keyScreen(function(){ if (sess.role === 'clinician') location.href = '/studio.html'; else caregiverApp(); });
   });
 }
 function joinLink(code){
@@ -1155,7 +1176,7 @@ function showSettings(){
   if ($('kn')) $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
   o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
   $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
-  $('so').onclick = function(){ if (confirm('Sign out? You will need your recovery key to come back.')) { clearSession(); sess = null; st = null; welcome(); } };
+  $('so').onclick = function(){ var k = sess.pid + '.' + sess.token, v = $('rkv'); v.style.display = 'block'; v.textContent = k; try { navigator.clipboard.writeText(k); } catch(e){} if (confirm('Your recovery key is shown above (and copied). Save it somewhere safe: you need it to sign back in to THIS account. Sign out now?')) { clearSession(); sess = null; st = null; welcome('Signed out. To get back in, tap the green button and enter your recovery key.'); } };
   $('dl').onclick = function(){ if (confirm('Delete your account and all your data? This cannot be undone.')) hApi('delete').then(function(j){ if (j && j.ok) { clearSession(); sess = null; st = null; welcome('Your account and data were deleted.'); } }); };
 }
 
@@ -1190,9 +1211,10 @@ function cgRender(){
   var el = $('cgv'); if (!el) return;
   var who = (st && st.profile.name) || sess.patientName || 'them';
   if (!armed && !(st && st.profile && st.profile.alertsOn)) {
-    el.innerHTML = '<div class="idle"><b>You are a caregiver for ' + esc(who) + '</b><br>Step 1: tap the blue button below.<br>Step 2: tap Allow when your phone asks about notifications.<br>Then this phone gets an alert even when Orbit-X is closed.</div><button class="btn" id="arm">Arm this phone</button><div class="center"><button class="link" id="lv">Stop being a caregiver</button></div>';
+    el.innerHTML = '<div class="idle"><b>You are a caregiver for ' + esc(who) + '</b><br>Step 1: tap the blue button below.<br>Step 2: tap Allow when your phone asks about notifications.<br>Then this phone gets an alert even when Orbit-X is closed.</div><button class="btn" id="arm">Arm this phone</button><div class="center"><button class="link" id="rkc">Show my recovery key</button> <button class="link" id="lv">Sign out / stop being a caregiver</button></div><div class="code" id="rkcv" style="display:none;font-size:13px"></div>';
+    $('rkc').onclick = function(){ var v = $('rkcv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
     $('arm').onclick = function(){ armed = true; beep(); keepAwake(); cgRender(); enableAlerts(function(ok, m){ alertMsg = ok ? '' : m; cgRender(); }, true); };
-    $('lv').onclick = function(){ if (confirm('Leave? You will no longer be alerted.')) { clearSession(); sess = null; st = null; welcome(); } };
+    $('lv').onclick = function(){ if (confirm('Sign out? You will stop getting alerts. To come back as this caregiver, use your recovery key (tap Show my recovery key first and save it).')) { clearSession(); sess = null; st = null; welcome('Signed out. To get back in, tap the green button and enter your recovery key.'); } };
     return;
   }
   if (!st) { el.innerHTML = '<div class="idle"><b>Connecting...</b><br>Check your internet. Keep this page open.</div>'; return; }
