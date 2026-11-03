@@ -189,8 +189,27 @@ function pad(n){ return (n < 10 ? '0' : '') + n; }
 function todayStr(){ var d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
 function clock(t){ var d = new Date(t); var h = d.getHours(), m = d.getMinutes(), ap = h >= 12 ? 'pm' : 'am'; h = h % 12 || 12; return h + ':' + pad(m) + ' ' + ap; }
 function loadSession(){ try { return JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch(e){ return null; } }
-function saveSession(s){ try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch(e){} }
-function clearSession(){ try { localStorage.removeItem(SKEY); } catch(e){} }
+/* several accounts on one phone (for example: my own account AND a caregiver for my mother). One is active; the rest are kept so I can switch. */
+var AKEY = 'orbitx.accounts.v1';
+function accList(){ try { var a = JSON.parse(localStorage.getItem(AKEY) || '[]'); return Array.isArray(a) ? a : []; } catch(e){ return []; } }
+function accWrite(a){ try { localStorage.setItem(AKEY, JSON.stringify(a)); } catch(e){} }
+function accSame(x, y){ return x && y && x.pid === y.pid && x.token === y.token; }
+function accSave(s){ if (!s || !s.token || s.synthetic) return; var a = accList().filter(function(x){ return !accSame(x, s) && !(s.role !== 'patient' && x.pid === s.pid && x.role === s.role); }); a.unshift(s); accWrite(a.slice(0, 8)); }
+function saveSession(s){ try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch(e){} accSave(s); }
+function clearSession(){ var cur = loadSession(); try { localStorage.removeItem(SKEY); } catch(e){} if (cur) accWrite(accList().filter(function(x){ return !accSame(x, cur); })); }
+function accLabel(x){ return x.role === 'caregiver' ? 'Caregiver for ' + (x.patientName || 'someone') : x.role === 'clinician' ? 'Doctor for ' + (x.patientName || 'a patient') : x.accountType === 'provider' ? 'Organisation: ' + (x.name || 'account') : 'My own account' + (x.name ? ' (' + x.name + ')' : ''); }
+function switchTo(x){ try { localStorage.setItem(SKEY, JSON.stringify(x)); } catch(e){} accSave(x); location.href = '/'; }
+function showSwitch(){
+  var cur = loadSession(), list = accList(); if (cur) accSave(cur), list = accList();
+  var o = document.createElement('div'); o.className = 'overlay on';
+  o.innerHTML = '<h2>Switch account</h2><div class="small" style="margin-bottom:8px">This phone can hold your own account and also help someone else as a caregiver. Tap one to switch.</div>' +
+    list.map(function(x, i){ var on = accSame(x, cur); return '<button class="btn' + (on ? '' : ' ghost') + '" data-sw="' + i + '"' + (on ? ' disabled' : '') + '>' + esc(accLabel(x)) + (on ? ' (current)' : '') + '</button>'; }).join('') +
+    '<button class="btn ghost" id="swadd">Add another account (invite or recovery key)</button><button class="btn ghost" id="swx">Close</button>';
+  document.body.appendChild(o);
+  o.querySelectorAll('[data-sw]').forEach(function(b){ b.onclick = function(){ switchTo(list[+b.getAttribute('data-sw')]); }; });
+  $('swx').onclick = function(){ o.remove(); };
+  $('swadd').onclick = function(){ o.remove(); welcome(); };
+}
 var sess = loadSession();
 var st = null;            // last state from the server
 var timer = null;
@@ -279,9 +298,10 @@ function welcome(msg){
   '<button class="btn ghost" id="cgv">I am a family member or caregiver (I have an invite)</button>' +
   '<button class="btn ghost" id="pro">I am a doctor, clinic or organisation</button>' +
   '<button class="btn green" id="rst2" style="margin-top:10px">I already have an account: sign in with my recovery key</button>' +
+  (accList().length ? '<button class="btn ghost" id="swb">Switch to an account saved on this phone</button>' : '') +
   '<div class="center" style="margin-top:12px"><a class="link" href="/guide.html" style="text-decoration:none">How Orbit-X works, in simple words</a> <button class="link" id="rst">Restore my account</button></div>' +
   '<div class="small center" style="margin-top:10px">Built with Muse Spark Open. Orbit-X is not a medical device.</div>';
-  bindLangPicker('wl'); $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = $('rst2').onclick = function(){ codeScreen('restore'); };
+  bindLangPicker('wl'); $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = $('rst2').onclick = function(){ codeScreen('restore'); }; if ($('swb')) $('swb').onclick = showSwitch;
 }
 /* ---------- tablets per time: a small stepper used when setting times and when logging a dose ---------- */
 var SLOT_ROWS = [['morning', 'Morning', 'sm'], ['afternoon', 'Afternoon', 'sa'], ['evening', 'Evening', 'se'], ['night', 'Night', 'sg']];
@@ -362,9 +382,7 @@ function codeScreen(kind){
   };
 }
 function doJoin(code, fail){
-  var cur = loadSession(); /* one phone holds one Orbit-X role: never replace someone's own account by accident */
-  if (cur && cur.token && cur.role === 'patient') { fail('This phone is signed in to your own Orbit-X account, and a phone can hold only one role. Open the invite on another phone or browser. Or sign out here first (Settings, Sign out): your recovery key brings your own account back later.'); return; }
-  if (cur && cur.token && (cur.role === 'caregiver' || cur.role === 'clinician') && !confirm('This phone is already set up to help ' + (cur.patientName || 'someone') + '. Joining replaces that. If this is a new invite for the same person, that is fine. Continue?')) { fail('Not joined. Nothing changed.'); return; }
+  /* the current account stays saved, so one phone can be both a person's own account and a caregiver: switch any time */
   api('POST', '/api/join', { code: code }).then(function(j){
     if (!j.ok) { fail(j._status === 0 ? 'No internet connection. Please try again.' : 'That invite code is not valid, or it was already used on another phone. Ask the person to open Family and tap New invite.'); return; }
     sess = { role: j.role === 'clinician' ? 'clinician' : 'caregiver', pid: j.pid, token: j.token, id: j.id, name: j.name, patientName: j.patientName }; saveSession(sess);
@@ -1144,7 +1162,7 @@ function showSettings(){
     '<label class="l">Bluetooth blood-pressure cuff</label><div class="small">Pair a cuff that uses the standard Bluetooth blood-pressure service (Chrome on Android). Each reading comes straight in, works with no internet, and you confirm it before it is saved.</div><div class="err" id="bte"></div><button class="btn ghost" id="btc">Connect a cuff</button><button class="btn ghost" id="btx" style="display:none">Disconnect cuff</button><div class="small" id="btm"></div>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
     (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
-    '<div style="height:10px"></div><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
+    '<div style="height:10px"></div><button class="btn ghost" id="sw">Switch account (caregiver or my own)</button><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   bindQty(o);
   bindLangSelect($('sl'), $('slo')); if ($('sl').value === '__o') { $('slo').style.display = ''; $('slo').value = langName(); }
@@ -1176,6 +1194,7 @@ function showSettings(){
   if ($('kn')) $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
   o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
   $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
+  $('sw').onclick = showSwitch;
   $('so').onclick = function(){ var k = sess.pid + '.' + sess.token, v = $('rkv'); v.style.display = 'block'; v.textContent = k; try { navigator.clipboard.writeText(k); } catch(e){} if (confirm('Your recovery key is shown above (and copied). Save it somewhere safe: you need it to sign back in to THIS account. Sign out now?')) { clearSession(); sess = null; st = null; welcome('Signed out. To get back in, tap the green button and enter your recovery key.'); } };
   $('dl').onclick = function(){ if (confirm('Delete your account and all your data? This cannot be undone.')) hApi('delete').then(function(j){ if (j && j.ok) { clearSession(); sess = null; st = null; welcome('Your account and data were deleted.'); } }); };
 }
@@ -1191,8 +1210,8 @@ function keepAwake(){ try { if (navigator.wakeLock) navigator.wakeLock.request('
 document.addEventListener('visibilitychange', function(){ if (!document.hidden && armed) keepAwake(); if (!document.hidden) qFlush(); if (!document.hidden && sess && sess.pid && sess.role === 'patient' && document.getElementById('c2')) { hApi('state').then(function(j){ if (take(j)) { refreshCards(); renderEmergency(); } }); } });
 function caregiverApp(){
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + '</span></div><div id="cgv" style="position:relative;flex:1"></div>' + langPicker('cl') + '<audio id="rtcaudio" autoplay playsinline></audio>';
-  bindLangPicker('cl'); cgRender(); cgPoll(); quietResync();
+  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + ' <button class="link" id="swc">Switch</button></span></div><div id="cgv" style="position:relative;flex:1"></div>' + langPicker('cl') + '<audio id="rtcaudio" autoplay playsinline></audio>';
+  bindLangPicker('cl'); $('swc').onclick = showSwitch; cgRender(); cgPoll(); quietResync();
 }
 function cgPoll(){
   hApi('state').then(function(j){
