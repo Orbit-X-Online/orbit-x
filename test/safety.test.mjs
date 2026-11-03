@@ -60,4 +60,14 @@ globalThis.fetch = async () => new Response(JSON.stringify({ choices: [{ message
 let last; for (let i = 0; i < 41; i++) last = await hit();
 assert.equal(last.status, 429); assert.equal(last.headers.get('Retry-After'), '77'); assert.ok(rlCalls >= 41);
 ok('translation route limit is enforced by the durable store (41st request in the window is refused with Retry-After)');
+
+// 8. language coverage and lab units
+for (const t of ['Mo ni ìrora àyà', 'Mo dákú', 'chest dey pain me', 'I no fit breathe', 'Maumivu ya kifua', 'je n’arrive pas à respirer']) assert.equal(preCheck(t) && preCheck(t).type, 'emergency', t);
+assert.equal(preCheck('what does eGFR mean'), null);
+ok('emergency wording in Yoruba, Pidgin, Swahili and French (with or without accents) goes to the fixed emergency screen');
+assert.equal(unsafe('eGFR was 62 mL/min/1.73 m2 on 2026-03-12.'), false);
+assert.equal(unsafe('Creatinine 1.4 mg/dL and glucose 5.4 mmol/L were documented.'), false);
+for (const t of ['Take 5 mg daily.', 'Dose is 10 mg/day.', 'The label says 500 mg twice a day.']) assert.equal(!!unsafe(t), true, t);
+ok('lab units (mg/dL, mL/min) are allowed in explanations; doses are still blocked');
+
 console.log('ALL SAFETY TESTS PASSED (' + n + ')');
