@@ -36,7 +36,7 @@ let r = await post({}, 'I have chest pain'); let j = await r.json();
 assert.equal(r.status, 200); assert.equal(j.safety, 'emergency'); assert.match(j.reply, /112/); assert.equal(calls, 0);
 r = await post({}, 'Should I double my tablets?'); j = await r.json(); assert.equal(j.safety, 'advice'); assert.equal(calls, 0);
 r = await post({}, 'I want to hurt myself'); j = await r.json(); assert.equal(j.safety, 'selfharm'); assert.match(j.reply, /112/); assert.equal(calls, 0);
-r = await post({ MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.meta.ai/v1', MODEL_TEXT: 'm' }, 'What is a systolic reading?'); j = await r.json();
+r = await post({ ASSISTANT_CHAT: 'on', MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.meta.ai/v1', MODEL_TEXT: 'm' }, 'What is a systolic reading?'); j = await r.json();
 assert.equal(calls, 1, 'definition questions do reach the model once'); assert.equal(j.reply, SAFE_FALLBACK, 'unsafe model text is replaced');
 ok('assistant route: rules answer with no key and no model call; unsafe model text is replaced by the fixed fallback');
 
@@ -70,4 +70,10 @@ assert.equal(unsafe('Creatinine 1.4 mg/dL and glucose 5.4 mmol/L were documented
 for (const t of ['Take 5 mg daily.', 'Dose is 10 mg/day.', 'The label says 500 mg twice a day.']) assert.equal(!!unsafe(t), true, t);
 ok('lab units (mg/dL, mL/min) are allowed in explanations; doses are still blocked');
 
+
+// 9. chat is off by default: with no setting at all (or any value but "on") the model is never called
+calls = 0; globalThis.fetch = async () => { calls++; return new Response(JSON.stringify({ choices: [{ message: { content: 'hello' } }] })); };
+for (const e of [{}, { ASSISTANT_CHAT: '' }, { ASSISTANT_CHAT: 'yes' }]) { r = await post({ MODEL_API_KEY: 'k', MODEL_BASE_URL: 'https://api.meta.ai/v1', ...e }, 'tell me a joke'); j = await r.json(); assert.equal(j.safety, 'chat_off'); }
+assert.equal(calls, 0);
+ok('free-text chat is off unless ASSISTANT_CHAT is exactly "on"; the model is never called by default');
 console.log('ALL SAFETY TESTS PASSED (' + n + ')');
