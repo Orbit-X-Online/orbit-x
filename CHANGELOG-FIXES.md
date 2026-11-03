@@ -131,3 +131,17 @@ Not verifiable here: real phone calls, real SMS delivery, Bluetooth and radio ha
 - _headers: Content-Security-Policy + Permissions-Policy. sw.js cache v12 with voice.js, maskable icons, demo page.
 - Added maskable icons and screenshots; fixed demo.html banner squashing the app on phones.
 - Tests: test/safety.test.mjs added; npm test, npm run check and test/ui-smoke.py pass. NOT tested: real microphone/speech, real Muse Spark/Baseten calls, CSP in a live browser session.
+
+
+## Audit round (language, voice, safety, headers)
+
+| Defect | Fix | Files |
+|---|---|---|
+| `Permissions-Policy` had `geolocation=()`: emergency location could never work | `geolocation=(self)` | `public/_headers` |
+| CSP blocked the OCR script, wasm, workers and language data (photo/report reading failed silently) | Allowed cdnjs/jsdelivr/tessdata, `wasm-unsafe-eval`, blob workers | `public/_headers` |
+| Pack-count message guessed causes | Factual wording only: it compares numbers and points to the pharmacist/doctor | `public/index.html` |
+| Output guard blocked lab values such as `mg/dL` | Dose pattern ignores `/dL`, `/L`, `/min` etc.; real doses still blocked | `src/safety.js` |
+| Emergency rules were English-only | Accent-folded phrases for Pidgin, Yoruba, Igbo, Hausa, Swahili, French (partial by design) | `src/safety.js` |
+| Voice could stay on "Speaking" if the phone never fired start/end | Per-sentence watchdog moves on | `public/voice.js` |
+| Translation lag: one big batch at a time | Up to 3 small parallel batches | `public/lang.js` |
+| Old service worker cache | `orbitx-shell-v13` | `public/sw.js` |
