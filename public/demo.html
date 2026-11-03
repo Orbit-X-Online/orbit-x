@@ -25,13 +25,19 @@ header b{color:var(--txt);font-size:16px;letter-spacing:.5px}
 .hint{text-align:center;font-size:12px;color:var(--mut);min-height:16px}
 .row{display:flex;gap:8px;margin:10px 0}
 .row button,.q{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:10px 6px;font-size:13px;cursor:pointer}
-.inputbar{display:flex;gap:8px;align-items:center;margin-top:auto}
-.inputbar input{flex:1;background:var(--card);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:12px 16px;font-size:15px;outline:none}
-#mic{width:56px;height:56px;border-radius:50%;border:0;background:#2563EB;color:#fff;font-size:22px;cursor:pointer;position:relative;flex:none}
-#mic.on{background:#16A34A}
-#mic.on::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:2px solid var(--cy);animation:pr 1.2s ease-out infinite}
+.cmd{background:linear-gradient(180deg,#0F1B3A,#0B1530);border:1px solid var(--line);border-radius:20px;padding:14px;margin:6px 0 4px;box-shadow:0 6px 24px rgba(37,99,235,.12)}
+.cmd .ct{font-size:13px;color:#9BDCFF;letter-spacing:.3px;margin:0 0 10px;text-align:center}
+.bpin{display:flex;gap:8px;align-items:center}
+.bpin input{flex:1;min-width:0;width:100%;background:#070B16;border:1px solid var(--line);color:var(--txt);border-radius:14px;padding:12px 8px;font-size:22px;font-weight:600;text-align:center;outline:none;-moz-appearance:textfield}
+.bpin input::-webkit-outer-spin-button,.bpin input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.bpin input:focus{border-color:var(--cy);box-shadow:0 0 0 3px rgba(56,189,248,.18)}
+.bpin .sl{color:var(--mut);font-size:22px}
+.bpin button{flex:none;border:0;border-radius:14px;background:linear-gradient(180deg,#3B82F6,#2563EB);color:#fff;font-size:15px;font-weight:600;padding:14px 18px;cursor:pointer;box-shadow:0 4px 14px rgba(37,99,235,.35)}
+.cmd .lbl{display:flex;gap:8px;font-size:11.5px;color:var(--mut);margin:6px 2px 0}.cmd .lbl span{flex:1;text-align:center}
+.cfm{display:none;gap:8px;margin-top:10px}.cfm.on{display:flex}
+.cfm button{flex:1;border-radius:14px;padding:12px;font-size:15px;font-weight:600;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--txt)}
+.cfm button.y{background:#166534;border-color:#22c55e}
 @keyframes pr{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(1.4)}}
-#send{background:none;border:0;color:#7DD3FC;font-size:14px;cursor:pointer;padding:6px}
 .demo{margin:12px 0 4px;padding:8px 10px;border:1px dashed var(--line);border-radius:12px;font-size:12px;color:var(--mut)}
 .demo input{width:100%;accent-color:#38BDF8}
 .demo .l{display:flex;justify-content:space-between;margin-bottom:4px}
@@ -109,15 +115,6 @@ function say(text, cb){
   OXVoice.speak(text, { onstart: function(){ faceTalk(true); }, onend: function(){ faceTalk(false); cb && cb(); } });
 }
 var rec = null, listening = false;
-function listen(){
-  if (!window.OXVoice || !OXVoice.recSupported()) { hint('Voice input is not available here. Type instead.'); $('txt').focus(); return; }
-  OXVoice.listen({
-    onstart: function(){ listening = true; $('mic').classList.add('on'); faceTalk(false); hint('Listening...'); },
-    onend: function(){ listening = false; $('mic').classList.remove('on'); faceTalk(false); if ($('hint') && $('hint').textContent === 'Listening...') hint(''); },
-    onresult: function(t){ $('txt').value = t; handle(t); },
-    onerror: function(m){ listening = false; $('mic').classList.remove('on'); hint(m); }
-  });
-}
 
 /* ---------- UI helpers ---------- */
 var proofOpen = null;
@@ -131,7 +128,7 @@ function hint(t){ var h = $('hint'); if (h) h.textContent = t; }
 function patientHTML(){
   return '<header><b>Orbit-X</b><span class="status"><i class="dot"></i><span id="stat">Ready</span></span></header>' +
   '<div class="stage"><div class="chip" id="c1"><span>Blood pressure</span><b id="c1v"></b></div>' +
-  '<svg id="face" viewBox="0 0 260 260" role="img" aria-label="Orbit, the AI assistant face">' +
+  '<svg id="face" viewBox="0 0 260 260" role="img" aria-label="Orbit, the Orbit-X reading face">' +
    '<defs><radialGradient id="g" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#38BDF8" stop-opacity=".28"/><stop offset="1" stop-color="#38BDF8" stop-opacity="0"/></radialGradient>' +
    '<linearGradient id="skin" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#12284D"/><stop offset="1" stop-color="#0A1630"/></linearGradient></defs>' +
    '<circle cx="130" cy="130" r="128" fill="url(#g)"/>' +
@@ -144,8 +141,8 @@ function patientHTML(){
   '</svg><div class="chip" id="c2"><span>Missed doses</span><b id="c2v"></b></div></div>' +
   '<div class="caption" id="cap"></div><div class="hint" id="hint"></div>' +
   '<div class="banner" id="ban"></div>' +
-  '<div class="row"><button data-q="log bp">Log BP</button><button data-q="took my tablet">Medicine</button><button data-q="how was my week">History</button></div>' +
-  '<div class="inputbar"><input id="txt" placeholder="Type to Orbit" autocomplete="off" enterkeyhint="send"><button id="send">Send</button><button id="mic" aria-label="Talk to Orbit">&#127908;</button></div>' +
+  '<div class="cmd"><div class="ct">Log your blood pressure</div><div class="bpin"><input id="bs" type="number" inputmode="numeric" min="50" max="300" placeholder="Top" aria-label="Top number"><span class="sl">/</span><input id="bd" type="number" inputmode="numeric" min="30" max="200" placeholder="Bottom" aria-label="Bottom number"><button id="bpgo">Log</button></div><div class="cfm" id="cfm"><button class="y" id="cfy">Yes, save it</button><button id="cfn">No, change it</button></div></div>' +
+  '<div class="row"><button data-q="took my tablet">Medicine</button><button data-q="how was my week">History</button></div>' +
   '<div class="demo"><div class="l"><span>Demo day</span><b id="dv"></b></div><input type="range" id="day" min="1" max="30" step="1"><button id="reset">Reset demo</button> <button id="mute">Voice: on</button></div>' +
   '<div class="overlay" id="evo"></div>' +
   '<div class="overlay" id="emer"><div class="pulse"></div><div class="big" id="emtxt"></div><div class="tl" id="emtl"></div><div class="banner on" id="emban" style="display:none"></div><button class="btn ghost" id="emclose">Close</button></div>';
@@ -213,7 +210,7 @@ function renderEmTl(){
 }
 
 function handle(text){
-  text = String(text || '').trim(); if (!text) return; $('txt').value = '';
+  text = String(text || '').trim(); if (!text) return;
   // Fixed safety rule runs FIRST. The AI never decides emergencies.
   if (D.detectEmergency(text)) { startEmergency(null, null, text); return; }
   var cmd = D.parseCommand(text), a = D.analyze(DAYS, state.day);
@@ -223,9 +220,9 @@ function handle(text){
     if (D.isEmergencyReading(p.sys, p.dia)) { startEmergency(p.sys, p.dia, 'High reading'); return; }
     say('Saved: ' + p.sys + ' over ' + p.dia + '. ' + (p.sys >= a.baseline + D.HIGH_MARGIN ? 'That is higher than your usual. I will keep watching it with you.' : 'That is close to your usual.')); return;
   }
-  if (state.pending && cmd.type === 'no') { state.pending = null; say('Okay, I did not save it. Please say it again.'); return; }
+  if (state.pending && cmd.type === 'no') { state.pending = null; say('Okay, I did not save it. Please enter it again.'); return; }
   if (cmd.type === 'log_bp') { state.pending = { sys: cmd.sys, dia: cmd.dia }; say('I heard ' + cmd.sys + ' over ' + cmd.dia + '. Is that right?'); return; }
-  if (text.toLowerCase().indexOf('log bp') > -1) { say('Please say or type your reading, like 150 over 95.'); return; }
+  if (text.toLowerCase().indexOf('log bp') > -1) { say('Please enter your two numbers, like 150 and 95.'); return; }
   if (cmd.type === 'log_med') { state.medLog[state.day] = true; say('Good. I have marked your tablet as taken.'); return; }
   if (cmd.type === 'missed_med') { say('Thank you for telling me. Shall I remind you again in 30 minutes?'); return; }
   if (cmd.type === 'explain') { say(a.sentence); setCaption(a.sentence, a.level === 'pattern' ? 'pattern' : null); if (a.evidence.length) setTimeout(showEvidence, 500); return; }
@@ -233,18 +230,25 @@ function handle(text){
   say('I can log your blood pressure, note your medicine, or explain your week. What would you like?');
 }
 
+function showConfirm(on){ var c = $('cfm'); if (c) c.classList.toggle('on', !!on); }
+function bpSubmit(){
+  var a = parseInt($('bs').value, 10), b = parseInt($('bd').value, 10);
+  if (!(a >= 50 && a <= 300 && b >= 30 && b <= 200 && a > b)) { say('Please enter the top number and the bottom number, for example 150 and 95.'); return; }
+  $('bs').value = ''; $('bd').value = '';
+  handle(a + ' over ' + b); if (state.pending) showConfirm(true);
+}
 function initPatient(){
   app.innerHTML = patientHTML();
   $('day').oninput = function(){ state.day = +this.value; state.pending = null; refreshCards(); greet(); };
   $('cap').onclick = function(){ if (proofOpen) showEvidence(); };
-  $('send').onclick = function(){ handle($('txt').value); };
-  $('txt').onkeydown = function(e){ if (e.key === 'Enter') handle($('txt').value); };
-  $('mic').onclick = listen;
+  $('bpgo').onclick = bpSubmit; $('bd').onkeydown = $('bs').onkeydown = function(e){ if (e.key === 'Enter') bpSubmit(); };
+  $('cfy').onclick = function(){ showConfirm(false); handle('yes'); };
+  $('cfn').onclick = function(){ showConfirm(false); handle('no'); };
   document.querySelectorAll('.row button').forEach(function(b){ b.onclick = function(){ handle(b.getAttribute('data-q')); }; });
   $('reset').onclick = function(){ api('reset', {}); state = { day: 24, pending: null, bpLog: {}, medLog: {} }; $('emer').classList.remove('on'); $('evo').classList.remove('on'); refreshCards(); setCaption('Demo reset. Tap Orbit to begin.'); };
   $('mute').onclick = function(){ voiceOn = !voiceOn; this.textContent = 'Voice: ' + (voiceOn ? 'on' : 'off'); if (!voiceOn && window.OXVoice) OXVoice.stop(); };
   $('emclose').onclick = function(){ $('emer').classList.remove('on'); };
-  refreshCards(); setCaption('Tap the mic or type to talk to Orbit.'); hint('');
+  refreshCards(); setCaption('Enter a reading, or tap a button.'); hint('');
   // first sentence appears without voice (browsers block speech until the first tap)
   var a0 = D.analyze(DAYS, state.day); setCaption('Good morning, Mr. Briggs. ' + a0.short, a0.level === 'pattern' ? 'pattern' : null);
   setInterval(function(){
