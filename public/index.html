@@ -518,8 +518,8 @@ function pickPhoto(cb){
 function packCompare(n, e){
   if (e === null || e === undefined || !(n >= 0)) return '';
   if (n === e) return 'That matches what you logged.';
-  if (n < e) return 'That is ' + (e - n) + ' fewer than I expected from the tablets you logged. A tablet may have been taken without being logged.';
-  return 'That is ' + (n - e) + ' more than I expected. A logged tablet may not have been taken, or tablets were added.';
+  if (n < e) return 'That is ' + (e - n) + ' fewer than the count from the tablets you logged. Orbit-X only compares the numbers. Please ask your pharmacist or doctor if you are unsure.';
+  return 'That is ' + (n - e) + ' more than the count from the tablets you logged. Orbit-X only compares the numbers. Please ask your pharmacist or doctor if you are unsure.';
 }
 function packFlow(mode, reqId){
   pickPhoto(function(img){
