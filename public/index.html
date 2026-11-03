@@ -269,16 +269,16 @@ function tzName(){ try { return Intl.DateTimeFormat().resolvedOptions().timeZone
 function welcome(msg){
   stopTimer();
   app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">Not a doctor. Emergency: 112</span></div>' +
-  '<div class="stage" style="height:210px;margin-bottom:6px">' + faceSvg() + '</div>' +
+  '<div class="stage" style="height:105px;margin-bottom:0">' + faceSvg() + '</div>' +
   '<div class="center" style="font-size:20px;line-height:1.35;margin:2px 8px 4px">Hello. I am Orbit.</div>' +
-  '<div class="center small" style="margin:0 10px 12px;font-size:14px">I help you keep track of your blood pressure and tablets, and I make sure your family knows if you need help. I never give medical advice.</div>' +
+  '<div class="center small" style="margin:0 10px 6px;font-size:13px">I help you keep track of your blood pressure and tablets, and I make sure your family knows if you need help. I never give medical advice.</div>' +
   (msg ? '<div class="err center">' + esc(msg) + '</div>' : '') +
   langPicker('wl') +
   '<div class="small" style="margin:4px 2px 0">Who are you?</div>' +
   '<button class="btn" id="go">I want to look after my own health</button>' +
   '<button class="btn ghost" id="cgv">I am a family member or caregiver (I have an invite)</button>' +
   '<button class="btn ghost" id="pro">I am a doctor, clinic or organisation</button>' +
-  '<button class="btn green" id="rst2" style="margin-top:14px">I already have an account: sign in with my recovery key</button>' +
+  '<button class="btn green" id="rst2" style="margin-top:10px">I already have an account: sign in with my recovery key</button>' +
   '<div class="center" style="margin-top:12px"><a class="link" href="/guide.html" style="text-decoration:none">How Orbit-X works, in simple words</a> <button class="link" id="rst">Restore my account</button></div>' +
   '<div class="small center" style="margin-top:10px">Built with Muse Spark Open. Orbit-X is not a medical device.</div>';
   bindLangPicker('wl'); $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = $('rst2').onclick = function(){ codeScreen('restore'); };
