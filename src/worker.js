@@ -1488,7 +1488,7 @@ async function handleAssistant(req, env, cors) {
   const lastUser = [...messages].reverse().find((m) => m.role === 'user');
   const pre = lastUser && preCheck(lastUser.content); // fixed rules first: emergency, self-harm, advice requests never reach the model, and this works with no AI key
   if (pre) return json({ reply: pre.reply, safety: pre.type, source: 'rules' }, 200, cors);
-  if (String(env.ASSISTANT_CHAT || '').toLowerCase() === 'off') return json({ reply: CHAT_OFF_REPLY, safety: 'chat_off', source: 'rules' }, 200, cors); // free-text chat switched off: only fixed, rule-based answers
+  if (String(env.ASSISTANT_CHAT || '').toLowerCase() !== 'on') return json({ reply: CHAT_OFF_REPLY, safety: 'chat_off', source: 'rules' }, 200, cors); // free-text chat is OFF unless ASSISTANT_CHAT is exactly "on": only fixed, rule-based answers
   if (!env.MODEL_API_KEY) return json({ error: 'not_configured', message: 'The AI assistant is not set up on this server (MODEL_API_KEY is missing). Everything else in Orbit-X still works.' }, 503, cors);
   try {
     const reply = await metaChat(env, { messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages] });
