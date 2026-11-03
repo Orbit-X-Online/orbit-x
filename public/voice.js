@@ -55,10 +55,15 @@ window.OXVoice = (function () {
       if (i >= parts.length) { end(); return; }
       var u = new SpeechSynthesisUtterance(parts[i++]); u.rate = o.rate || 0.95; u.pitch = 1;
       if (v) { u.voice = v; u.lang = v.lang; } // same voice for every language
-      u.onstart = function () { if (!started) { started = true; try { o.onstart && o.onstart(); } catch (e) {} } };
-      u.onend = function () { next(); };
-      u.onerror = function (e) { if (e && (e.error === 'interrupted' || e.error === 'canceled')) { end(); return; } next(); };
-      try { speechSynthesis.speak(u); } catch (e) { end(); }
+      var moved = false, wd1 = null, wd2 = null;
+      function go(fn) { if (moved) return; moved = true; clearTimeout(wd1); clearTimeout(wd2); fn(); }
+      u.onstart = function () { clearTimeout(wd1); if (!started) { started = true; try { o.onstart && o.onstart(); } catch (e) {} } };
+      u.onend = function () { go(next); };
+      u.onerror = function (e) { if (e && (e.error === 'interrupted' || e.error === 'canceled')) { go(end); return; } go(next); };
+      /* watchdog: some phones never fire start/end; do not stay stuck on "Speaking" */
+      wd1 = setTimeout(function () { if (my !== token) { go(end); return; } go(function () { try { speechSynthesis.cancel(); } catch (e) {} next(); }); }, 5000);
+      wd2 = setTimeout(function () { if (my !== token) { go(end); return; } go(function () { try { speechSynthesis.cancel(); } catch (e) {} next(); }); }, 6000 + parts[i - 1].length * 120);
+      try { speechSynthesis.speak(u); } catch (e) { go(end); }
     }
     setTimeout(next, 30); // lets cancel() settle (Chrome drops a speak() sent in the same tick)
   }
