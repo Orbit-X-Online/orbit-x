@@ -8,11 +8,12 @@ Orbit-X **does not give medical advice and is not a medical device.** Plain code
 
 | Screen | Who it is for | What it does |
 |---|---|---|
-| `/` (index) | Everyone | Sign-up, then your daily app: log blood pressure and tablets, talk or type to Orbit, Family and caregivers, Settings (phone alerts, tablet times, account). |
+| `/` (index) | Everyone | Sign-up (just your name), then your daily app: log blood pressure and tablets, talk to Orbit (fixed, rule-based answers; free-text AI chat is off by default), History, Family and caregivers, Settings (phone alerts, tablet times, language, account). |
 | `/workspace.html` | Everyone | **Health Workspace** — your documents, extracted facts with sources, timeline, Evidence Graph, appointment brief, sharing and consent. |
 | `/guide.html` | Everyone | A one-minute plain-words explanation. |
 | `/demo.html` | Anyone curious | A walkthrough with a **fictional** patient. No real people or alerts. |
 | `/studio.html` | Doctors you invite | **Rule Studio** — a clinician writes an alert rule in plain words, reads it back, and approves it. |
+| `/gateway.html` | Doctor / organisation accounts | **Cuff Gateway:** a phone or laptop with Chrome pairs a Bluetooth cuff and sends readings to a patient's account through the public API with a device key. |
 | `/developer.html`, `/docs.html`, `/partner.html` | Doctor / organisation accounts only | **Developer tools:** API keys, FHIR record import, emergency handoff, API docs, a test app. Hidden from personal accounts (also enforced on the server). |
 | `/brief.html`, `/receipt.html` | Whoever holds the link | Read-only shared appointment brief and integrity receipt. |
 
@@ -26,9 +27,9 @@ Orbit-X **does not give medical advice and is not a medical device.** Plain code
 | Web Push request + result tracking (accepted / rejected / expired / throttled / service error / network error) | Implemented, tested with a fake push service. **Not yet verified against real Google/Mozilla/Apple push services.** |
 | "Shown on the phone" confirmation | Implemented: the phone's service worker reports back after displaying. **Not yet verified on a real device.** |
 | Emergency alert chain with server-side escalation | Implemented, tested (fake store) |
-| SMS / phone calls | **Not implemented** (needs a paid provider). The app gives Call/Text buttons that use the person's own SIM. |
-| Health Workspace, evidence graph, pattern engine | Implemented (text documents only) |
-| AI wording (Muse Spark Open via Baseten / Meta Model API) | Implemented; needs your key. Without a key: clear "not configured" message and a labelled rule-based mode. Live model **not verified** in this repo's tests (mocked). |
+| SMS / phone calls from the server | **Implemented, needs a provider account:** SMS through Twilio or Africa's Talking, voice calls through Twilio (set the secrets below). Without them the alert log says "SMS not set up" and the app falls back to Call/Text buttons that use the person's own SIM. **Not verified against a live provider.** |
+| Health Workspace, evidence graph, pattern engine | Implemented. Documents can be pasted/typed text or a photo of a paper report (read by Muse Spark Open's vision, or on the phone with Tesseract OCR as fallback). The person checks the text before analysis. |
+| AI wording (Muse Spark Open via Baseten / Meta Model API) | Implemented; needs your key. Without a key: clear "not configured" message and a labelled rule-based mode. Free-text chat stays **off** unless `ASSISTANT_CHAT` is exactly `on`. Live model **not verified** in this repo's tests (mocked). |
 | FHIR | **Limited R4 subset**, not full interoperability. Supported resources: Patient, Organization, Practitioner, Encounter, Observation, Condition, MedicationRequest, AllergyIntolerance, DiagnosticReport, DocumentReference, Provenance, Consent, AuditEvent. Structural validation only (not a full conformance validator). |
 | Hospital/EMR connections, emergency handoff delivery | **Simulated** and labelled so. |
 | WhatsApp webhook | Parked stub (verification handshake only). |
@@ -43,7 +44,7 @@ Node.js 20+ (tested on 22), a free Cloudflare account, and `npx wrangler login`.
 ## Local setup
 
 ```
-npm install
+npm install                        # no lockfile is committed yet; run this once and commit the package-lock.json it creates
 cp .dev.vars.example .dev.vars     # fill in only what you need; never commit this file
 npm run dev                        # http://localhost:8787
 ```
@@ -58,7 +59,13 @@ Names only, set with `npx wrangler secret put NAME`:
 |---|---|---|
 | `MODEL_API_KEY` | Optional | AI provider key. Without it the AI says it is not configured; everything else works. |
 | `RECEIPT_SECRET` | Recommended | Signs integrity receipts. Without it receipts are hash-chained but unsigned. |
-| `VAPID_SUBJECT` | Recommended | Your contact address for push services, e.g. `mailto:you@example.com`. Defaults to a placeholder. |
+| `VAPID_SUBJECT` | Recommended | Your contact address for push services, e.g. `mailto:you@your-email.example` (or an `https://` address). If unset, the first `https://` address in `ALLOWED_ORIGINS` is used. |
+| `ASSISTANT_CHAT` | Optional | Free-text AI chat. Off unless exactly `on`. Set in `wrangler.toml`. |
+| `MODEL2_API_KEY`, `MODEL2_BASE_URL`, `MODEL2_TEXT` | Optional | Second AI provider that takes over if the first is out of credit or down. |
+| `TWILIO_SID`, `TWILIO_TOKEN`, `TWILIO_FROM` / `AT_USERNAME`, `AT_API_KEY`, `AT_FROM` | Optional | Server-sent SMS (and Twilio voice calls) when a caregiver must be reached. |
+| `TURN_KEY_ID`, `TURN_API_TOKEN` (or `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`) | Optional | TURN relay so voice calls work on mobile data. |
+| `ADMIN_TOKEN` | Optional | Lets you list models on `/api/ai/status` (header `X-Admin-Token`). |
+| `TWA_PACKAGE`, `TWA_SHA256` | Optional | Android app (TWA) link; see the last section. |
 | `WHATSAPP_*` | Optional | Parked WhatsApp feature. |
 
 Non-secret settings live in `wrangler.toml`: `MODEL_BASE_URL`, `MODEL_TEXT`, `ESCALATE_MS`, `ALLOWED_ORIGINS` (**change this to your own domain**), optional `PUSH_EXTRA_HOSTS`.
@@ -68,8 +75,8 @@ Push (VAPID) keys are generated automatically per household and kept inside that
 ## Run the tests
 
 ```
-npm test          # smoke + household + notifications/security + static front-end (no network, no cost)
-npm run check     # syntax check of every source file and the service worker
+npm test          # smoke + household + notifications/security + end-to-end + static front-end + safety (no network, no cost)
+npm run check     # syntax check of every source file and front-end script
 python3 test/ui-smoke.py   # optional: real headless browser, needs `pip install playwright && playwright install chromium`
 ```
 
@@ -88,11 +95,11 @@ Durable Object configuration (already in `wrangler.toml`; do not rename the clas
 [[migrations]]                tag = "v1", new_sqlite_classes = ["AlertHub"]
 ```
 
-Static files are served from `public/` (`run_worker_first` sends only `/api/*` to the Worker). `public/_headers` adds basic security headers.
+Static files are served from `public/` (`run_worker_first` sends only `/api/*` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy (which still allows inline scripts).
 
 ## Turn on phone alerts on Android
 
-1. Open your deployed `https://` Orbit-X address in **Chrome** and create your account (tick your tablet times).
+1. Open your deployed `https://` Orbit-X address in **Chrome** and create your account (just your name). Then set your tablet times in Settings.
 2. Settings → **Turn on phone alerts** → **Allow** when asked.
 3. Tap again to **Send a test**. You will see two steps: "push service accepted" (step 1) and, a few seconds later, "this phone confirmed it displayed the alert" (step 2).
 4. Optional: Chrome menu → **Add to Home screen**.
@@ -124,8 +131,8 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 - Do Not Disturb, silenced Chrome notifications, battery savers and "force stop" can hide or block alerts.
 - Web Push is free but offers **no delivery guarantee**. Orbit-X therefore never says "delivered" unless the phone itself reports it displayed the notification.
 - Reminders more than 2 hours late (caregiver heads-up: 3 hours) are skipped and recorded rather than sent stale.
-- No SMS or automatic phone calls (paid providers needed). Emergency screens use the device's own Call/Text.
-- Unauthenticated account creation has no global rate limit yet (add Cloudflare rate-limiting rules before public launch).
+- Automatic SMS and phone calls need a Twilio or Africa's Talking account (secrets below). Without one, only push alerts go out and the screens fall back to the device's own Call/Text.
+- Account creation is limited to 20 new accounts per hour per IP address (counted in a Durable Object, so it holds across Worker instances). There is no CAPTCHA, and many different addresses can still create accounts, so add Cloudflare rate-limiting/WAF rules before a public launch.
 
 ## Troubleshooting
 
@@ -143,9 +150,9 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 
 | Model | Use | Status |
 |---|---|---|
-| Muse Spark | Rewords the facts the pattern engine found, and answers general questions. Output is checked for medical advice. | Integrated; needs your key |
-| Muse Voice Transcribe | Speech understanding | Planned |
-| SAM 3.1 | Checks a photo of a tablet | Planned |
+| Muse Spark (Open) | Rewords the facts the pattern engine found; reads photos of paper reports and counts tablets in a pack photo (vision); translates Orbit's sentences. Output is checked for medical advice. Free-text chat only if `ASSISTANT_CHAT=on`. | Integrated; needs your key; live model not verified here |
+| Muse Voice Transcribe | Speech understanding (today the app uses the browser's own speech recognition) | Planned, not used |
+| SAM 3.1 | Segment tablets in a photo | Planned, not used (tablet counting uses Muse Spark vision) |
 
 ## What was built when (hackathon disclosure)
 
@@ -165,5 +172,5 @@ MIT. See `LICENSE`.
 
 ## Android app (TWA)
 1. Open pwabuilder.com, enter the live URL, choose Android. Install the signed **.apk** from the download (not the .aab, which only Google Play can use). Remove any older Orbit-X install first.
-2. PWABuilder shows a package name and a SHA-256 fingerprint. In the Cloudflare dashboard, Workers, orbit-x, Settings, Variables, add `TWA_PACKAGE` and `TWA_SHA256` (several fingerprints may be separated by commas) and deploy. `/.well-known/assetlinks.json` is then served automatically and the address bar disappears.
+2. PWABuilder shows a package name and a SHA-256 fingerprint. In the Cloudflare dashboard, Workers, orbit-x, Settings, Variables, add `TWA_PACKAGE` and `TWA_SHA256` (several fingerprints may be separated by commas) and deploy. `/.well-known/assetlinks.json` is then served automatically and the address bar disappears. Until both are set the Worker returns 404 for that file, and the Android link is not active (the web app and PWA install are unaffected). The fingerprint must be a full 32-byte SHA-256 (`AB:CD:...`).
 3. Moving to a custom domain later means building the Android app again for that domain.
