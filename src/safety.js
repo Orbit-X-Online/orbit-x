@@ -22,6 +22,15 @@ const EMERGENCY = [
   /\b(dolor de pecho|no puedo respirar|me desmay\w*)\b/i, /\b(douleur (dans|à|a) la poitrine|n'arrive pas à respirer|je n'arrive pas a respirer)\b/i,
   /\b(ciwon kirji|ba zan iya numfashi)\b/i, /\b(dor no peito|n[aã]o consigo respirar)\b/i, /(ألم في الصدر|لا أستطيع التنفس)/,
 ];
+// Matched on text with accents removed (see fold): Nigerian Pidgin, Yoruba, Igbo, Hausa, Swahili, French variants. Partial on purpose; a miss falls through to the model, whose reply is guarded.
+const EMERGENCY_FOLDED = [
+  /\b(chest (dey|don|dey be) (pain|hurt)\w*|my chest dey pain|i no fit breathe|no fit breathe|(i|he|she|e|dem) don (faint|collapse)|body no dey (respond|move))\b/,
+  /\b(irora aya|aya mi n? ?(dun|ro|so)|mi o le mi|ko le mi|mo daku|o daku|won daku)\b/,
+  /\b(obi (m )?na[- ]?egbu (m|ya)|enweghi m ike iku ume|adighi m enwe ike iku ume|aguru m ume)\b/,
+  /\b(ba (na|zan) iya numfashi|numfashi na yi wuya|na suma|ya suma|ta suma)\b/,
+  /\b(maumivu ya kifua|siwezi kupumua|nimezimia|amezimia)\b/,
+  /\bn.?arrive pas a respirer\b|\bdouleur (dans|a) la poitrine\b|\bj.?ai perdu connaissance\b/,
+];
 const SELFHARM = [
   /\b(kill(ing)? myself|end(ing)? (my|this) life|take my (own )?life|suicid\w*|want(ed)? to die|wish i (was|were) dead|self[- ]?harm\w*|hurt(ing)? myself|harm myself|don'?t want to (live|be alive)|better off dead|no reason to live)\b/i,
   /\b(quiero morir|me quiero matar|suicidarme|me suicider|je veux mourir|quero morrer|أريد أن أموت)\b/i,
@@ -41,13 +50,14 @@ const ADVICE = [
 
 const test = (list, t) => list.some((r) => r.test(t));
 const norm = (s) => String(s || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+const fold = (s) => norm(s).toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
 
 // Returns null when the text may go on, or { type, reply } with a fixed answer. Order matters: danger first.
 export function preCheck(text) {
   const t = norm(text);
   if (!t) return null;
   if (test(SELFHARM, t)) return { type: 'selfharm', reply: SELFHARM_REPLY };
-  if (test(EMERGENCY, t)) return { type: 'emergency', reply: EMERGENCY_REPLY };
+  if (test(EMERGENCY, t) || test(EMERGENCY_FOLDED, fold(t))) return { type: 'emergency', reply: EMERGENCY_REPLY };
   if (test(ADVICE, t)) return { type: 'advice', reply: ADVICE_REPLY };
   return null;
 }
@@ -56,7 +66,7 @@ export function preCheck(text) {
 const MED_NAME = /\b(ibuprofen|paracetamol|acetaminophen|tylenol|panadol|aspirin|metformin|insulin|warfarin|digoxin|furosemide|hydrochlorothiazide|diazepam|tramadol|codeine|morphine|antibiotics?|painkillers?|pain ?relie\w+|sedatives?|steroids?|supplements?|herbal|over[- ]the[- ]counter|\w+(pril|sartan|olol|dipine|statin|formin|azepam|cillin|mycin))\b/i;
 const OUTPUT_RULES = [
   /\b(diagnos\w*|prognos\w*|prescri\w*|cure[sd]?|treat(ment|ments|ing|ed)?|therap(y|ies)|remed(y|ies))\b/i,
-  /\bdos(e|es|age|ing)\b|\b\d+(\.\d+)?\s?(mg|mcg|µg|ml|g|iu|units?)\b|\b(once|twice|three times) (a|per|every) (day|daily|week)\b/i,
+  /\bdos(e|es|age|ing)\b|\b\d+(\.\d+)?\s?(mg|mcg|µg|ml|g|iu|units?)\b(?!\s?\/\s?(dl|l|ml|min|24 ?h|g|kg|m2|mmol)\b)|\b(once|twice|three times) (a|per|every) (day|daily|week)\b/i,
   /\byou (have|probably have|likely have|might have|may have|could have|are suffering|suffer|seem to have|appear to have)\b/i,
   /\b(you|they|he|she) (should|must|need to|ought to|have to|had better|can try|could try|might want to|may want to)\b/i,
   /\b(i|we) (recommend|suggest|advise|urge|would)\b|\b(it is|it's) (best|better|safe|fine|ok|okay|important) (to|for you to)\b|\b(i|we) (think|believe) (you|it)\b/i,
