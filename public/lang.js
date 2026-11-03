@@ -37,7 +37,7 @@ window.OXLang = (function () {
   function valid(name) { return /^[\p{L}\p{M}][\p{L}\p{M} ()'.\-]{1,39}$/u.test(String(name || '').trim()); }
 
   /* ---- translation engine ---- */
-  var MEM = {}, BAD = {}, waiters = {}, queue = [], QT = {}, OUT = {}, timer = null, flushing = false, noticed = false, failUntil = 0;
+  var MEM = {}, BAD = {}, waiters = {}, queue = [], QT = {}, OUT = {}, timer = null, inflight = 0, noticed = false, failUntil = 0;
   function hsh(t) { var h = 5381; for (var i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
   function ckey(lang, tpl) { return 'oxtr:' + hsh(lang) + ':' + hsh(tpl) + ':' + tpl.length; }
   function tokenise(text) { var toks = [], tpl = text.replace(/\d+(?:[.,:\/]\d+)*/g, function (m) { toks.push(m); return '[#' + (toks.length - 1) + ']'; }); return { tpl: tpl, toks: toks }; }
@@ -65,19 +65,20 @@ window.OXLang = (function () {
   }
   function drop(k) { var ws = waiters[k] || []; delete waiters[k]; delete QT[k]; ws.forEach(function (f) { try { f(null); } catch (e) {} }); }
   function flush() {
-    if (flushing) { timer = setTimeout(flush, 200); return; }
+    if (inflight >= 3) { timer = setTimeout(flush, 150); return; } /* up to 3 small batches at once: the screen fills in faster */
     var lang = get(); if (!lang || !queue.length) { note(''); return; }
     var keys = [], tpls = [], size = 0;
-    while (queue.length && keys.length < 24 && size < 4500) { var k = queue.shift(); keys.push(k); tpls.push(QT[k]); size += QT[k].length; delete QT[k]; }
-    flushing = true; note('Translating into ' + lang + '...');
+    while (queue.length && keys.length < 12 && size < 2400) { var k = queue.shift(); keys.push(k); tpls.push(QT[k]); size += QT[k].length; delete QT[k]; }
+    inflight++; note('Translating into ' + lang + '...');
+    if (queue.length) setTimeout(flush, 0);
     var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null, to = setTimeout(function () { try { ctl && ctl.abort(); } catch (e) {} }, 50000);
     fetch('/api/xlate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lang: lang, items: tpls }), signal: ctl ? ctl.signal : undefined, cache: 'no-store' })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j._s = r.status; return j; }); })
       .catch(function () { return { _s: 0 }; })
       .then(function (j) {
-        clearTimeout(to); flushing = false;
+        clearTimeout(to); inflight--;
         var items = j && j.ok && Array.isArray(j.items) ? j.items : null;
-        if (items) { keys.forEach(function (k, i) { done(k, typeof items[i] === 'string' && items[i] ? items[i] : null); }); if (queue.length) flush(); else note(''); return; }
+        if (items) { keys.forEach(function (k, i) { done(k, typeof items[i] === 'string' && items[i] ? items[i] : null); }); if (queue.length) flush(); else if (!inflight) note(''); return; }
         /* the server could not translate: stop asking for a minute, keep the English, say so once */
         failUntil = Date.now() + (j._s === 429 ? 120000 : 60000); keys.forEach(drop); queue.splice(0).forEach(drop);
         if (!noticed) { noticed = true; note(j._s === 503 ? 'Translation is not switched on for this app yet. Showing English.' : j._s === 429 ? 'Translating too often. Showing English for now.' : 'Could not translate just now. Showing English.'); setTimeout(function () { note(''); }, 6000); } else note('');
