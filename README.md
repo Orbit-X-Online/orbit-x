@@ -2,7 +2,7 @@
 
 **Orbit-X is a health-information intelligence and interoperability platform.** It helps a person keep their own health information in one place, understand it with evidence-linked explanations, exchange it using a limited FHIR R4 subset, and (optionally) have family or caregivers alerted if they need help.
 
-Orbit-X **does not give medical advice and is not a medical device.** Plain code finds patterns in the person's own logged data; the AI only rewords facts, and its output is checked so it cannot suggest medicine, doses or diagnoses. Emergencies are decided by fixed code, never by an AI. Built for the Meta Global AI Developer Hackathon (Startups track). Use **synthetic (pretend) data only**.
+Orbit-X **does not give medical advice and is not a medical device.** Plain code finds patterns in the person's own logged data; the AI only rewords facts, and its output is checked so it cannot suggest medicine, doses or diagnoses. Emergencies are decided by fixed code, never by an AI. Built solo for the Meta Global AI Developer Hackathon (Startups track, theme: Build for Your World). Use **synthetic (pretend) data only**.
 
 **Prototype with synthetic data. Next steps: stricter CSP, sign-up CAPTCHA, an external security review.** See "Security: what is in place, and what is not" below.
 
@@ -26,12 +26,12 @@ Orbit-X **does not give medical advice and is not a medical device.** Plain code
 | Accounts, caregiver invites (invited / joined / expired), household isolation | Implemented, automated-tested |
 | Server-side reminder scheduling with Durable Object alarms (works with the page closed) | Implemented, tested against a fake store. **Not yet verified on live Cloudflare.** |
 | Daylight-saving-aware local reminder times (uses the phone's IANA zone name) | Implemented, tested (US DST change) |
-| Web Push request + result tracking (accepted / rejected / expired / throttled / service error / network error) | Implemented, tested with a fake push service. **Not yet verified against real Google/Mozilla/Apple push services.** |
+| Web Push request + result tracking (accepted / rejected / expired / throttled / service error / network error) | Implemented, tested with a fake push service. **Confirmed by the author:** a real push alert arrived on a real phone (checked by hand, not by the automated tests, which use a fake push service). Mozilla and Apple push services are not verified. |
 | "Shown on the phone" confirmation | Implemented: the phone's service worker reports back after displaying. **Not yet verified on a real device.** |
 | Emergency alert chain with server-side escalation | Implemented, tested (fake store) |
-| SMS / phone calls from the server | **Implemented, needs a provider account:** SMS through Twilio or Africa's Talking, voice calls through Twilio (set the secrets below). Without them the alert log says "SMS not set up" and the app falls back to Call/Text buttons that use the person's own SIM. **Not verified against a live provider.** |
+| SMS / phone calls from the server | **Implemented, needs a provider account:** SMS through Twilio or Africa's Talking, voice calls through Twilio (set the secrets below). Without them the alert log says "SMS not set up" and the app falls back to Call/Text buttons that use the person's own SIM. **Confirmed by the author:** a real SMS arrived on a real phone (checked by hand; the automated tests use a fake provider). Voice calls are not verified live. |
 | Health Workspace, evidence graph, pattern engine | Implemented. Documents can be pasted/typed text or a photo of a paper report (read by Muse Spark Open's vision, or on the phone with Tesseract OCR as fallback). The person checks the text before analysis. |
-| AI wording (Muse Spark Open via Baseten / Meta Model API) | Implemented; needs your key. Without a key: clear "not configured" message and a labelled rule-based mode. Free-text chat stays **off** unless `ASSISTANT_CHAT` is exactly `on`. Live model **not verified** in this repo's tests (mocked). |
+| AI wording (Muse Spark Open via Baseten / Meta Model API) | Implemented; needs your key. Without a key: clear "not configured" message and a labelled rule-based mode. Free-text chat stays **off** unless `ASSISTANT_CHAT` is exactly `on`. **Confirmed working live by the author:** reading a photo of a medicine pack to show tablets left, explaining uploaded documents, and switching language (language switching is sometimes slow). The automated tests use a mock model. |
 | FHIR | **Limited R4 subset**, not full interoperability. Supported resources: Patient, Organization, Practitioner, Encounter, Observation, Condition, MedicationRequest, AllergyIntolerance, DiagnosticReport, DocumentReference, Provenance, Consent, AuditEvent. Structural validation only (not a full conformance validator). |
 | Hospital/EMR connections, emergency handoff delivery | **Simulated** and labelled so. |
 | WhatsApp webhook | Parked stub (verification handshake only). |
@@ -143,6 +143,14 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 
 Use synthetic (pretend) data only until these are addressed.
 
+## Where it stands, and what is next
+
+**Working today** (confirmed by the author on a real phone, by hand; `VERIFICATION-REPORT.md` covers only the automated runs): real push alerts, a real SMS to a caregiver, reading a photo of a medicine pack to show tablets left, explaining uploaded documents, and switching language (sometimes slow).
+
+**Engineering evidence:** deployed on Cloudflare Workers with Durable Objects; 175+ automated checks across six test files (smoke, household, notifications/security, end-to-end, static front-end, safety); a syntax check and a headless-browser smoke test; rate limits; and an AI safety filter that is tested.
+
+**Next steps:** a stricter content-security policy (move inline scripts out of the pages), a sign-up CAPTCHA, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
+
 ## Known platform limitations
 
 - A phone that is off or has no connection cannot show a notification at that moment. The push service holds a reminder for up to 1 hour (tablet reminder) or 2 hours (caregiver heads-up) and an emergency push for 2 minutes, then discards it.
@@ -168,7 +176,7 @@ Use synthetic (pretend) data only until these are addressed.
 
 | Model | Use | Status |
 |---|---|---|
-| Muse Spark (Open) | Rewords the facts the pattern engine found; reads photos of paper reports and counts tablets in a pack photo (vision); translates Orbit's sentences. Output is checked for medical advice. Free-text chat only if `ASSISTANT_CHAT=on`. | Integrated; needs your key; live model not verified here |
+| Muse Spark (Open) | Rewords the facts the pattern engine found; reads photos of paper reports and counts tablets in a pack photo (vision); translates Orbit's sentences. Output is checked for medical advice. Free-text chat only if `ASSISTANT_CHAT=on`. | Integrated; needs your key; confirmed working live by the author (not by the automated tests) |
 | Muse Voice Transcribe | Speech understanding (today the app uses the browser's own speech recognition) | Planned, not used |
 | SAM 3.1 | Segment tablets in a photo | Planned, not used (tablet counting uses Muse Spark vision) |
 
