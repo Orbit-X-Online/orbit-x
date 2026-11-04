@@ -300,7 +300,7 @@ function welcome(msg){
   '<button class="btn green" id="rst2" style="margin-top:10px">I already have an account: sign in with my recovery key</button>' +
   (accList().length ? '<button class="btn ghost" id="swb">Switch to an account saved on this phone</button>' : '') +
   '<div class="center" style="margin-top:12px"><a class="link" href="/guide.html" style="text-decoration:none">How Orbit-X works, in simple words</a> <button class="link" id="rst">Restore my account</button></div>' +
-  '<div class="small center" style="margin-top:10px">Built with Muse Spark Open. Orbit-X is not a medical device.</div>';
+  '<div class="small center" style="margin-top:10px">Built with Muse Spark Open. Orbit-X is not a medical device. By continuing you agree to the <a class=\"link\" href=\"/privacy.html\" style=\"text-decoration:underline\">privacy and consent notice</a>.</div>';
   bindLangPicker('wl'); $('go').onclick = onboard; $('pro').onclick = onboardPro; $('cgv').onclick = function(){ codeScreen('join'); }; $('rst').onclick = $('rst2').onclick = function(){ codeScreen('restore'); }; if ($('swb')) $('swb').onclick = showSwitch;
 }
 /* ---------- tablets per time: a small stepper used when setting times and when logging a dose ---------- */
@@ -323,18 +323,33 @@ function keyScreen(next){
   $('ks').onchange = function(){ $('kn').disabled = !$('ks').checked; };
   $('kn').onclick = $('kx').onclick = next;
 }
+/* ---------- optional sign-up CAPTCHA (Cloudflare Turnstile); does nothing unless the server turns it on ---------- */
+var CAP = { on: null, token: '', id: null };
+function capLoad(){
+  CAP.on = null; CAP.token = ''; CAP.id = null; var box = $('cap'); if (!box) { CAP.on = false; return; }
+  fetch('/api/captcha', { cache: 'no-store' }).then(function(r){ return r.json(); }).then(function(j){
+    if (!j || !j.on || !j.sitekey) { CAP.on = false; return; }
+    CAP.on = true;
+    box.innerHTML = '<div class="small" style="margin-top:10px">Quick check that you are a person:</div><div id="capw" style="margin-top:6px"></div>';
+    var go = function(){ try { CAP.id = turnstile.render('#capw', { sitekey: j.sitekey, theme: 'dark', callback: function(t){ CAP.token = t; }, 'expired-callback': function(){ CAP.token = ''; }, 'error-callback': function(){ CAP.token = ''; } }); } catch (e) { if ($('er')) $('er').textContent = 'The security check could not start. Please reload and try again.'; } };
+    if (window.turnstile) go(); else { var sc = document.createElement('script'); sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; sc.async = true; sc.onload = go; sc.onerror = function(){ if ($('er')) $('er').textContent = 'The security check could not load. Check your internet and try again.'; }; document.head.appendChild(sc); }
+  }).catch(function(){ CAP.on = false; });
+}
+function capGate(){ if (CAP.on === null) { $('er').textContent = 'One moment, getting ready...'; return false; } if (CAP.on && !CAP.token) { $('er').textContent = 'Please complete the quick check above.'; return false; } return true; }
+function createErr(j){ CAP.token = ''; try { if (window.turnstile && CAP.id !== null) turnstile.reset(CAP.id); } catch (e) {} return j._status === 0 ? 'No internet connection. Please try again.' : j.error === 'captcha_failed' ? 'The check did not pass. Please try again.' : j.error === 'captcha_unavailable' ? 'The security check is unavailable. Please try again in a minute.' : 'Something went wrong. Please try again.'; }
 function onboard(){
   app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><div class="stage" style="height:170px;margin-bottom:0">' + faceSvg() + '</div><h2 style="font-weight:500;font-size:20px;margin:6px 0 0;text-align:center">One quick thing</h2>' +
   '<label class="l" for="nm">What should I call you?</label><input class="field" id="nm" maxlength="40" autocomplete="given-name" placeholder="Your name" enterkeyhint="go">' +
   '<div class="small" style="margin-top:12px">Next you will see your blood pressure screen, and I will show you around in under a minute. Your readings stay private to you and the family you invite. Orbit-X is not a doctor and does not give medical advice. If you feel very unwell, call 112.</div>' +
-  '<div class="err" id="er"></div><button class="btn" id="st">Start</button>';
-  $('bk').onclick = function(){ welcome(); };
+  '<div id="cap"></div><div class="err" id="er"></div><button class="btn" id="st">Start</button>';
+  $('bk').onclick = function(){ welcome(); }; capLoad();
   $('nm').onkeydown = function(e){ if (e.key === 'Enter') $('st').click(); };
   $('st').onclick = function(){
     var name = $('nm').value.trim(); if (!name) { $('er').textContent = 'Please tell me your name.'; return; }
+    if (!capGate()) return;
     $('st').disabled = true; $('er').textContent = '';
-    api('POST', '/api/create', { name: name, slots: [], doseQty: {}, phone: '', today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'individual' }).then(function(j){
-      if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
+    api('POST', '/api/create', { name: name, slots: [], doseQty: {}, phone: '', today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'individual', captcha: CAP.on ? CAP.token : undefined }).then(function(j){
+      if (!j.ok) { $('st').disabled = false; $('er').textContent = createErr(j); return; }
       sess = { role: 'patient', pid: j.pid, token: j.token, firstRun: true, accountType: 'individual' }; saveSession(sess); keyScreen(function(){ location.href = '/?guardian=1'; });
     });
   };
@@ -344,13 +359,14 @@ function onboardPro(){
   '<div class="small" style="margin-top:6px">This gives you the Developer area: API keys, record import and emergency handoff. It is separate from the personal app. Use synthetic (pretend) data only while Orbit-X is a hackathon project.</div>' +
   '<label class="l" for="nm">Your name</label><input class="field" id="nm" maxlength="40" autocomplete="name" placeholder="Dr Ade">' +
   '<label class="l" for="og">Clinic or organisation</label><input class="field" id="og" maxlength="60" placeholder="City Clinic">' +
-  '<div class="err" id="er"></div><button class="btn" id="st">Create organisation account</button><div class="center"><a class="link" href="/docs.html" style="text-decoration:none">Read the API docs first</a></div>';
-  $('bk').onclick = function(){ welcome(); };
+  '<div id="cap"></div><div class="err" id="er"></div><button class="btn" id="st">Create organisation account</button><div class="center"><a class="link" href="/docs.html" style="text-decoration:none">Read the API docs first</a></div>';
+  $('bk').onclick = function(){ welcome(); }; capLoad();
   $('st').onclick = function(){
     var name = $('nm').value.trim(), og = $('og').value.trim(); if (!name || !og) { $('er').textContent = 'Please fill in both boxes.'; return; }
+    if (!capGate()) return;
     $('st').disabled = true; $('er').textContent = '';
-    api('POST', '/api/create', { name: name, org: og, slots: [], today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'provider' }).then(function(j){
-      if (!j.ok) { $('st').disabled = false; $('er').textContent = j._status === 0 ? 'No internet connection. Please try again.' : 'Something went wrong. Please try again.'; return; }
+    api('POST', '/api/create', { name: name, org: og, slots: [], today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'provider', captcha: CAP.on ? CAP.token : undefined }).then(function(j){
+      if (!j.ok) { $('st').disabled = false; $('er').textContent = createErr(j); return; }
       sess = { role: 'patient', pid: j.pid, token: j.token, name: name, accountType: 'provider' }; saveSession(sess); keyScreen(function(){ location.href = '/developer.html'; });
     });
   };
@@ -1153,7 +1169,7 @@ function showSettings(){
     '<label class="l" for="sl" data-notr>Language / Langue / Ede / Harshe</label><select class="field" id="sl" data-notr>' + OXLang.options() + '</select><input class="field" id="slo" maxlength="40" placeholder="Type any language" style="display:none;margin-top:6px" data-notr><div class="small" style="margin-top:4px">The whole app, your records and Orbit\'s voice change to this language the moment you pick it. Numbers never change. Medical text from your documents stays as written.</div>' +
     '<label class="check"><input type="checkbox" id="ta"' + (st.profile.tabletAlerts ? ' checked' : '') + '> Tell my caregivers if I have not logged a tablet</label><div class="small" style="margin-top:4px">I remind you first. If you still have not logged it a few hours later, your caregivers get a gentle heads-up. They are not rung.</div>' +
     '<button class="btn" id="sv">Save</button>' +
-    '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
+    '<label class="l">Phone alerts on this phone</label><div class="small">Lets Orbit-X remind you about tablets and tell you if nobody answered, even when this page is closed.</div><div class="small" style="margin-top:4px">On Android: allow Orbit-X notifications, turn Do Not Disturb off, and set Chrome battery usage to Unrestricted so alerts are not delayed.</div><div class="err" id="ale"></div><button class="btn ghost" id="alb">' + (st.profile.alertsOn ? 'Phone alerts are ON. Send a test' : 'Turn on phone alerts') + '</button>' +
     '<label class="l">Recovery key</label><div class="small">If you lose this phone, this key restores your account on a new one. Keep it private.</div><button class="btn ghost" id="rk">Show my recovery key</button><div class="code" id="rkv" style="display:none;font-size:13px"></div>' +
     '<label class="l">Fall guard</label><div class="small">If your phone falls and then lies still, Orbit asks "Did you fall?" If you do not answer in 15 seconds, your family is alerted. Works while Orbit-X is open on this phone with the screen on.</div><label class="check"><input type="checkbox" id="fg"' + (fallOn() ? ' checked' : '') + '> Turn on fall guard</label><div class="err" id="fge"></div><button class="btn ghost" id="fgt">Test it now</button>' +
     '<label class="l">No internet? Orbit-X keeps working</label><div class="small">Readings and tablets are saved on this phone and sent when signal returns. If you press help with no internet, I save the alert, show Call 112 and text buttons (with your location), and send the alert automatically the moment signal is back.</div>' +
@@ -1162,7 +1178,7 @@ function showSettings(){
     '<label class="l">Bluetooth blood-pressure cuff</label><div class="small">Pair a cuff that uses the standard Bluetooth blood-pressure service (Chrome on Android). Each reading comes straight in, works with no internet, and you confirm it before it is saved.</div><div class="err" id="bte"></div><button class="btn ghost" id="btc">Connect a cuff</button><button class="btn ghost" id="btx" style="display:none">Disconnect cuff</button><div class="small" id="btm"></div>' +
     '<label class="l">Alert rules your care team wrote</label>' + (st.rules.length ? st.rules.map(function(r){ return '<div class="cg"><b>' + esc(r.name) + '</b><div class="small">' + esc(r.readback) + '</div><div class="small">Written by ' + esc(r.author) + '</div></div>'; }).join('') : '<div class="small">None yet. Add a doctor in Family and they can write rules in plain words.</div>') +
     (sess.accountType === 'individual' ? '<label class="l">Doctors and clinics</label><div class="small">Connecting hospital software is only for doctor and organisation accounts. Your personal account keeps things simple and private.</div>' : '<label class="l">Connect another app (Orbit API)</label><div class="small">Give a key to a clinic app, a fall sensor or a smart watch. When it sends a signal, the same alert chain runs.</div><div id="kl">' + (st.apiKeys || []).map(function(k){ return '<div class="cg"><b>' + esc(k.label) + '</b><div class="acts"><button data-kd="' + esc(k.id) + '">Delete key</button></div></div>'; }).join('') + '</div><button class="btn ghost" id="kn">Create a key</button><div class="code" id="kv" style="display:none;font-size:12px;word-break:break-all"></div>') +
-    '<div style="height:10px"></div><button class="btn ghost" id="sw">Switch account (caregiver or my own)</button><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
+    '<div class="small center" style="margin-top:10px"><a class="link" href="/guide.html" style="text-decoration:underline">Help: read the 1-minute guide</a> &middot; <a class="link" href="/privacy.html" style="text-decoration:underline">Privacy and consent</a></div><div style="height:10px"></div><button class="btn ghost" id="sw">Switch account (caregiver or my own)</button><button class="btn ghost" id="so">Sign out on this phone</button><button class="btn ghost" id="dl" style="color:#fca5a5">Delete my account and data</button><button class="btn ghost" id="sb">Close</button>';
   o.classList.add('on'); $('sb').onclick = function(){ o.classList.remove('on'); };
   bindQty(o);
   bindLangSelect($('sl'), $('slo')); if ($('sl').value === '__o') { $('slo').style.display = ''; $('slo').value = langName(); }
@@ -1210,7 +1226,7 @@ function keepAwake(){ try { if (navigator.wakeLock) navigator.wakeLock.request('
 document.addEventListener('visibilitychange', function(){ if (!document.hidden && armed) keepAwake(); if (!document.hidden) qFlush(); if (!document.hidden && sess && sess.pid && sess.role === 'patient' && document.getElementById('c2')) { hApi('state').then(function(j){ if (take(j)) { refreshCards(); renderEmergency(); } }); } });
 function caregiverApp(){
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + ' <button class="link" id="swc">Switch</button></span></div><div id="cgv" style="position:relative;flex:1"></div>' + langPicker('cl') + '<audio id="rtcaudio" autoplay playsinline></audio>';
+  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + ' <button class="link" id="swc">Switch</button> <a class="link" href="/guide.html#caregiver" style="text-decoration:none;margin-left:8px">Help</a></span></div><div id="cgv" style="position:relative;flex:1"></div>' + langPicker('cl') + '<audio id="rtcaudio" autoplay playsinline></audio>';
   bindLangPicker('cl'); $('swc').onclick = showSwitch; cgRender(); cgPoll(); quietResync();
 }
 function cgPoll(){

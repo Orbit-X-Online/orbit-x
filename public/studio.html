@@ -52,7 +52,7 @@ var flash = '';
 var EX = ['Alert me if systolic is above 160 twice in 3 days', 'Monitor for headaches and blurred vision', 'Ring the family if diastolic is above 120', 'Tell me if she reports dizziness and nausea'];
 function view(){
   var rd = st.readings.slice(-6).reverse(), sy = st.symptoms.slice(-6).reverse();
-  app.innerHTML = '<div class="top"><div><div class="small">ORBIT-X RULE STUDIO</div><h1>' + esc(st.profile.name) + '</h1></div><button class="g" id="so">Sign out</button></div>' +
+  app.innerHTML = '<div class="top"><div><div class="small">ORBIT-X RULE STUDIO</div><h1>' + esc(st.profile.name) + '</h1></div><button class="g" id="so">Sign out</button></div><div class="small" style="margin:6px 0 0"><a style="color:#38BDF8" href="/guide.html#clinic">Help: how Rule Studio works</a></div>' +
     '<div class="small">You are ' + esc(st.me && st.me.name) + '. Write when the patient\'s family or you should be alerted. Orbit-X turns your words into a fixed rule and shows it back in plain English before it runs. The AI never decides an emergency.</div>' +
     (flash ? '<div class="card" style="border-color:#4ADE80">' + esc(flash) + '</div>' : '') +
     '<h2>New rule</h2><textarea id="tx" maxlength="400" placeholder="Write it like you would tell a nurse..."></textarea><div class="chips">' + EX.map(function(x, i){ return '<button data-ex="' + i + '">' + esc(x) + '</button>'; }).join('') + '</div>' +
