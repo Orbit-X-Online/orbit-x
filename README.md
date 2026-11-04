@@ -98,7 +98,7 @@ Durable Object configuration (already in `wrangler.toml`; do not rename the clas
 [[migrations]]                tag = "v1", new_sqlite_classes = ["AlertHub"]
 ```
 
-Static files are served from `public/` (`run_worker_first` sends only `/api/*` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy. The CSP allows no third-party hosts. Scripts must be files under `public/` (`/js/*.js` for page code); inline scripts are blocked.
+Static files are served from `public/` (`run_worker_first` sends `/api/*` and `/.well-known/assetlinks.json` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy. The CSP allows no third-party hosts. `script-src` currently allows inline scripts (`'unsafe-inline'`) because each page keeps its code inline in its HTML file. Moving that code into files under `public/js/` and removing the allowance is a planned hardening step (a policy that blocks inline scripts while the pages still contain them shows a blank page).
 
 ## Turn on phone alerts on Android
 
@@ -112,7 +112,7 @@ Static files are served from `public/` (`run_worker_first` sends only `/api/*` t
 1. Make sure step 3 above confirmed on this phone.
 2. Choose a tablet time (e.g. Morning = 08:00 local) and do **not** log the tablet.
 3. Close the Orbit-X tab and swipe Chrome away. Leave the phone on with internet.
-4. At the reminder time (08:00 morning, 13:00 afternoon, 18:00 evening, 21:00 night) a notification appears. If you set up a caregiver phone, it gets a "tablet not logged" heads-up 3 hours later (11:00, 16:00, 21:00, 23:00).
+4. At the reminder time (08:00 morning, 13:00 afternoon, 18:00 evening, 21:00 night) a notification appears. If you set up a caregiver phone, it gets a "tablet not logged" heads-up about 3 hours later (11:00, 16:00, 21:00), or 2 hours later for the night tablet (23:00).
 5. Reminders only start for times **after** the account is created.
 
 ## How to read the push diagnostics
@@ -133,11 +133,11 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 **In place (tested with fakes, not a formal audit):**
 - Tokens are stored hashed on the server; invite codes are single-use and expire; wrong invite codes are rate-limited (10 per 10 minutes).
 - Account creation, translation and sign-in attempts are rate-limited; caregivers cannot do patient-only actions; inputs are validated; CORS uses an allowlist.
-- Security headers: `Strict-Transport-Security`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and a Content-Security-Policy (no inline scripts, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`).
+- Security headers: `Strict-Transport-Security`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and a Content-Security-Policy (`object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`).
 - Model output goes through a safety filter; emergency decisions are made by fixed code, not by the model. A test scans front-end files for secret-looking strings.
 
 **Not in place (known, and why):**
-- Styles still allow inline `style` attributes (`style-src 'unsafe-inline'`). Scripts no longer do: all page code is in `/js/*.js` and `script-src` has no `'unsafe-inline'`. The app keeps its session token in the browser's storage, so a script-injection bug would still be serious.
+- Scripts and styles both still allow inline code (`script-src` and `style-src` include `'unsafe-inline'`), because page code is inline in each HTML file. The policy therefore limits what can load, but would not stop an injected inline script. The app keeps its session token in the browser's storage, so a script-injection bug would still be serious.
 - No CAPTCHA (for example Cloudflare Turnstile) on sign-up, and no password: the recovery key is the only way back in. Account creation is capped per IP address only.
 - Health text and photos are sent to the AI provider, and phone numbers and message text to the SMS provider, when those features are used. No independent security review, penetration test or compliance assessment (HIPAA, GDPR) has been done. No dependency lockfile is committed yet.
 
@@ -149,7 +149,7 @@ Use synthetic (pretend) data only until these are addressed.
 
 **Engineering evidence:** deployed on Cloudflare Workers with Durable Objects; 175+ automated checks across six test files (smoke, household, notifications/security, end-to-end, static front-end, safety); a syntax check and a headless-browser smoke test; rate limits; and an AI safety filter that is tested.
 
-**Next steps:** a stricter content-security policy for styles, a sign-up CAPTCHA, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
+**Next steps:** a stricter content-security policy for scripts and styles (move page code into files under `public/js/`), a sign-up CAPTCHA, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
 
 ## Known platform limitations
 

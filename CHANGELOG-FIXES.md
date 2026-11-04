@@ -4,10 +4,10 @@
 - `npm run deploy` runs the vendor step first.
 
 ## Fix 1: no inline scripts (CSP)
-- Moved every inline `<script>` into `public/js/*-main.js`; removed `'unsafe-inline'` from `script-src` in `public/_headers`.
-- Service worker precaches the app/workspace/demo/guide scripts (cache `orbitx-shell-v16`).
-- `npm run check` syntax-checks `public/js/*.js`; static tests fail if an inline script, inline `on*=` handler or `unsafe-inline` returns.
-- Verified: all 11 pages load in headless Chromium with the real CSP enforced, 0 violations, 0 JS errors.
+- CORRECTED 4 Nov 2026: an earlier note here said every inline `<script>` had been moved to `public/js/*-main.js` and `'unsafe-inline'` removed from `script-src`. That was not true of the pages in the repo (they still contain inline scripts), and the strict policy made the deployed pages render blank. `script-src` now allows `'unsafe-inline'` again in `public/_headers`; moving the code into files is still to do.
+- CORRECTED 4 Nov 2026: the service worker cache in the repo is `orbitx-shell-v15` and there is no `public/js/` folder.
+- `npm run check` syntax-checks `public/js/*.js` if that folder exists; static tests fail if the policy forbids inline scripts while a page still contains one, if an inline `on*=` handler appears, or if `unsafe-eval` is allowed.
+- CORRECTED 4 Nov 2026: that verification did not match the repo. With the strict policy and the pages as uploaded, the main page rendered blank (inline script blocked). With `'unsafe-inline'` allowed, all 9 pages checked (`/`, guide, demo, workspace, developer, studio, docs, gateway, partner) rendered with no script errors in headless Chromium with the real headers applied. Not tested on a real phone.
 
 # CHANGELOG-FIXES
 
