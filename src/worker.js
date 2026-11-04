@@ -1486,6 +1486,19 @@ async function limitedDurable(env, req, bucket, limit, winMs, fallback) {
   } catch (e) { console.error('rate store error:', e && e.message); }
   return fallback(req);
 }
+// Optional sign-up CAPTCHA (Cloudflare Turnstile). Off unless BOTH TURNSTILE_SITE_KEY and TURNSTILE_SECRET are set, so nothing changes until you turn it on.
+function captchaOn(env) { return Boolean(String(env.TURNSTILE_SECRET || '').trim() && String(env.TURNSTILE_SITE_KEY || '').trim()); }
+async function captchaCheck(env, req, token) { // 'ok' | 'failed' | 'unavailable'
+  if (typeof token !== 'string' || token.length < 10 || token.length > 2048) return 'failed';
+  const form = new URLSearchParams({ secret: String(env.TURNSTILE_SECRET).trim(), response: token });
+  const ip = req.headers.get('CF-Connecting-IP'); if (ip) form.set('remoteip', ip);
+  const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: form, signal: ctrl.signal });
+    const j = await r.json().catch(() => ({}));
+    return j && j.success === true ? 'ok' : 'failed';
+  } catch (e) { return 'unavailable'; } finally { clearTimeout(timer); }
+}
 const CREATE_HITS = new Map(), CREATE_LIMIT = 20, CREATE_WIN_MS = 3600000;
 // fallback only (used when the durable store is unavailable): per-instance count of new accounts per address
 function createLimited(req) {
@@ -1569,6 +1582,12 @@ async function handleHousehold(req, env, url, cors) {
   if (p === '/api/create' && req.method === 'POST') {
     { const wait = await limitedDurable(env, req, 'create', CREATE_LIMIT, CREATE_WIN_MS, createLimited); if (wait) return json({ error: 'slow_down', retryAfterSeconds: wait }, 429, { ...cors, 'Retry-After': String(wait) }); } // at most 20 new accounts per hour from one address, counted in the Durable Object so it holds across Worker instances
     let body = {}; try { body = (await req.json()) || {}; } catch { /* empty */ }
+    if (captchaOn(env)) { // human check is required only when switched on
+      const cc = await captchaCheck(env, req, body.captcha);
+      if (cc === 'failed') return json({ ok: false, error: 'captcha_failed' }, 400, cors);
+      if (cc === 'unavailable') return json({ ok: false, error: 'captcha_unavailable' }, 503, cors);
+    }
+    delete body.captcha; // never stored
     const pid = rand(8);
     body.pid = pid;
     return relay(await forward(hub(env, 'h:' + pid), '/h/create', req, JSON.stringify(body)), cors);
@@ -1706,6 +1725,7 @@ export default {
     if (url.pathname === '/api/health' && req.method === 'GET') {
       return json({ ok: true, app: 'orbit-x', time: new Date().toISOString(), metaKeyConfigured: Boolean(env.MODEL_API_KEY), aiMode: aiMode(env) }, 200, cors);
     }
+    if (url.pathname === '/api/captcha' && req.method === 'GET') { const on = captchaOn(env); return json({ ok: true, on, sitekey: on ? String(env.TURNSTILE_SITE_KEY).trim() : '' }, 200, cors); }
     if (url.pathname === '/api/xlate' && req.method === 'POST') return handleXlate(req, env, cors);
     if (url.pathname === '/api/ai/status' && req.method === 'GET') return handleAiStatus(req, env, url, cors);
     if ((url.pathname === '/api/assistant' || url.pathname === '/api/explain') && req.method === 'POST') { // public AI routes spend AI credit: limit each address
