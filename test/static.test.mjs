@@ -8,7 +8,9 @@ let n = 0; const ok = (m) => console.log('  ok ' + (++n) + ' ' + m);
 for (const f of pages) {
   const s = fs.readFileSync(path.join(dir, f), 'utf8');
   assert.match(s, /<html lang="en"/, f + ' needs lang'); assert.match(s, /<meta name="viewport"/, f + ' needs viewport'); assert.match(s, /<title>[^<]{3,}<\/title>/, f + ' needs title');
-  for (const m of s.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)) new vm.Script(m[1], { filename: f });
+  assert.ok(![...s.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].some((m) => m[1].trim()), f + ' has an inline script; move it to /js/ (CSP forbids inline scripts)');
+  assert.ok(!/\son[a-z]+\s*=\s*["']/i.test(s), f + ' has an inline event handler (CSP forbids it)');
+  for (const m of s.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)) { const t = m[1].replace(/^\//, ''); new vm.Script(fs.readFileSync(path.join(dir, t), 'utf8'), { filename: t }); }
   for (const m of s.matchAll(/(?:href|src)="(\/?[A-Za-z0-9_.\-\/]+)(?:[?#][^"]*)?"/g)) {
     const t = m[1].replace(/^\//, ''); if (!t || /^(https?:|tel:|sms:|mailto:)/.test(t)) continue;
     assert.ok(fs.existsSync(path.join(dir, t)), f + ' links to missing file ' + m[1]);
@@ -19,7 +21,18 @@ new vm.Script(fs.readFileSync(path.join(dir, 'sw.js'), 'utf8')); ok('service wor
 const sw = fs.readFileSync(path.join(dir, 'sw.js'), 'utf8');
 assert.match(sw, /addEventListener\('push'/); assert.match(sw, /showNotification/); assert.match(sw, /\/api\/push\/msg\//); assert.match(sw, /\/api\/push\/ack\//); ok('service worker handles push, fetches stored message, reports display');
 const man = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.webmanifest'), 'utf8')); assert.equal(man.scope, '/'); for (const i of man.icons) assert.ok(fs.existsSync(path.join(dir, i.src.replace(/^\//, '')))); ok('manifest valid, icons exist');
-const idx = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+// A page's behaviour now lives in its linked scripts, so content checks read the page plus its local scripts.
+const full = (f) => { const h = fs.readFileSync(path.join(dir, f), 'utf8'); return h + [...h.matchAll(/<script[^>]*\bsrc="([^"]+)"/g)].map((m) => fs.readFileSync(path.join(dir, m[1].replace(/^\//, '')), 'utf8')).join('\n'); };
+const idx = full('index.html');
+const hdr = fs.readFileSync(path.join(dir, '_headers'), 'utf8'); const scriptSrc = (hdr.match(/script-src[^;]*/) || [''])[0];
+assert.ok(scriptSrc && !/'unsafe-inline'|'unsafe-eval'/.test(scriptSrc), 'script-src must not allow unsafe-inline or unsafe-eval'); ok('CSP script-src has no unsafe-inline');
+assert.ok(!/https?:\/\//.test(hdr.match(/Content-Security-Policy:.*/)[0]), 'CSP must not allow any third-party host');
+const dr = fs.readFileSync(path.join(dir, 'docread.js'), 'utf8'); assert.ok(!/https?:\/\//.test(dr.replace(/\/\*[\s\S]*?\*\//, '')), 'docread.js must not load libraries from a CDN');
+const vend = fs.readFileSync(new URL('../scripts/vendor-libs.mjs', import.meta.url), 'utf8');
+for (const f of ['pdf.min.js', 'pdf.worker.min.js', 'mammoth.browser.min.js', 'tesseract/tesseract.min.js']) assert.ok(vend.includes("'" + f + "'"), 'vendor script must provide ' + f);
+for (const f of ['tesseract/worker.min.js', 'tesseract/lang/eng.traineddata.gz', 'tesseract/tesseract-core-simd-lstm.wasm.js']) assert.ok(vend.includes("'" + f + "'"));
+assert.match(JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts.deploy, /vendor-libs/); ok('no third-party script hosts in the CSP; PDF/Word/OCR libraries are self-hosted via npm run vendor and installed before deploy');
+const swSrc = fs.readFileSync(path.join(dir, 'sw.js'), 'utf8'); for (const f of ['index', 'workspace', 'demo', 'guide']) for (const m of fs.readFileSync(path.join(dir, f + '.html'), 'utf8').matchAll(/src="(\/js\/[^"]+)"/g)) assert.ok(swSrc.includes("'" + m[1] + "'"), m[1] + ' must be in the offline cache list'); ok('page scripts under /js are cached for offline use');
 assert.match(idx, /does not prove|Step 1 of 2/); assert.match(idx, /tzName/); ok('index page distinguishes push acceptance from device display and sends the time-zone name');
 for (const f of pages) { const s = fs.readFileSync(path.join(dir, f), 'utf8'); assert.ok(!/(sk-[A-Za-z0-9]{20,}|BEGIN (RSA |EC )?PRIVATE KEY|Bearer [A-Za-z0-9]{30,})/.test(s), f + ' looks like it contains a secret'); }
 ok('no secret-looking strings in front-end files');
@@ -29,7 +42,7 @@ for (const sc of man.screenshots || []) assert.ok(fs.existsSync(path.join(dir, s
 assert.ok(man.screenshots.length >= 2 && man.id && man.start_url && man.display === 'standalone' && man.prefer_related_applications === false); assert.ok(man.icons.some((i) => i.purpose === 'maskable' && i.sizes === '512x512') && man.icons.some((i) => i.purpose === 'any' && i.sizes === '512x512'));
 ok('manifest has the fields an Android app builder needs (id, start_url, standalone, screenshots, 512 icons incl. maskable)');
 assert.match(sw, /redirected/); ok('service worker never serves a redirected answer for a page load');
-for (const f of ['gateway.html', 'index.html']) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /Disconnect cuff/); assert.match(fs.readFileSync(path.join(dir, 'radio.js'), 'utf8'), /id="oxmu"/); ok('cuff, panic button and radio can all be disconnected');
+for (const f of ['gateway.html', 'index.html']) assert.match(full(f), /Disconnect cuff/); assert.match(fs.readFileSync(path.join(dir, 'radio.js'), 'utf8'), /id="oxmu"/); ok('cuff, panic button and radio can all be disconnected');
 assert.ok(fs.existsSync(path.join(dir, 'lang.js'))); new vm.Script(fs.readFileSync(path.join(dir, 'lang.js'), 'utf8')); assert.match(sw, /\/lang\.js/);
 for (const f of ['index.html', 'workspace.html', 'guide.html']) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /lang\.js/, f + ' must load lang.js');
 ok('whole-app translation script exists, parses, is cached offline and is loaded by the app, My records and the guide');
