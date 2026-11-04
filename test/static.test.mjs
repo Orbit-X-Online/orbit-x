@@ -29,12 +29,12 @@ const full = (f) => { const h = fs.readFileSync(path.join(dir, f), 'utf8'); retu
 const idx = full('index.html');
 const hdr = fs.readFileSync(path.join(dir, '_headers'), 'utf8'); const scriptSrc = (hdr.match(/script-src[^;]*/) || [''])[0];
 assert.ok(scriptSrc && !/'unsafe-eval'|'unsafe-inline'/.test(scriptSrc), 'script-src must not allow unsafe-eval or unsafe-inline'); ok('CSP script-src has no unsafe-inline or unsafe-eval; inline page code runs only by SHA-256 fingerprint (checked above)');
-assert.ok(!/https?:\/\//.test(hdr.match(/Content-Security-Policy:.*/)[0]), 'CSP must not allow any third-party host');
+{ const hosts = [...new Set(hdr.match(/Content-Security-Policy:.*/)[0].match(/https?:\/\/[^\s;']+/g) || [])]; assert.deepEqual(hosts, ['https://challenges.cloudflare.com'], 'the only third-party host the CSP may name is Cloudflare Turnstile (sign-up CAPTCHA)'); }
 const dr = fs.readFileSync(path.join(dir, 'docread.js'), 'utf8'); assert.ok(!/https?:\/\//.test(dr.replace(/\/\*[\s\S]*?\*\//, '')), 'docread.js must not load libraries from a CDN');
 const vend = fs.readFileSync(new URL('../scripts/vendor-libs.mjs', import.meta.url), 'utf8');
 for (const f of ['pdf.min.js', 'pdf.worker.min.js', 'mammoth.browser.min.js', 'tesseract/tesseract.min.js']) assert.ok(vend.includes("'" + f + "'"), 'vendor script must provide ' + f);
 for (const f of ['tesseract/worker.min.js', 'tesseract/lang/eng.traineddata.gz', 'tesseract/tesseract-core-simd-lstm.wasm.js']) assert.ok(vend.includes("'" + f + "'"));
-assert.match(JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts.deploy, /vendor-libs/); ok('no third-party script hosts in the CSP; PDF/Word/OCR libraries are self-hosted via npm run vendor and installed before deploy');
+assert.match(JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).scripts.deploy, /vendor-libs/); ok('only Cloudflare Turnstile is allowed as a third-party host in the CSP; PDF/Word/OCR libraries are self-hosted via npm run vendor and installed before deploy');
 const swSrc = fs.readFileSync(path.join(dir, 'sw.js'), 'utf8'); for (const f of ['index', 'workspace', 'demo', 'guide']) for (const m of fs.readFileSync(path.join(dir, f + '.html'), 'utf8').matchAll(/src="(\/js\/[^"]+)"/g)) assert.ok(swSrc.includes("'" + m[1] + "'"), m[1] + ' must be in the offline cache list'); ok('page scripts under /js are cached for offline use');
 assert.match(idx, /does not prove|Step 1 of 2/); assert.match(idx, /tzName/); ok('index page distinguishes push acceptance from device display and sends the time-zone name');
 for (const f of pages) { const s = fs.readFileSync(path.join(dir, f), 'utf8'); assert.ok(!/(sk-[A-Za-z0-9]{20,}|BEGIN (RSA |EC )?PRIVATE KEY|Bearer [A-Za-z0-9]{30,})/.test(s), f + ' looks like it contains a secret'); }
