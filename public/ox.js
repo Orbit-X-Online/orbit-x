@@ -58,12 +58,42 @@ window.OX = (function(){
 
   var BKEY = 'orbitx.session.backup';
   function today(){ var d = new Date(), p = function(n){ return ('0' + n).slice(-2); }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
+  // Sandbox sign-up is protected by the same Turnstile check as normal sign-up. Resolves '' when Turnstile is not configured, a token when solved, or null if the person cancels.
+  function sandboxToken(){
+    return api('GET', '/api/config').then(function(cfg){
+      var key = cfg && cfg.turnstileSiteKey;
+      if (!key || key === 'REPLACE_WITH_TURNSTILE_SITE_KEY') return '';
+      return new Promise(function(resolve){
+        var ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:9999;padding:16px';
+        ov.innerHTML = '<div style="background:#fff;color:#111;border-radius:14px;padding:18px;max-width:340px;width:100%;text-align:center"><p style="margin:0 0 12px;font-size:15px">Quick security check to open the demo</p><div id="ox-sbx-captcha" style="min-height:70px"></div><p id="ox-sbx-msg" style="margin:8px 0 0;font-size:13px"></p><button type="button" id="ox-sbx-cancel" style="margin-top:12px;padding:8px 16px;border-radius:8px;border:1px solid #bbb;background:#f4f4f4;font-size:14px">Cancel</button></div>';
+        document.body.appendChild(ov);
+        var done = false;
+        function finish(v){ if (done) return; done = true; clearInterval(timer); try { ov.remove(); } catch(e){} resolve(v); }
+        ov.querySelector('#ox-sbx-cancel').addEventListener('click', function(){ finish(null); });
+        function render(){
+          try { window.turnstile.render(ov.querySelector('#ox-sbx-captcha'), { sitekey: key, callback: function(t){ finish(t); }, 'error-callback': function(){ ov.querySelector('#ox-sbx-msg').textContent = 'Security check failed. Close and try again.'; } }); }
+          catch(e){ ov.querySelector('#ox-sbx-msg').textContent = 'Security check could not start.'; }
+        }
+        if (!document.getElementById('ox-turnstile-script') && !window.turnstile) {
+          var sc = document.createElement('script'); sc.id = 'ox-turnstile-script'; sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; sc.async = true; sc.defer = true; document.head.appendChild(sc);
+        }
+        var tries = 0, timer = setInterval(function(){
+          if (window.turnstile) { clearInterval(timer); render(); }
+          else if (++tries > 100) { clearInterval(timer); ov.querySelector('#ox-sbx-msg').textContent = 'Security check could not load. Check your connection.'; }
+        }, 100);
+      });
+    });
+  }
   // Opens a separate, pretend organisation account for the API demo. The person's own login is kept safe and can be restored.
   function enterSandbox(next){
     var cur = session();
     if (cur && cur.synthetic && cur.accountType === 'provider') { location.href = next || '/developer.html'; return Promise.resolve(true); }
     try { if (cur && !cur.synthetic) localStorage.setItem(BKEY, JSON.stringify(cur)); } catch(e){}
-    return api('POST', '/api/create', { name: 'Amara Okafor', slots: [], today: today(), accountType: 'provider', org: 'Sandbox' }).then(function(j){
+    return sandboxToken().then(function(tok){
+      if (tok === null) return false; // person closed the security check
+      return api('POST', '/api/create', { turnstileToken: tok, name: 'Amara Okafor', slots: [], today: today(), accountType: 'provider', org: 'Sandbox' });
+    }).then(function(j){
       if (!j || !j.ok) return false;
       try { localStorage.setItem(SKEY, JSON.stringify({ role: 'patient', pid: j.pid, token: j.token, name: 'Amara Okafor', synthetic: true, accountType: 'provider' })); } catch(e){ return false; }
       location.href = next || '/developer.html'; return true;
