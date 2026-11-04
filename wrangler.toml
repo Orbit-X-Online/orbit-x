@@ -13,7 +13,8 @@ MODEL_TEXT = "meta-models/muse-spark-open-1026"
 ESCALATE_MS = "20000"
 ASSISTANT_CHAT = "off" # free-text AI chat is OFF (also off if this line is missing). Orbit answers only with fixed rules, logs and evidence from your own records.
 ALLOWED_ORIGINS = "https://orbit-x.alecedoh1994.workers.dev"
-# Secrets (set with `npx wrangler secret put NAME`, never here): MODEL_API_KEY, RECEIPT_SECRET, WHATSAPP_*
+# Sign-up CAPTCHA (Cloudflare Turnstile), OFF until you do both: add TURNSTILE_SITE_KEY = "0x...your site key..." in [vars] above, and run `npx wrangler secret put TURNSTILE_SECRET`.
+# Secrets (set with `npx wrangler secret put NAME`, never here): MODEL_API_KEY, RECEIPT_SECRET, TURNSTILE_SECRET, WHATSAPP_*
 # VAPID_SUBJECT is not secret: optionally add VAPID_SUBJECT = "mailto:you@your-email.example" above. If unset, the first https address in ALLOWED_ORIGINS is used.
 
 # Downloads the PDF/Word/OCR reader files into public/vendor before every deploy (works with "wrangler deploy" and Cloudflare Git builds).
