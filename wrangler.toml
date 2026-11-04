@@ -16,6 +16,11 @@ ALLOWED_ORIGINS = "https://orbit-x.alecedoh1994.workers.dev"
 # Secrets (set with `npx wrangler secret put NAME`, never here): MODEL_API_KEY, RECEIPT_SECRET, WHATSAPP_*
 # VAPID_SUBJECT is not secret: optionally add VAPID_SUBJECT = "mailto:you@your-email.example" above. If unset, the first https address in ALLOWED_ORIGINS is used.
 
+# Downloads the PDF/Word/OCR reader files into public/vendor before every deploy (works with "wrangler deploy" and Cloudflare Git builds).
+# If the download fails the deploy still goes ahead, but PDF/Word/photo reading on the phone will not work until `npm run vendor` succeeds.
+[build]
+command = "node scripts/vendor-libs.mjs || echo vendor-download-failed"
+
 [[durable_objects.bindings]]
 name = "ALERTS"
 class_name = "AlertHub"
