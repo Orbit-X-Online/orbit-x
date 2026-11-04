@@ -29,7 +29,8 @@ Orbit-X **does not give medical advice and is not a medical device.** Plain code
 | Web Push request + result tracking (accepted / rejected / expired / throttled / service error / network error) | Implemented, tested with a fake push service. **Confirmed by the author:** a real push alert arrived on a real phone (checked by hand, not by the automated tests, which use a fake push service). Mozilla and Apple push services are not verified. |
 | "Shown on the phone" confirmation | Implemented: the phone's service worker reports back after displaying. **Not yet verified on a real device.** |
 | Emergency alert chain with server-side escalation | Implemented, tested (fake store) |
-| SMS / phone calls from the server | **Implemented, needs a provider account:** SMS through Twilio or Africa's Talking, voice calls through Twilio (set the secrets below). Without them the alert log says "SMS not set up" and the app falls back to Call/Text buttons that use the person's own SIM. **Confirmed by the author:** a real SMS arrived on a real phone (checked by hand; the automated tests use a fake provider). Voice calls are not verified live. |
+| SMS / phone calls from the server | **Implemented, needs a provider account:** SMS through Twilio or Africa's Talking, voice calls through Twilio (set the secrets below). Without them the alert log says "SMS not set up" and the app falls back to Call/Text buttons that use the person's own SIM. **Confirmed by the author:** a real SMS arrived on a real phone (checked by hand; the automated tests use a fake provider). Twilio voice calls are not verified live. |
+| In-app voice call between phones (uses a TURN relay) | Implemented. **Confirmed by the author:** a call worked on real phones through the TURN relay (checked by hand, not by the automated tests). |
 | Health Workspace, evidence graph, pattern engine | Implemented. Documents can be pasted/typed text or a photo of a paper report (read by Muse Spark Open's vision, or on the phone with Tesseract OCR as fallback). The person checks the text before analysis. |
 | AI wording (Muse Spark Open via Baseten / Meta Model API) | Implemented; needs your key. Without a key: clear "not configured" message and a labelled rule-based mode. Free-text chat stays **off** unless `ASSISTANT_CHAT` is exactly `on`. **Confirmed working live by the author:** reading a photo of a medicine pack to show tablets left, explaining uploaded documents, and switching language (language switching is sometimes slow). The automated tests use a mock model. |
 | FHIR | **Limited R4 subset**, not full interoperability. Supported resources: Patient, Organization, Practitioner, Encounter, Observation, Condition, MedicationRequest, AllergyIntolerance, DiagnosticReport, DocumentReference, Provenance, Consent, AuditEvent. Structural validation only (not a full conformance validator). |
@@ -98,7 +99,7 @@ Durable Object configuration (already in `wrangler.toml`; do not rename the clas
 [[migrations]]                tag = "v1", new_sqlite_classes = ["AlertHub"]
 ```
 
-Static files are served from `public/` (`run_worker_first` sends `/api/*` and `/.well-known/assetlinks.json` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy. The CSP allows no third-party hosts. `script-src` currently allows inline scripts (`'unsafe-inline'`) because each page keeps its code inline in its HTML file. Moving that code into files under `public/js/` and removing the allowance is a planned hardening step (a policy that blocks inline scripts while the pages still contain them shows a blank page).
+Static files are served from `public/` (`run_worker_first` sends `/api/*` and `/.well-known/assetlinks.json` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy. The CSP allows no third-party hosts. `script-src` has no `'unsafe-inline'`. Each page keeps its code inline in its HTML file, and that code runs only because its SHA-256 fingerprint is listed in `public/_headers`; an injected script has no fingerprint and is blocked. If you edit an inline script, run `npm run csp` to refresh the fingerprints (`npm test` fails if you forget, and a page with an unlisted script would render blank). Moving page code into files under `public/js/` is a planned cleanup.
 
 ## Turn on phone alerts on Android
 
@@ -133,11 +134,11 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 **In place (tested with fakes, not a formal audit):**
 - Tokens are stored hashed on the server; invite codes are single-use and expire; wrong invite codes are rate-limited (10 per 10 minutes).
 - Account creation, translation and sign-in attempts are rate-limited; caregivers cannot do patient-only actions; inputs are validated; CORS uses an allowlist.
-- Security headers: `Strict-Transport-Security`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and a Content-Security-Policy (`object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`).
+- Security headers: `Strict-Transport-Security`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and a Content-Security-Policy (inline scripts only by SHA-256 fingerprint, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`).
 - Model output goes through a safety filter; emergency decisions are made by fixed code, not by the model. A test scans front-end files for secret-looking strings.
 
 **Not in place (known, and why):**
-- Scripts and styles both still allow inline code (`script-src` and `style-src` include `'unsafe-inline'`), because page code is inline in each HTML file. The policy therefore limits what can load, but would not stop an injected inline script. The app keeps its session token in the browser's storage, so a script-injection bug would still be serious.
+- Styles still allow inline `style` attributes (`style-src 'unsafe-inline'`). Scripts do not: inline code runs only if its SHA-256 fingerprint is listed in `public/_headers`. Page code is still inline in the HTML files, not in `/js/*.js`. The app keeps its session token in the browser's storage, so a script-injection bug would still be serious.
 - No CAPTCHA (for example Cloudflare Turnstile) on sign-up, and no password: the recovery key is the only way back in. Account creation is capped per IP address only.
 - Health text and photos are sent to the AI provider, and phone numbers and message text to the SMS provider, when those features are used. No independent security review, penetration test or compliance assessment (HIPAA, GDPR) has been done. No dependency lockfile is committed yet.
 
@@ -149,7 +150,7 @@ Use synthetic (pretend) data only until these are addressed.
 
 **Engineering evidence:** deployed on Cloudflare Workers with Durable Objects; 175+ automated checks across six test files (smoke, household, notifications/security, end-to-end, static front-end, safety); a syntax check and a headless-browser smoke test; rate limits; and an AI safety filter that is tested.
 
-**Next steps:** a stricter content-security policy for scripts and styles (move page code into files under `public/js/`), a sign-up CAPTCHA, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
+**Next steps:** a stricter content-security policy for styles, and moving page code into files under `public/js/`, a sign-up CAPTCHA, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
 
 ## Known platform limitations
 

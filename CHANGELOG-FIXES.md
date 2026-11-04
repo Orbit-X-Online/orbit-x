@@ -4,10 +4,10 @@
 - `npm run deploy` runs the vendor step first.
 
 ## Fix 1: no inline scripts (CSP)
-- CORRECTED 4 Nov 2026: an earlier note here said every inline `<script>` had been moved to `public/js/*-main.js` and `'unsafe-inline'` removed from `script-src`. That was not true of the pages in the repo (they still contain inline scripts), and the strict policy made the deployed pages render blank. `script-src` now allows `'unsafe-inline'` again in `public/_headers`; moving the code into files is still to do.
+- CORRECTED 4 Nov 2026: an earlier note here said every inline `<script>` had been moved to `public/js/*-main.js` and `'unsafe-inline'` removed from `script-src`. That was not true of the pages in the repo (they still contain inline scripts), and the strict policy made the deployed pages render blank. `script-src` now allows each page's inline code by SHA-256 fingerprint in `public/_headers` (no `'unsafe-inline'`); `npm run csp` regenerates the fingerprints and the static test fails if one is missing. Moving the code into files is still to do.
 - CORRECTED 4 Nov 2026: the service worker cache in the repo is `orbitx-shell-v15` and there is no `public/js/` folder.
 - `npm run check` syntax-checks `public/js/*.js` if that folder exists; static tests fail if the policy forbids inline scripts while a page still contains one, if an inline `on*=` handler appears, or if `unsafe-eval` is allowed.
-- CORRECTED 4 Nov 2026: that verification did not match the repo. With the strict policy and the pages as uploaded, the main page rendered blank (inline script blocked). With `'unsafe-inline'` allowed, all 9 pages checked (`/`, guide, demo, workspace, developer, studio, docs, gateway, partner) rendered with no script errors in headless Chromium with the real headers applied. Not tested on a real phone.
+- CORRECTED 4 Nov 2026: that verification did not match the repo. With the strict policy and the pages as uploaded, the main page rendered blank (inline script blocked). With the fingerprints in place, all 9 pages checked (`/`, guide, demo, workspace, developer, studio, docs, gateway, partner) rendered with no script errors in headless Chromium with the real headers applied. Not tested on a real phone.
 
 # CHANGELOG-FIXES
 
