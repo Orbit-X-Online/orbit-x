@@ -4,6 +4,8 @@
 
 Orbit-X **does not give medical advice and is not a medical device.** Plain code finds patterns in the person's own logged data; the AI only rewords facts, and its output is checked so it cannot suggest medicine, doses or diagnoses. Emergencies are decided by fixed code, never by an AI. Built for the Meta Global AI Developer Hackathon (Startups track). Use **synthetic (pretend) data only**.
 
+**Prototype with synthetic data. Next steps: stricter CSP, sign-up CAPTCHA, an external security review.** See "Security: what is in place, and what is not" below.
+
 ## The screens
 
 | Screen | Who it is for | What it does |
@@ -124,6 +126,22 @@ Static files are served from `public/` (`run_worker_first` sends only `/api/*` t
 | Push service error (5xx) / network error | Temporary. One automatic retry is made, then it is reported. |
 
 The Family screen's activity list (patient only) records kind, state and HTTP code per attempt, never health text, endpoints or keys.
+
+## Security: what is in place, and what is not
+
+**In place (tested with fakes, not a formal audit):**
+- Tokens are stored hashed on the server; invite codes are single-use and expire; wrong invite codes are rate-limited (10 per 10 minutes).
+- Account creation, translation and sign-in attempts are rate-limited; caregivers cannot do patient-only actions; inputs are validated; CORS uses an allowlist.
+- Security headers: `Strict-Transport-Security`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and a Content-Security-Policy (`object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`).
+- Model output goes through a safety filter; emergency decisions are made by fixed code, not by the model. A test scans front-end files for secret-looking strings.
+
+**Not in place (known, and why):**
+- The CSP still allows inline scripts (`'unsafe-inline'`), because the pages use inline scripts; moving them to files is planned. The app keeps its session token in the browser's storage, so a script-injection bug would be serious.
+- The CSP also allows `cdnjs.cloudflare.com` and `cdn.jsdelivr.net` for the PDF and OCR libraries, which is wide for a strict policy.
+- No CAPTCHA (for example Cloudflare Turnstile) on sign-up, and no password: the recovery key is the only way back in. Account creation is capped per IP address only.
+- Health text and photos are sent to the AI provider, and phone numbers and message text to the SMS provider, when those features are used. No independent security review, penetration test or compliance assessment (HIPAA, GDPR) has been done. No dependency lockfile is committed yet.
+
+Use synthetic (pretend) data only until these are addressed.
 
 ## Known platform limitations
 
