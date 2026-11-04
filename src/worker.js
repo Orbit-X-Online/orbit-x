@@ -1312,12 +1312,13 @@ export class AlertHub {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         this.pk = (this.pk || []).filter((t) => now - t < 3600000);
         if (this.pk.length >= 12) { fail(429, 'slow_down'); break; }
-        if (typeof body.img !== 'string' || body.img.length > 450000 || !IMG_RE.test(body.img)) { fail(400, 'bad_image'); break; }
+        if (typeof body.img !== 'string' || body.img.length > 900000 || !IMG_RE.test(body.img)) { fail(400, 'bad_image'); break; }
         this.pk.push(now);
         const r = await countTabletsWithAI(this.env, body.img);
         const sup = supplyInfo(h);
-        extra.seen = r.ok ? r.seen : null; extra.confident = !!(r.ok && r.confident); extra.why = r.ok ? (r.seen === null ? 'cannot_count' : '') : r.error;
-        extra.expected = sup ? sup.remaining : null;
+        extra.seen = r.ok && r.confident ? r.seen : null; extra.confident = !!(r.ok && r.confident); extra.why = r.ok ? (r.seen === null || !r.confident ? (r.torn ? 'torn' : r.disagree ? 'reads_differ' : 'cannot_count') : '') : r.error;
+        extra.issues = r.ok ? (r.issues || []) : []; extra.range = r.ok && r.range ? r.range : null;
+        extra.expected = sup ? sup.remaining : null; extra.agreed = r.ok ? (r.agreed || 0) : 0;
         break;
       }
       case 'proofreq': { // a caregiver asks for a photo of today's tablets

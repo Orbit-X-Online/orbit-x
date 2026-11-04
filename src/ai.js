@@ -181,27 +181,69 @@ export async function readPhotoWithAI(env, dataUrl) {
 /* ------------------------------------------------------------------ photo of a tablet pack -> how many tablets are still in it
    The model only COUNTS. The person sees the number, can correct it, and nothing is changed until they confirm. */
 const PACK_SYSTEM = `You look at ONE photo of a tablet pack. Count how many tablets are still in the pack.
-Blister strip or card: count the blisters that still hold a tablet. Opened, punched or empty blisters do not count.
-Output ONLY one JSON object: {"kind":"blister"|"loose"|"bottle"|"none","tablets":integer or null,"confident":true or false}
-Rules: if you cannot count with certainty (a closed bottle, blurry, cut off, no tablets visible), tablets must be null. Never guess. Do not read, name or interpret any drug name, dose or instruction.`;
+Blister strip or card: count the pockets that still hold a whole tablet. Opened, punched, torn-open or empty pockets do NOT count.
+From the FOIL side (back) you cannot see tablets: count foil pockets that are still whole and unpunched, and set side to "back".
+A pocket that is torn through, cut off at the edge, covered by a finger, hidden by glare or too blurry to judge is NOT countable: do not guess it, add it to torn_slots instead.
+Output ONLY one JSON object: {"kind":"blister"|"loose"|"bottle"|"none","side":"front"|"back"|"unclear","rows":[integer,...] or null,"total_slots":integer or null,"empty_slots":integer or null,"torn_slots":integer,"tablets":integer or null,"confident":true or false,"issues":[zero or more of "glare","blur","cut_off","torn","foil_back","dark","too_far","overlap"]}
+"rows" is the number of tablets still present in each row or strip in order, so "tablets" must equal the sum of "rows". For loose tablets, "rows" is null. "tablets" counts only the pockets you are sure about.
+Rules: if you cannot count with certainty (a closed bottle, blurry, cut off, no tablets visible), tablets must be null and confident false. Never guess and never round. Do not read, name or interpret any drug name, dose or instruction.`;
+const PACK_ISSUES = ['glare', 'blur', 'cut_off', 'torn', 'foil_back', 'dark', 'too_far', 'overlap'];
 export async function countTabletsWithAI(env, dataUrl) {
   if (aiMode(env) === 'mock') return { ok: false, error: 'mock_no_vision' };
   if (aiMode(env) !== 'live') return { ok: false, error: 'not_configured' };
   const t0 = Date.now();
+  /* A photo count from a model can never be guaranteed exact, so this never trusts one look. The pack is read THREE times, each time
+     asking for the count in a different way (row by row, from the other direction, and as full-minus-empty). The code checks every
+     read's own arithmetic (the rows must add up to the total). A number is offered only when at least two reads agree, every read that
+     is sure agrees with them, and nobody is sure of something different. Otherwise there is no number and the person counts by hand.
+     The person always confirms the number before it is saved. */
+  const asks = [
+    'Count the tablets still in this pack. List the number present in each row or strip, in reading order, then give the total.',
+    'Count again from the opposite direction (bottom to top, right to left). List the number present in each row or strip, then give the total.',
+    'Count the TOTAL number of blister slots and the number of EMPTY slots, then give tablets = total_slots minus empty_slots. If the pack is loose tablets, count them one by one.',
+  ];
   try {
     const model = await resolveModel(env);
-    const out = await metaChat(env, { model, temperature: 0, maxTokens: 300, timeoutMs: 45000, messages: [
-      { role: 'system', content: PACK_SYSTEM },
-      { role: 'user', content: [{ type: 'text', text: 'Count the tablets still in this pack.' }, { type: 'image_url', image_url: { url: dataUrl } }] },
-    ] });
-    const d = parseJson(out);
-    if (!d) return { ok: false, error: 'malformed_json', model, ms: Date.now() - t0 };
-    const kind = ['blister', 'loose', 'bottle', 'none'].includes(d.kind) ? d.kind : 'none';
-    const n = Number.isInteger(d.tablets) && d.tablets >= 0 && d.tablets <= 200 ? d.tablets : null;
-    return { ok: true, seen: kind === 'bottle' || kind === 'none' ? null : n, kind, confident: d.confident === true && n !== null, model, ms: Date.now() - t0 };
+    const reads = await Promise.all(asks.map(async (text) => {
+      const out = await metaChat(env, { model, temperature: 0, maxTokens: 400, timeoutMs: 45000, messages: [
+        { role: 'system', content: PACK_SYSTEM },
+        { role: 'user', content: [{ type: 'text', text }, { type: 'image_url', image_url: { url: dataUrl } }] },
+      ] });
+      const d = parseJson(out);
+      if (!d) return null;
+      const kind = ['blister', 'loose', 'bottle', 'none'].includes(d.kind) ? d.kind : 'none';
+      let n = Number.isInteger(d.tablets) && d.tablets >= 0 && d.tablets <= 200 ? d.tablets : null;
+      let ok = d.confident === true && n !== null;
+      if (Array.isArray(d.rows) && d.rows.length && d.rows.length <= 40 && d.rows.every((x) => Number.isInteger(x) && x >= 0 && x <= 100)) {
+        const sum = d.rows.reduce((a, x) => a + x, 0);
+        if (n === null || sum !== n) { n = null; ok = false; } // the read does not add up: throw it away
+      }
+      if (Number.isInteger(d.total_slots) && Number.isInteger(d.empty_slots) && n !== null) {
+        if (d.total_slots - d.empty_slots !== n) { n = null; ok = false; }
+      }
+      const torn = Number.isInteger(d.torn_slots) && d.torn_slots > 0 ? Math.min(d.torn_slots, 40) : 0;
+      const issues = Array.isArray(d.issues) ? d.issues.filter((x) => PACK_ISSUES.includes(x)) : [];
+      if (torn > 0 && !issues.includes('torn')) issues.push('torn');
+      if (torn > 0) ok = false; // some pockets cannot be judged, so this read is never "sure"
+      return { kind, n: kind === 'bottle' || kind === 'none' ? null : n, sure: ok, torn, issues };
+    }));
+    if (reads.some((r) => !r)) return { ok: false, error: 'malformed_json', model, ms: Date.now() - t0 };
+    const nums = reads.filter((r) => r.n !== null);
+    const tally = new Map(); for (const r of nums) tally.set(r.n, (tally.get(r.n) || 0) + 1);
+    let best = null, bestC = 0; for (const [v, c] of tally) if (c > bestC) { best = v; bestC = c; }
+    const sureOther = nums.some((r) => r.sure && r.n !== best);
+    const agreed = bestC >= 2 && !sureOther && new Set(nums.filter((r) => r.n === best).map((r) => r.kind)).size === 1;
+    const maxTorn = Math.max(0, ...reads.map((r) => r.torn));
+    const confident = agreed && maxTorn === 0 && nums.filter((r) => r.n === best && r.sure).length >= 2;
+    /* a torn or partly hidden pack: never guess the hidden pockets. Give the safe floor (what is surely there) and a ceiling, and the person checks the rest. */
+    const range = agreed && maxTorn > 0 ? { lo: best, hi: best + maxTorn } : null;
+    const iss = new Map(); for (const r of reads) for (const x of new Set(r.issues)) iss.set(x, (iss.get(x) || 0) + 1);
+    const issues = [...iss].filter(([, c]) => c >= 2 || (reads.length < 2)).map(([x]) => x).slice(0, 4);
+    return { ok: true, seen: confident ? best : null, kind: nums.length ? nums[0].kind : 'none', confident, agreed: confident ? bestC : 0, disagree: tally.size > 1 && !range, torn: !!range, range, issues, model, ms: Date.now() - t0 };
   } catch (e) {
     const m = String(e && e.message || ''), st = e && e.status;
     const vision = st !== 402 && st !== 401 && st !== 429 && st !== 504 && /image|vision|multimodal|multi-modal|modalit|content.*(string|type)|image_url/i.test(m);
     return { ok: false, error: vision ? 'vision_unsupported' : reason(e), ms: Date.now() - t0 };
   }
 }
+
