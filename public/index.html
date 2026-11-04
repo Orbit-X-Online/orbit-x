@@ -552,19 +552,20 @@ function refreshCards(){
   }
 }
 /* ---------- photo of the tablet pack: count what is left, compare with what was logged, optionally send to a caregiver ---------- */
-function shrinkPhoto(file, cb){
+function shrinkPhoto(file, cb, hi){ /* hi: a sharper, larger photo for counting tablets (small blisters need pixels) */
+  var MAXSIDE = hi ? 1600 : 1000, MAXLEN = hi ? 880000 : 420000;
   var r = new FileReader();
   r.onload = function(){ var im = new Image(); im.onload = function(){
-    var sc = Math.min(1, 1000 / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = Math.round(im.width * sc); c.height = Math.round(im.height * sc);
+    var sc = Math.min(1, MAXSIDE / Math.max(im.width, im.height)), c = document.createElement('canvas'); c.width = Math.round(im.width * sc); c.height = Math.round(im.height * sc);
     c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-    var q = 0.7, d; do { d = c.toDataURL('image/jpeg', q); q -= 0.1; } while (d.length > 420000 && q > 0.2);
-    cb(d.length > 450000 ? null : d);
+    var q = hi ? 0.85 : 0.7, d; do { d = c.toDataURL('image/jpeg', q); q -= 0.1; } while (d.length > MAXLEN && q > 0.2);
+    cb(d.length > MAXLEN + 30000 ? null : d);
   }; im.onerror = function(){ cb(null); }; im.src = r.result; };
   r.onerror = function(){ cb(null); }; r.readAsDataURL(file);
 }
-function pickPhoto(cb){
+function pickPhoto(cb, hi){
   var i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.setAttribute('capture', 'environment');
-  i.onchange = function(){ var f = i.files && i.files[0]; if (f) shrinkPhoto(f, cb); };
+  i.onchange = function(){ var f = i.files && i.files[0]; if (f) shrinkPhoto(f, cb, hi); };
   i.click();
 }
 function packCompare(n, e){
@@ -573,31 +574,57 @@ function packCompare(n, e){
   if (n < e) return 'That is ' + (e - n) + ' fewer than the count from the tablets you logged. Orbit-X only compares the numbers. Please ask your pharmacist or doctor if you are unsure.';
   return 'That is ' + (n - e) + ' more than the count from the tablets you logged. Orbit-X only compares the numbers. Please ask your pharmacist or doctor if you are unsure.';
 }
+function packTip(x){
+  return { glare: 'Glare hides some pockets: tilt the pack so the light does not shine back.', blur: 'The photo is blurry: hold still and let the camera focus.', cut_off: 'Part of the pack is cut off: keep the whole pack inside the photo.',
+    torn: 'Some pockets are torn or hidden.', foil_back: 'I can only see the foil side: turn the pack over to the tablet side.', dark: 'It is too dark: use more light.', too_far: 'Move closer so every pocket is clear.', overlap: 'Tablets overlap: spread them out in one layer.' }[x] || '';
+}
 function packFlow(mode, reqId){
-  pickPhoto(function(img){
-    if (!img) { say('I could not use that photo. Please try again.'); return; }
-    var o = $('evo'); o.innerHTML = '<h2>' + (mode === 'proof' ? 'Your tablet photo' : 'Check my pack') + '</h2><div class="small center">Looking at the photo...</div>'; o.classList.add('on');
-    hApi('packread', { img: img }).then(function(j){
-      var seen = j && j.ok && j.seen !== null && j.seen !== undefined ? j.seen : null, exp = j && j.ok && j.expected !== null && j.expected !== undefined ? j.expected : null;
-      var msg = seen !== null ? 'I can see about ' + seen + ' tablet' + (seen === 1 ? '' : 's') + ' left in this pack. Please check the photo and correct the number if I am wrong.' : 'I could not count the tablets from this photo. You can count them and type the number' + (mode === 'proof' ? ', or just send the photo.' : '.');
-      o.innerHTML = '<h2>' + (mode === 'proof' ? 'Your tablet photo' : 'Check my pack') + '</h2><img alt="Your photo" src="' + img + '" style="width:100%;max-height:230px;object-fit:contain;border-radius:12px;background:#000">' +
-        '<div class="small" style="margin:10px 0 4px">' + esc(msg) + '</div><label class="l" for="pcn">Tablets left in the pack</label><input class="field" id="pcn" type="number" inputmode="numeric" min="0" max="500" value="' + (seen !== null ? seen : '') + '">' +
-        '<div class="small" id="pcm" role="status" aria-live="polite" style="min-height:18px"></div><div class="err" id="pce"></div>' +
-        (mode === 'proof' ? '<button class="btn" id="pcs">Send photo</button>' : '<button class="btn" id="pcu">Use this as my count</button>') + '<button class="btn ghost" id="pcc">' + (mode === 'proof' ? 'Cancel' : 'Close') + '</button>';
-      function val(){ var v = $('pcn').value.trim(); return /^\d{1,3}$/.test(v) ? parseInt(v, 10) : null; }
-      function upd(){ var n = val(); $('pcm').textContent = n === null ? '' : packCompare(n, exp); }
-      $('pcn').oninput = upd; upd();
-      $('pcc').onclick = function(){ o.classList.remove('on'); };
-      if (mode === 'proof') $('pcs').onclick = function(){
-        var b = $('pcs'); b.disabled = true; b.textContent = 'Sending...';
-        hApi('proofsend', { id: reqId, img: img, count: val() }).then(function(r2){ if (take(r2)) { o.classList.remove('on'); refreshCards(); say('Sent. Thank you.'); } else { b.disabled = false; b.textContent = 'Send photo'; $('pce').textContent = r2 && r2.error === 'no_request' ? 'This request is no longer open.' : 'Could not send. Please check your internet and try again.'; } });
-      };
-      else $('pcu').onclick = function(){
-        var n = val(); if (n === null) { $('pce').textContent = 'Please type how many tablets are left.'; return; }
-        hApi('profile', { supplyLeft: n }).then(function(r2){ if (take(r2)) { o.classList.remove('on'); refreshCards(); say('Done. I will count down from ' + n + '.'); } else $('pce').textContent = 'Could not save. Please try again.'; });
-      };
-    });
-  });
+  var parts = [], exp = null, o = $('evo'), head = '<h2>' + (mode === 'proof' ? 'Your tablet photo' : 'Check my pack') + '</h2>';
+  function note(p, n){
+    var t = 'Photo ' + n + ': ';
+    if (p.seen !== null) t += 'I count ' + p.seen + ' (my three looks agree).';
+    else if (p.range) t += 'between ' + p.range.lo + ' and ' + p.range.hi + '. ' + (p.range.hi - p.range.lo) + ' pocket(s) are torn or hidden, so I will not guess them. Please check those by hand.';
+    else if (p.why === 'reads_differ') t += 'my looks gave different numbers, so I will not guess.';
+    else t += 'I could not count the tablets from this photo.';
+    var tips = (p.issues || []).filter(function(x){ return !(x === 'torn' && p.range); }).map(packTip).filter(Boolean);
+    return t + (tips.length ? ' ' + tips.join(' ') : '');
+  }
+  function total(){ var n = 0; for (var k = 0; k < parts.length; k++) { if (parts[k].seen === null) return null; n += parts[k].seen; } return n; }
+  function add(){
+    pickPhoto(function(img){
+      if (!img) { say('I could not use that photo. Please try again.'); if (parts.length) show(); return; }
+      o.innerHTML = head + '<div class="small center">Looking at the photo carefully...</div>'; o.classList.add('on');
+      hApi('packread', { img: img }).then(function(j){
+        var good = j && j.ok;
+        if (good && j.expected !== null && j.expected !== undefined) exp = j.expected;
+        parts.push({ img: img, seen: good && j.seen !== null && j.seen !== undefined ? j.seen : null, range: good && j.range ? j.range : null, why: good ? j.why : 'error', issues: good && j.issues ? j.issues : [] });
+        show();
+      });
+    }, mode !== 'proof');
+  }
+  function show(){
+    var tot = total(), keep = $('pcn') ? $('pcn').value : '';
+    o.innerHTML = head + parts.map(function(p, k){ return '<img alt="Photo ' + (k + 1) + '" src="' + p.img + '" style="width:' + (parts.length > 1 ? '48%' : '100%') + ';max-height:' + (parts.length > 1 ? '120' : '230') + 'px;object-fit:contain;border-radius:12px;background:#000;margin:0 1% 4px 0">'; }).join('') +
+      '<div class="small" style="margin:10px 0 4px">' + parts.map(function(p, k){ return esc(note(p, k + 1)); }).join('<br>') + '</div>' +
+      '<div class="small" style="margin:6px 0">A photo count is only a helper and can be wrong. Please count the tablets yourself, fix the number if needed, and tick the box.</div>' +
+      '<label class="l" for="pcn">Tablets left' + (parts.length > 1 ? ' (all photos together)' : ' in the pack') + '</label><input class="field" id="pcn" type="number" inputmode="numeric" min="0" max="500" value="' + (tot !== null ? tot : '') + '">' +
+      '<div class="small" id="pcm" role="status" aria-live="polite" style="min-height:18px"></div><label class="check"><input type="checkbox" id="pck"> I counted the tablets myself and this number is right</label><div class="err" id="pce"></div>' +
+      (mode === 'proof' ? '<button class="btn" id="pcs">Send photo</button>' : '<button class="btn" id="pcu">Use this as my count</button>' + (parts.length < 4 ? '<button class="btn ghost" id="pca">Add another photo (torn piece, other strip or the other side)</button><div class="small">Put each strip in only one photo so nothing is counted twice.</div>' : '')) + '<button class="btn ghost" id="pcc">' + (mode === 'proof' ? 'Cancel' : 'Close') + '</button>';
+    function val(){ var v = $('pcn').value.trim(); return /^\d{1,3}$/.test(v) ? parseInt(v, 10) : null; }
+    function upd(){ var n = val(); $('pcm').textContent = n === null ? '' : packCompare(n, exp) + (n !== null && exp !== null && Math.abs(n - exp) > Math.max(5, Math.round(exp * 0.25)) ? ' That is a big difference, so please count once more.' : ''); }
+    $('pcn').oninput = upd; upd();
+    $('pcc').onclick = function(){ o.classList.remove('on'); };
+    if ($('pca')) $('pca').onclick = add;
+    if (mode === 'proof') $('pcs').onclick = function(){
+      var b = $('pcs'); b.disabled = true; b.textContent = 'Sending...';
+      hApi('proofsend', { id: reqId, img: parts[0].img, count: val() }).then(function(r2){ if (take(r2)) { o.classList.remove('on'); refreshCards(); say('Sent. Thank you.'); } else { b.disabled = false; b.textContent = 'Send photo'; $('pce').textContent = r2 && r2.error === 'no_request' ? 'This request is no longer open.' : 'Could not send. Please check your internet and try again.'; } });
+    };
+    else $('pcu').onclick = function(){
+      var n = val(); if (n === null) { $('pce').textContent = 'Please type how many tablets are left.'; return; } if (!$('pck').checked) { $('pce').textContent = 'Please count them yourself and tick the box so the number is right.'; return; }
+      hApi('profile', { supplyLeft: n }).then(function(r2){ if (take(r2)) { o.classList.remove('on'); refreshCards(); say('Done. I will count down from ' + n + '.'); } else $('pce').textContent = 'Could not save. Please try again.'; });
+    };
+  }
+  add();
 }
 function schedulePatient(){
   stopTimer();
