@@ -4,7 +4,7 @@
 
 Orbit-X **does not give medical advice and is not a medical device.** Plain code finds patterns in the person's own logged data; the AI only rewords facts, and its output is checked so it cannot suggest medicine, doses or diagnoses. Emergencies are decided by fixed code, never by an AI. Built solo for the Meta Global AI Developer Hackathon (Startups track, theme: Build for Your World). Use **synthetic (pretend) data only**.
 
-**Prototype with synthetic data. Next steps: stricter CSP, sign-up CAPTCHA, an external security review.** See "Security: what is in place, and what is not" below.
+**Prototype with synthetic data. Next steps: a stricter style policy, an external security review. Sign-up CAPTCHA is built and optional (off until you configure it).** See "Security: what is in place, and what is not" below.
 
 ## The screens
 
@@ -12,7 +12,8 @@ Orbit-X **does not give medical advice and is not a medical device.** Plain code
 |---|---|---|
 | `/` (index) | Everyone | Sign-up (just your name), then your daily app: log blood pressure and tablets, talk to Orbit (fixed, rule-based answers; free-text AI chat is off by default), History, Family and caregivers, Settings (phone alerts, tablet times, language, account). |
 | `/workspace.html` | Everyone | **Health Workspace** — your documents, extracted facts with sources, timeline, Evidence Graph, appointment brief, sharing and consent. |
-| `/guide.html` | Everyone | A one-minute plain-words explanation. |
+| `/guide.html` | Everyone | A one-minute plain-words explanation with tabs for the person, the caregiver and the doctor or clinic. Linked from the welcome screen, patient Settings, the caregiver screen (Help), Rule Studio and My records. A first-run tour for patients opens automatically and the **?** button replays it. |
+| `/privacy.html` | Everyone | Privacy and consent notice for testers: what is stored, who can see it, what is sent to the AI, how to delete your account. |
 | `/demo.html` | Anyone curious | A walkthrough with a **fictional** patient. No real people or alerts. |
 | `/studio.html` | Doctors you invite | **Rule Studio** — a clinician writes an alert rule in plain words, reads it back, and approves it. |
 | `/gateway.html` | Doctor / organisation accounts | **Cuff Gateway:** a phone or laptop with Chrome pairs a Bluetooth cuff and sends readings to a patient's account through the public API with a device key. |
@@ -67,6 +68,7 @@ Names only, set with `npx wrangler secret put NAME`:
 | `MODEL2_API_KEY`, `MODEL2_BASE_URL`, `MODEL2_TEXT` | Optional | Second AI provider that takes over if the first is out of credit or down. |
 | `TWILIO_SID`, `TWILIO_TOKEN`, `TWILIO_FROM` / `AT_USERNAME`, `AT_API_KEY`, `AT_FROM` | Optional | Server-sent SMS (and Twilio voice calls) when a caregiver must be reached. |
 | `TURN_KEY_ID`, `TURN_API_TOKEN` (or `TURN_URLS`, `TURN_USERNAME`, `TURN_CREDENTIAL`) | Optional | TURN relay so voice calls work on mobile data. |
+| `TURNSTILE_SITE_KEY` (in `wrangler.toml` `[vars]`), `TURNSTILE_SECRET` (secret) | Optional | Sign-up CAPTCHA (Cloudflare Turnstile). Off unless **both** are set. |
 | `ADMIN_TOKEN` | Optional | Lets you list models on `/api/ai/status` (header `X-Admin-Token`). |
 | `TWA_PACKAGE`, `TWA_SHA256` | Optional | Android app (TWA) link; see the last section. |
 | `WHATSAPP_*` | Optional | Parked WhatsApp feature. |
@@ -88,9 +90,10 @@ python3 test/ui-smoke.py   # optional: real headless browser, needs `pip install
 1. `npm install`
 2. `npx wrangler login`
 3. Edit `ALLOWED_ORIGINS` in `wrangler.toml` to your domain(s).
-4. `npm run vendor` (downloads the PDF/Word/OCR libraries into `public/vendor/` once; commit `scripts/vendor.lock.json`; `npm run deploy` also runs it)
-5. `npx wrangler secret put MODEL_API_KEY` (optional), `RECEIPT_SECRET`, and `VAPID_SUBJECT`.
-6. `npm run deploy`
+4. `npx wrangler secret put MODEL_API_KEY` (optional), `RECEIPT_SECRET`, and `VAPID_SUBJECT`.
+5. `npm run deploy` (or `npx wrangler deploy`).
+
+The PDF/Word/OCR reader libraries are not stored in the repo. `wrangler.toml` has a `[build]` step that downloads them into `public/vendor/` before every deploy, so a deploy needs internet access. If that download fails the deploy still goes ahead, but PDF, Word and on-phone photo reading will show "Could not load the file reader" until you run `npm run vendor` and deploy again. After the first download, commit `scripts/vendor.lock.json` so later downloads are checked against the same hashes. You can confirm the files are live by opening `/vendor/pdf.min.js` on your site.
 
 Durable Object configuration (already in `wrangler.toml`; do not rename the class, the migration depends on it):
 
@@ -99,7 +102,17 @@ Durable Object configuration (already in `wrangler.toml`; do not rename the clas
 [[migrations]]                tag = "v1", new_sqlite_classes = ["AlertHub"]
 ```
 
-Static files are served from `public/` (`run_worker_first` sends `/api/*` and `/.well-known/assetlinks.json` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy. The CSP allows no third-party hosts. `script-src` has no `'unsafe-inline'`. Each page keeps its code inline in its HTML file, and that code runs only because its SHA-256 fingerprint is listed in `public/_headers`; an injected script has no fingerprint and is blocked. If you edit an inline script, run `npm run csp` to refresh the fingerprints (`npm test` fails if you forget, and a page with an unlisted script would render blank). Moving page code into files under `public/js/` is a planned cleanup.
+Static files are served from `public/` (`run_worker_first` sends `/api/*` and `/.well-known/assetlinks.json` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy. The only third-party host the CSP names is `https://challenges.cloudflare.com` (Cloudflare Turnstile, for the optional sign-up CAPTCHA). `script-src` has no `'unsafe-inline'`. Each page keeps its code inline in its HTML file, and that code runs only because its SHA-256 fingerprint is listed in `public/_headers`; an injected script has no fingerprint and is blocked. If you edit an inline script, run `npm run csp` to refresh the fingerprints (`npm test` fails if you forget, and a page with an unlisted script would render blank). Moving page code into files under `public/js/` is a planned cleanup.
+
+## Sign-up CAPTCHA (optional, Cloudflare Turnstile)
+
+Off by default, so nothing changes until you do this. It makes a person tick a quick check before an account is created.
+1. Cloudflare dashboard → **Turnstile** → **Add widget**. Add your site's hostname (for example `orbit-x.alecedoh1994.workers.dev`), choose **Managed**, and copy the **site key** and **secret key**.
+2. Add `TURNSTILE_SITE_KEY = "your site key"` under `[vars]` in `wrangler.toml`.
+3. Run `npx wrangler secret put TURNSTILE_SECRET` and paste the secret key.
+4. Deploy. Open a private browser tab, choose "I want to look after my own health": a "Quick check that you are a person" box appears above Start.
+
+How it works: the page asks `/api/captcha` whether it is on; if so it shows the Turnstile box and sends the token with `/api/create`; the server checks the token with Cloudflare before making the account and never stores it. If only one of the two settings exists it stays off, so a half-finished setup cannot lock people out. To turn it off, remove `TURNSTILE_SITE_KEY` (or the secret). For testing, Cloudflare publishes dummy keys that always pass or always fail; use them on a test copy, not on the live site. Joining by invite link and signing in with a recovery key do not need the check.
 
 ## Turn on phone alerts on Android
 
@@ -107,6 +120,7 @@ Static files are served from `public/` (`run_worker_first` sends `/api/*` and `/
 2. Settings → **Turn on phone alerts** → **Allow** when asked.
 3. Tap again to **Send a test**. You will see two steps: "push service accepted" (step 1) and, a few seconds later, "this phone confirmed it displayed the alert" (step 2).
 4. Optional: Chrome menu → **Add to Home screen**.
+5. If alerts arrive late or not at all: allow Orbit-X notifications, turn Do Not Disturb off, and set Chrome battery usage to **Unrestricted** (Android Settings → Apps → Chrome → Battery).
 
 ## Test a reminder with the website closed
 
@@ -139,18 +153,19 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 
 **Not in place (known, and why):**
 - Styles still allow inline `style` attributes (`style-src 'unsafe-inline'`). Scripts do not: inline code runs only if its SHA-256 fingerprint is listed in `public/_headers`. Page code is still inline in the HTML files, not in `/js/*.js`. The app keeps its session token in the browser's storage, so a script-injection bug would still be serious.
-- No CAPTCHA (for example Cloudflare Turnstile) on sign-up, and no password: the recovery key is the only way back in. Account creation is capped per IP address only.
+- The sign-up CAPTCHA (Cloudflare Turnstile) is **optional and off by default**; until you turn it on (see "Sign-up CAPTCHA" below) account creation is capped per IP address only. There is no password: the recovery key is the only way back in.
+- A plain-words privacy and consent notice is at `/privacy.html` (linked from the welcome screen and Settings). It is a prototype notice, not legal advice, and it is a link, not a tick-box gate. Tell testers in writing before they use real information.
 - Health text and photos are sent to the AI provider, and phone numbers and message text to the SMS provider, when those features are used. No independent security review, penetration test or compliance assessment (HIPAA, GDPR) has been done. No dependency lockfile is committed yet.
 
 Use synthetic (pretend) data only until these are addressed.
 
 ## Where it stands, and what is next
 
-**Working today** (confirmed by the author on a real phone, by hand; `VERIFICATION-REPORT.md` covers only the automated runs): real push alerts, a real SMS to a caregiver, reading a photo of a medicine pack to show tablets left, explaining uploaded documents, and switching language (sometimes slow).
+**Working today** (confirmed by the author on a real phone and the live site, by hand; `VERIFICATION-REPORT.md` covers only the automated runs): real push alerts, a real SMS to a caregiver, reading a photo of a medicine pack to show tablets left, uploading and explaining documents (once the reader files are deployed), and switching language (sometimes slow).
 
 **Engineering evidence:** deployed on Cloudflare Workers with Durable Objects; 175+ automated checks across six test files (smoke, household, notifications/security, end-to-end, static front-end, safety); a syntax check and a headless-browser smoke test; rate limits; and an AI safety filter that is tested.
 
-**Next steps:** a stricter content-security policy for styles, and moving page code into files under `public/js/`, a sign-up CAPTCHA, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
+**Next steps:** a stricter content-security policy for styles, and moving page code into files under `public/js/`, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
 
 ## Known platform limitations
 
@@ -159,7 +174,7 @@ Use synthetic (pretend) data only until these are addressed.
 - Web Push is free but offers **no delivery guarantee**. Orbit-X therefore never says "delivered" unless the phone itself reports it displayed the notification.
 - Reminders more than 2 hours late (caregiver heads-up: 3 hours) are skipped and recorded rather than sent stale.
 - Automatic SMS and phone calls need a Twilio or Africa's Talking account (secrets below). Without one, only push alerts go out and the screens fall back to the device's own Call/Text.
-- Account creation is limited to 20 new accounts per hour per IP address (counted in a Durable Object, so it holds across Worker instances). There is no CAPTCHA, and many different addresses can still create accounts, so add Cloudflare rate-limiting/WAF rules before a public launch.
+- Account creation is limited to 20 new accounts per hour per IP address (counted in a Durable Object, so it holds across Worker instances). The sign-up CAPTCHA is off unless you configure it, and many different addresses can still create accounts, so turn it on and add Cloudflare rate-limiting/WAF rules before a public launch.
 
 ## Troubleshooting
 
@@ -172,6 +187,7 @@ Use synthetic (pretend) data only until these are addressed.
 | "Session expired" | Sign out, then rejoin with a new invite link. |
 | Invite says expired | Invites last 7 days. Tap **New invite**. |
 | AI says "not configured" | Set `MODEL_API_KEY` (optional feature). |
+| "Could not load the file reader" when choosing a PDF, Word file or photo | `public/vendor/` is missing from the deploy. Run `npm run vendor` with internet, then deploy again. Pasting text and the AI photo option still work meanwhile. |
 
 ## Meta models
 
