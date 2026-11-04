@@ -344,6 +344,30 @@ r = await call('POST', IN + 'insight', {}, ins.token); const kk = (await call('P
   pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: 'sorry' } }] }), { status: 200 });
   q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, null); assert.equal(q.ok, true);
   q = await call('POST', PF + 'packread', { img: IMG }, cg.token); assert.equal(q._s, 403); ok('the model only counts: a bottle or unreadable answer gives no number, and caregivers cannot use the pack reader');
+  // three differently-phrased reads: arithmetic is checked, at least two sure reads must agree, and no sure read may disagree
+  const seq = (list) => { let i = 0; pushHandler = async () => new Response(JSON.stringify({ choices: [{ message: { content: typeof list[i] === 'string' ? list[i++] : JSON.stringify(list[i++]) } }] }), { status: 200 }); };
+  const B = (o) => Object.assign({ kind: 'blister', confident: true }, o);
+  seq([B({ rows: [7, 7], tablets: 14 }), B({ rows: [7, 7], tablets: 14 }), B({ total_slots: 20, empty_slots: 6, tablets: 14 })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, 14); assert.equal(q.confident, true); assert.equal(q.agreed, 3);
+  seq([B({ rows: [7, 7], tablets: 15 }), B({ rows: [7, 7], tablets: 15 }), B({ rows: [7, 7], tablets: 15 })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, null); // rows add up to 14, not 15: every read is thrown away
+  seq([B({ tablets: 14 }), B({ tablets: 14 }), B({ tablets: 13 })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, null); assert.equal(q.why, 'reads_differ'); // a sure read disagrees: no number
+  seq([B({ tablets: 14 }), B({ tablets: 14 }), B({ tablets: null, confident: false })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, 14); // two sure reads agree, the third could not count
+  seq([B({ tablets: 14 }), B({ tablets: 12 }), B({ tablets: 9 })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, null);
+  seq([B({ total_slots: 20, empty_slots: 4, tablets: 14 }), B({ tablets: 14 }), B({ tablets: 14 })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, 14); assert.equal(q.agreed, 2); // the full-minus-empty read did not add up so it is dropped
+  ok('photo count: three reads, arithmetic checked, two sure reads must agree and none may disagree, otherwise the person counts by hand');
+  // torn / partly hidden pack: the hidden pockets are never guessed; the person gets a floor and a ceiling and checks by hand
+  seq([B({ tablets: 8, confident: false, torn_slots: 2, issues: ['torn'] }), B({ tablets: 8, confident: false, torn_slots: 2, issues: ['torn'] }), B({ tablets: 8, confident: false, torn_slots: 1, issues: ['torn', 'glare'] })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, null); assert.equal(q.why, 'torn'); assert.deepEqual(q.range, { lo: 8, hi: 10 }); assert.ok(q.issues.includes('torn'));
+  seq([B({ tablets: 8, torn_slots: 1 }), B({ tablets: 8 }), B({ tablets: 8 })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, null); assert.equal(q.why, 'torn'); // even one read that sees a torn pocket blocks a confident number
+  seq([B({ tablets: 5, side: 'back', issues: ['foil_back', 'glare'] }), B({ tablets: 5, issues: ['foil_back'] }), B({ tablets: 5 })]);
+  q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, 5); assert.deepEqual(q.issues, ['foil_back']); // advice only appears when two reads notice it
+  ok('photo count: torn pockets give a range and no confident number, and photo problems come back as plain advice');
   pushHandler = async () => new Response('', { status: 201 });
   delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
   q = await call('POST', PF + 'proofsend', { id: rid, img: IMG, count: 13 }, pf.token); assert.equal(q.ok, true); assert.equal(q.proof.status, 'sent'); assert.equal(q.proof.result.seen, 13); assert.equal(q.proof.result.expected, 20);
