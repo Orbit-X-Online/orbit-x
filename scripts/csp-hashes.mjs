@@ -9,5 +9,5 @@ for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.html')).sort()) {
   }
 }
 const hp = path.join(dir, '_headers'); const t = fs.readFileSync(hp, 'utf8');
-const out = t.replace(/script-src [^;]*;/, "script-src 'self' " + hs.join(' ') + " 'wasm-unsafe-eval';");
+const out = t.replace(/script-src [^;]*;/, "script-src 'self' " + hs.join(' ') + " https://challenges.cloudflare.com 'wasm-unsafe-eval';");
 if (out !== t) { fs.writeFileSync(hp, out); console.log('Updated public/_headers with ' + hs.length + ' script fingerprints.'); } else console.log('public/_headers already matches (' + hs.length + ' fingerprints).');
