@@ -1,17 +1,15 @@
 /* Orbit-X file reader. Turns a PDF, photo, Word file or text file into plain text, ON THE PHONE (the file itself is never uploaded).
-   Libraries (pdf.js, Tesseract OCR, mammoth) are loaded from cdnjs only when a file of that kind is chosen. */
+   Libraries (pdf.js, Tesseract OCR, mammoth) are served from /vendor (our own origin, installed by `npm run vendor`) and loaded only when a file of that kind is chosen. */
 window.OXRead = (function () {
-  var PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-  var PDFW = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  var TESS = 'https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js';
-  var MAM = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js';
+  var V = '/vendor/', PDFJS = V + 'pdf.min.js', PDFW = V + 'pdf.worker.min.js', TESS = V + 'tesseract/tesseract.min.js', MAM = V + 'mammoth.browser.min.js';
+  var TESS_OPTS = { workerPath: location.origin + V + 'tesseract/worker.min.js', corePath: location.origin + V + 'tesseract/', langPath: location.origin + V + 'tesseract/lang' };
   var MAXCHARS = 40000, loaded = {};
 
   function load(src) {
     if (loaded[src]) return loaded[src];
     loaded[src] = new Promise(function (res, rej) {
       var s = document.createElement('script'); s.src = src; s.onload = res;
-      s.onerror = function () { delete loaded[src]; rej(new Error('Could not load the file reader. Check your internet and try again.')); };
+      s.onerror = function () { delete loaded[src]; rej(new Error('Could not load the file reader. Check your internet and try again. (If this keeps happening, the app owner needs to run: npm run vendor)')); };
       document.head.appendChild(s);
     });
     return loaded[src];
@@ -38,7 +36,7 @@ window.OXRead = (function () {
   }
   function ocr(sources, progress) {
     return load(TESS).then(function () {
-      return Tesseract.createWorker('eng', 1, { logger: function (m) { if (m && m.status === 'recognizing text' && progress) progress('Reading the picture... ' + Math.round((m.progress || 0) * 100) + '%'); } });
+      return Tesseract.createWorker('eng', 1, { workerPath: TESS_OPTS.workerPath, corePath: TESS_OPTS.corePath, langPath: TESS_OPTS.langPath, logger: function (m) { if (m && m.status === 'recognizing text' && progress) progress('Reading the picture... ' + Math.round((m.progress || 0) * 100) + '%'); } });
     }).then(function (w) {
       var out = [], chain = Promise.resolve();
       sources.forEach(function (src, i) {
