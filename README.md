@@ -87,8 +87,9 @@ python3 test/ui-smoke.py   # optional: real headless browser, needs `pip install
 1. `npm install`
 2. `npx wrangler login`
 3. Edit `ALLOWED_ORIGINS` in `wrangler.toml` to your domain(s).
-4. `npx wrangler secret put MODEL_API_KEY` (optional), `RECEIPT_SECRET`, and `VAPID_SUBJECT`.
-5. `npm run deploy`
+4. `npm run vendor` (downloads the PDF/Word/OCR libraries into `public/vendor/` once; commit `scripts/vendor.lock.json`; `npm run deploy` also runs it)
+5. `npx wrangler secret put MODEL_API_KEY` (optional), `RECEIPT_SECRET`, and `VAPID_SUBJECT`.
+6. `npm run deploy`
 
 Durable Object configuration (already in `wrangler.toml`; do not rename the class, the migration depends on it):
 
@@ -97,7 +98,7 @@ Durable Object configuration (already in `wrangler.toml`; do not rename the clas
 [[migrations]]                tag = "v1", new_sqlite_classes = ["AlertHub"]
 ```
 
-Static files are served from `public/` (`run_worker_first` sends only `/api/*` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy (which still allows inline scripts).
+Static files are served from `public/` (`run_worker_first` sends only `/api/*` to the Worker). `public/_headers` adds security headers and a Content-Security-Policy. The CSP allows no third-party hosts. Scripts must be files under `public/` (`/js/*.js` for page code); inline scripts are blocked.
 
 ## Turn on phone alerts on Android
 
@@ -132,12 +133,11 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 **In place (tested with fakes, not a formal audit):**
 - Tokens are stored hashed on the server; invite codes are single-use and expire; wrong invite codes are rate-limited (10 per 10 minutes).
 - Account creation, translation and sign-in attempts are rate-limited; caregivers cannot do patient-only actions; inputs are validated; CORS uses an allowlist.
-- Security headers: `Strict-Transport-Security`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and a Content-Security-Policy (`object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`).
+- Security headers: `Strict-Transport-Security`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and a Content-Security-Policy (no inline scripts, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`).
 - Model output goes through a safety filter; emergency decisions are made by fixed code, not by the model. A test scans front-end files for secret-looking strings.
 
 **Not in place (known, and why):**
-- The CSP still allows inline scripts (`'unsafe-inline'`), because the pages use inline scripts; moving them to files is planned. The app keeps its session token in the browser's storage, so a script-injection bug would be serious.
-- The CSP also allows `cdnjs.cloudflare.com` and `cdn.jsdelivr.net` for the PDF and OCR libraries, which is wide for a strict policy.
+- Styles still allow inline `style` attributes (`style-src 'unsafe-inline'`). Scripts no longer do: all page code is in `/js/*.js` and `script-src` has no `'unsafe-inline'`. The app keeps its session token in the browser's storage, so a script-injection bug would still be serious.
 - No CAPTCHA (for example Cloudflare Turnstile) on sign-up, and no password: the recovery key is the only way back in. Account creation is capped per IP address only.
 - Health text and photos are sent to the AI provider, and phone numbers and message text to the SMS provider, when those features are used. No independent security review, penetration test or compliance assessment (HIPAA, GDPR) has been done. No dependency lockfile is committed yet.
 
@@ -149,7 +149,7 @@ Use synthetic (pretend) data only until these are addressed.
 
 **Engineering evidence:** deployed on Cloudflare Workers with Durable Objects; 175+ automated checks across six test files (smoke, household, notifications/security, end-to-end, static front-end, safety); a syntax check and a headless-browser smoke test; rate limits; and an AI safety filter that is tested.
 
-**Next steps:** a stricter content-security policy (move inline scripts out of the pages), a sign-up CAPTCHA, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
+**Next steps:** a stricter content-security policy for styles, a sign-up CAPTCHA, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
 
 ## Known platform limitations
 

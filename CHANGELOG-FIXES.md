@@ -1,3 +1,14 @@
+## Fix 2: self-hosted PDF/Word/OCR libraries
+- New `scripts/vendor-libs.mjs` (`npm run vendor`) downloads pdf.js, mammoth and Tesseract (worker, core, English data) into `public/vendor/` and pins SHA-256 hashes in `scripts/vendor.lock.json`.
+- `docread.js` loads them from `/vendor/`; CSP no longer allows `cdnjs`, `jsdelivr` or `tessdata.projectnaptha.com`.
+- `npm run deploy` runs the vendor step first.
+
+## Fix 1: no inline scripts (CSP)
+- Moved every inline `<script>` into `public/js/*-main.js`; removed `'unsafe-inline'` from `script-src` in `public/_headers`.
+- Service worker precaches the app/workspace/demo/guide scripts (cache `orbitx-shell-v16`).
+- `npm run check` syntax-checks `public/js/*.js`; static tests fail if an inline script, inline `on*=` handler or `unsafe-inline` returns.
+- Verified: all 11 pages load in headless Chromium with the real CSP enforced, 0 violations, 0 JS errors.
+
 # CHANGELOG-FIXES
 
 ## Defects found and fixed
