@@ -17,7 +17,7 @@ def run(captcha_on):
             bodies.append(json.loads(r.request.post_data or '{}'))
             r.fulfill(json={'ok': False, 'error': 'captcha_failed'} if len(bodies) == 1 and captcha_on else {'ok': True, 'pid': 'abcd1234', 'token': 't'})
         pg.route('**/api/create', create); pg.route('**/api/h/**', lambda r: r.fulfill(json={'ok': False}))
-        pg.goto(f'http://127.0.0.1:{port}/'); pg.wait_for_selector('#go'); pg.click('#go'); pg.wait_for_selector('#st'); pg.fill('#nm', 'Tester'); pg.wait_for_timeout(600)
+        pg.goto(f'http://127.0.0.1:{port}/'); pg.wait_for_selector('#go'); pg.click('#go'); pg.wait_for_selector('#st'); pg.fill('#nm', 'Tester'); pg.check('#pc'); pg.wait_for_timeout(600)
         has_widget = pg.locator('#capw[data-ok="1"]').count() == 1
         pg.click('#st'); pg.wait_for_timeout(300); msg = pg.inner_text('#er') if pg.locator('#er').count() else ''
         first_sent = len(bodies)
