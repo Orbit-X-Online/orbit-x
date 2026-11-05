@@ -51,4 +51,8 @@ for (const f of ['index.html', 'workspace.html', 'guide.html']) assert.match(fs.
 ok('whole-app translation script exists, parses, is cached offline and is loaded by the app, My records and the guide');
 assert.ok(fs.existsSync(path.join(dir, 'voice.js'))); new vm.Script(fs.readFileSync(path.join(dir, 'voice.js'), 'utf8')); for (const f of ['index.html', 'workspace.html', 'demo.html']) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /voice\.js/, f + ' must load voice.js'); for (const f of pages) assert.match(fs.readFileSync(path.join(dir, f), 'utf8'), /lang\.js/, f + ' must load lang.js');
 ok('shared voice module exists and is loaded by app, workspace and demo; lang.js on every page');
+{ const ix = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  assert.match(ix, /function staleTab\(/); assert.match(ix, /addEventListener\('storage'/); assert.match(ix, /pushOffDevice\(cur,/); assert.match(ix, /wipeCache\(cur\.pid\)/);
+  for (const f of ['workspace.html', 'studio.html']) assert.doesNotMatch(fs.readFileSync(path.join(dir, f), 'utf8'), /catch\(e\)\{\} location\.href = '\/'/, f + ' must sign out through dropSession so the saved-accounts list is cleaned too'); }
+ok('sign-out wipes cached health data, stops that phone getting alerts, and stale tabs cannot revive a signed-out account');
 console.log('ALL STATIC FRONT-END TESTS PASSED (' + n + ')');
