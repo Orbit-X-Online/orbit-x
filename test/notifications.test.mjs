@@ -379,9 +379,10 @@ r = await call('POST', IN + 'insight', {}, ins.token); const kk = (await call('P
   q = await call('POST', PF + 'resetkey', {}, cg.token); assert.equal(q._s, 400); assert.equal(q.error, 'confirm_required');
   q = await call('POST', PF + 'resetkey', { confirm: true }, cg.token); assert.ok(q.ok); assert.ok(q.recoveryKey.startsWith(pf.pid + '.')); const nk = q.recoveryKey.split('.')[1]; assert.notEqual(nk, pf.token);
   q = await call('GET', PF + 'state', null, pf.token); assert.equal(q._s, 401); // the old key no longer works
-  q = await call('GET', PF + 'state', null, nk); assert.ok(q.ok); assert.equal(q.role, 'patient'); assert.ok(q.notices.some((n) => n.kind === 'key_reset')); // the new key does, and the reset is on record
+  q = await call('POST', PF + 'restore', { secret: nk }); assert.ok(q.ok && q.token); const nsess = q.token; // the new key signs this phone in with a fresh session
+  q = await call('GET', PF + 'state', null, nsess); assert.ok(q.ok); assert.equal(q.role, 'patient'); assert.ok(q.notices.some((n) => n.kind === 'key_reset')); // the new key does, and the reset is on record
   q = await call('GET', PF + 'state', null, cg.token); assert.ok(q.ok); // the caregiver keeps their own access
-  q = await call('POST', PF + 'resetkey', { confirm: true }, cg.token); assert.ok(q.ok); pf.token = q.recoveryKey.split('.')[1]; // the second reset replaces the first key
+  q = await call('POST', PF + 'resetkey', { confirm: true }, cg.token); assert.ok(q.ok); q = await call('POST', PF + 'restore', { secret: q.recoveryKey.split('.')[1] }); assert.ok(q.ok); pf.token = q.token; // the second reset replaces the first key; the new key signs the phone in
   q = await call('POST', PF + 'resetkey', { confirm: true }, cg.token); assert.equal(q._s, 429); assert.equal(q.error, 'too_many_resets');
   ok('caregiver-assisted recovery: only a caregiver, only with confirmation, old key dies, new key works, caregiver keeps access, two resets a day at most');
   pushHandler = async () => new Response('', { status: 201 });
