@@ -4,13 +4,13 @@
 
 Orbit-X **does not give medical advice and is not a medical device.** Plain code finds patterns in the person's own logged data; the AI only rewords facts, and its output is checked so it cannot suggest medicine, doses or diagnoses. Emergencies are decided by fixed code, never by an AI. Built solo for the Meta Global AI Developer Hackathon (Startups track, theme: Build for Your World). Use **synthetic (pretend) data only**.
 
-**Prototype with synthetic data. Next steps: a stricter style policy, an external security review. Sign-up CAPTCHA is built and optional (off until you configure it).** See "Security: what is in place, and what is not" below.
+**Status: pilot-ready MVP.** Ready for a small, supervised pilot with consenting testers (a patient, their caregivers and, optionally, a clinician). It is **not** cleared for unsupervised clinical use, for emergencies on its own, or for use with real patient data at scale. See "Pilot-ready MVP: what that means" below and "Security: what is in place, and what is not".
 
 ## The screens
 
 | Screen | Who it is for | What it does |
 |---|---|---|
-| `/` (index) | Everyone | Sign-up (just your name), then your daily app: log blood pressure and tablets, talk to Orbit (fixed, rule-based answers; free-text AI chat is off by default), History, Family and caregivers, Settings (phone alerts, tablet times, language, account). |
+| `/` (index) | Everyone | Sign-up (just your name), then your daily app: log blood pressure and tablets, talk to Orbit (fixed, rule-based answers; free-text AI chat is off by default), History, Family and caregivers, Settings (phone alerts, tablet times, pharmacist and refill, language, recovery key, account). The welcome screen has a **sign in with my recovery key** button, and one phone can hold several accounts (for example your own and a caregiver account) and **switch** between them. |
 | `/workspace.html` | Everyone | **Health Workspace** — your documents, extracted facts with sources, timeline, Evidence Graph, appointment brief, sharing and consent. |
 | `/guide.html` | Everyone | A one-minute plain-words explanation with tabs for the person, the caregiver and the doctor or clinic. Linked from the welcome screen, patient Settings, the caregiver screen (Help), Rule Studio and My records. A first-run tour for patients opens automatically and the **?** button replays it. |
 | `/privacy.html` | Everyone | Privacy and consent notice for testers: what is stored, who can see it, what is sent to the AI, how to delete your account. |
@@ -143,6 +143,33 @@ How it works: the page asks `/api/captcha` whether it is on; if so it shows the 
 
 The Family screen's activity list (patient only) records kind, state and HTTP code per attempt, never health text, endpoints or keys.
 
+## Pilot-ready MVP: what that means
+
+**Meaning:** the core journeys work end to end and are tested, the safety design is in place, and the known gaps are written down. That is enough to run a small supervised pilot. It is not a claim of clinical validation or regulatory approval.
+
+**Ready for a pilot:**
+- Patient, caregiver and clinician journeys: sign-up, invites, daily blood pressure and tablet logging, caregiver alerts, doctor-written rules (Rule Studio), tablet counting with pharmacist refill requests, and the Health Workspace.
+- Account access: every account has a recovery key shown at sign-up. People can sign back in with it from the welcome screen (patient, caregiver, doctor or organisation). A person who lost their key can be helped back in by a joined caregiver (new key, shown once to the caregiver). One phone can switch between a person's own account and a caregiver account.
+- Safety: emergencies are decided by fixed code, never by the AI. The AI only rewords facts and its output is filtered. Free-text AI chat is off by default.
+- Languages: the whole app can be switched to another language (needs the model key).
+- Engineering: deployed on Cloudflare Workers with Durable Objects, rate limits, security headers, and automated tests across smoke, household, notifications/security, end-to-end, static front-end, safety and sign-up CAPTCHA suites.
+
+**Before a pilot starts (checklist):**
+1. Set `MODEL_API_KEY`, `RECEIPT_SECRET`, an SMS provider and the TURN keys (see "Environment variables and secrets").
+2. Turn on the sign-up CAPTCHA (see "Sign-up CAPTCHA").
+3. Test on real phones: sign out and restore with the recovery key, caregiver switching, an alert ringing a caregiver, and phone alerts with the screen off.
+4. Give every tester the privacy notice (`/privacy.html`) in writing and tell them the recovery key is the only way back into an account.
+5. Name a person who watches the alert log during the pilot.
+
+**Not claimed and not done yet:**
+- No email or phone-number account recovery. If a person loses their key, a joined caregiver can give them a new one (**Help [name] get back in**: the old key stops working, the other caregivers and the person are told, the reset is logged, at most 2 a day). If the person has no caregiver, a lost key means a lost account.
+- No clinical validation, medical-device status, or compliance assessment (HIPAA, GDPR, NDPR).
+- No independent security review or penetration test.
+- Phone push alerts can arrive late on some Android phones, and fall detection only works while the app is open.
+- Not for use as the only way someone gets help. Orbit-X is not a doctor and does not replace calling 112.
+
+**Pilot plan:** a few households for 2 to 4 weeks, with written consent, watched alerts, a weekly check-in, and a log of every missed or late alert. Use the results to decide on account recovery, the security review and the privacy review.
+
 ## Security: what is in place, and what is not
 
 **In place (tested with fakes, not a formal audit):**
@@ -157,7 +184,7 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 - A plain-words privacy and consent notice is at `/privacy.html` (linked from the welcome screen and Settings). It is a prototype notice, not legal advice, and it is a link, not a tick-box gate. Tell testers in writing before they use real information.
 - Health text and photos are sent to the AI provider, and phone numbers and message text to the SMS provider, when those features are used. No independent security review, penetration test or compliance assessment (HIPAA, GDPR) has been done. No dependency lockfile is committed yet.
 
-Use synthetic (pretend) data only until these are addressed.
+Use synthetic (pretend) data for demos. For a pilot, use real information only with written consent from each person, and treat the points above as open risks.
 
 ## Where it stands, and what is next
 
@@ -165,7 +192,7 @@ Use synthetic (pretend) data only until these are addressed.
 
 **Engineering evidence:** deployed on Cloudflare Workers with Durable Objects; 175+ automated checks across six test files (smoke, household, notifications/security, end-to-end, static front-end, safety); a syntax check and a headless-browser smoke test; rate limits; and an AI safety filter that is tested.
 
-**Next steps:** a stricter content-security policy for styles, and moving page code into files under `public/js/`, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
+**Next steps:** account recovery by email or phone number, a supervised household pilot, a privacy and compliance review, a stricter content-security policy for styles, and moving page code into files under `public/js/`, an external security review, a committed dependency lockfile, faster language switching, clinic pilots, Meta Voice Transcribe and SAM for tablet photos, and a WhatsApp channel.
 
 ## Known platform limitations
 
