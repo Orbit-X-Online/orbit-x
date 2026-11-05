@@ -195,8 +195,35 @@ function accList(){ try { var a = JSON.parse(localStorage.getItem(AKEY) || '[]')
 function accWrite(a){ try { localStorage.setItem(AKEY, JSON.stringify(a)); } catch(e){} }
 function accSame(x, y){ return x && y && x.pid === y.pid && x.token === y.token; }
 function accSave(s){ if (!s || !s.token || s.synthetic) return; var a = accList().filter(function(x){ return !accSame(x, s) && !(s.role !== 'patient' && x.pid === s.pid && x.role === s.role); }); a.unshift(s); accWrite(a.slice(0, 8)); }
-function saveSession(s){ try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch(e){} accSave(s); }
-function clearSession(){ var cur = loadSession(); try { localStorage.removeItem(SKEY); } catch(e){} if (cur) accWrite(accList().filter(function(x){ return !accSame(x, cur); })); }
+var storedOnce = !!loadSession(), authTrial = false, holdReload = false;
+function saveSession(s){ try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch(e){} accSave(s); storedOnce = !!loadSession(); }
+/* Another tab may have signed in, signed out or switched account. A tab that still shows the old account must never keep talking as it, or write it back. */
+function staleTab(){ var c = loadSession(); if (!sess) return !!c; if (c) return !accSame(c, sess); return storedOnce; }
+function reloadIfStale(){ if (!authTrial && !holdReload && staleTab()) { try { location.replace('/'); } catch(e){ location.reload(); } return true; } return false; }
+window.addEventListener('storage', function(e){ if (e.key === SKEY || e.key === null) reloadIfStale(); });
+function hex2(buf){ return Array.prototype.map.call(new Uint8Array(buf), function(b){ return ('0' + b.toString(16)).slice(-2); }).join(''); }
+/* Sign-out must really end it on this phone: stop this phone getting that account's alerts, and wipe its cached health data. */
+function pushOffDevice(cur, keepBrowserSub){
+  if (!cur || !cur.token || !cur.pid || !('serviceWorker' in navigator)) return;
+  try {
+    navigator.serviceWorker.getRegistration().then(function(r){ return r && r.pushManager ? r.pushManager.getSubscription() : null; }).then(function(sub){
+      if (!sub) return;
+      return crypto.subtle.digest('SHA-256', new TextEncoder().encode(sub.endpoint)).then(function(buf){
+        return fetch('/api/h/' + cur.pid + '/pushoff', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cur.token }, body: JSON.stringify({ eh: hex2(buf) }), cache: 'no-store' }).catch(function(){});
+      }).then(function(){ if (!keepBrowserSub) return sub.unsubscribe(); });
+    }).catch(function(){});
+  } catch(e){}
+}
+function wipeCache(pid){
+  ['orbitx.cache.v1', 'orbitx.laststate.v1'].forEach(function(k){ try { var c = JSON.parse(localStorage.getItem(k) || 'null'); if (!c || !pid || c.pid === pid) localStorage.removeItem(k); } catch(e){ try { localStorage.removeItem(k); } catch(e2){} } });
+}
+function clearSession(){
+  var cur = loadSession(); try { localStorage.removeItem(SKEY); } catch(e){}
+  var rest = cur ? accList().filter(function(x){ return !accSame(x, cur); }) : accList();
+  if (cur) accWrite(rest);
+  if (cur) { wipeCache(cur.pid); pushOffDevice(cur, rest.length > 0); }
+  storedOnce = false;
+}
 function accLabel(x){ return x.role === 'caregiver' ? 'Caregiver for ' + (x.patientName || 'someone') : x.role === 'clinician' ? 'Doctor for ' + (x.patientName || 'a patient') : x.accountType === 'provider' ? 'Organisation: ' + (x.name || 'account') : 'My own account' + (x.name ? ' (' + x.name + ')' : ''); }
 function switchTo(x){ try { localStorage.setItem(SKEY, JSON.stringify(x)); } catch(e){} accSave(x); location.href = '/'; }
 function showSwitch(){
@@ -216,6 +243,7 @@ var timer = null;
 
 /* ---------- network ---------- */
 function api(method, path, body){
+  if (sess && sess.token && reloadIfStale()) return new Promise(function(){}); /* this tab is showing an account that was signed out or replaced in another tab */
   var headers = { 'Content-Type': 'application/json' };
   if (sess && sess.token) headers.Authorization = 'Bearer ' + sess.token;
   return fetch(path, { method: method, headers: headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' })
@@ -321,7 +349,8 @@ function keyScreen(next){
   '<button class="btn green" id="kn" disabled>Continue</button><div class="center"><button class="link" id="kx">Skip for now. I will find it later in Settings</button></div>';
   $('kc').onclick = function(){ try { navigator.clipboard.writeText(k).then(function(){ $('km').textContent = 'Copied. Now paste it somewhere safe.'; $('ks').focus(); }, function(){ $('km').textContent = 'Press and hold the key above to copy it.'; }); } catch(e){ $('km').textContent = 'Press and hold the key above to copy it.'; } };
   $('ks').onchange = function(){ $('kn').disabled = !$('ks').checked; };
-  $('kn').onclick = $('kx').onclick = next;
+  holdReload = true;
+  $('kn').onclick = $('kx').onclick = function(){ holdReload = false; next(); };
 }
 /* ---------- optional sign-up CAPTCHA (Cloudflare Turnstile); does nothing unless the server turns it on ---------- */
 var CAP = { on: null, token: '', id: null };
@@ -383,13 +412,13 @@ function codeScreen(kind){
     if (join) doJoin(v, function(m){ $('ok').disabled = false; $('er').textContent = m; });
     else {
       v = v.replace(/[\s"'`]+/g, ''); var p = v.split('.'); if (p.length !== 2 || !p[0] || !p[1]) { $('ok').disabled = false; $('er').textContent = 'That key does not look right. It has two parts joined by a dot. Paste it exactly as shown.'; return; }
-      sess = { role: 'patient', pid: p[0].toLowerCase(), token: p[1] };
+      var prevSess = sess; authTrial = true; sess = { role: 'patient', pid: p[0].toLowerCase(), token: p[1] };
       hApi('state').then(function(j){
-        if (!j || !j.ok || !j.profile) { sess = null; $('ok').disabled = false; $('er').textContent = j && j._status === 0 ? 'No internet connection. Please try again.' : 'I could not find that account. Check the key and try again.'; return; }
+        if (!j || !j.ok || !j.profile) { sess = prevSess; authTrial = false; $('ok').disabled = false; $('er').textContent = j && j._status === 0 ? 'No internet connection. Please try again.' : 'I could not find that account. Check the key and try again.'; return; }
         var r = j.role, me = j.me || {};
         if (r === 'caregiver' || r === 'clinician') sess = { role: r, pid: sess.pid, token: sess.token, id: me.id, name: me.name, patientName: j.profile.name };
         else sess = { role: 'patient', pid: sess.pid, token: sess.token, name: j.profile.name, accountType: j.profile.accountType === 'provider' ? 'provider' : 'individual' };
-        saveSession(sess);
+        saveSession(sess); authTrial = false; wipeCache(); /* never show another account's saved data */
         if (r === 'clinician') { location.href = '/studio.html'; return; }
         if (r === 'caregiver') { caregiverApp(); return; }
         location.href = sess.accountType === 'provider' ? '/developer.html' : '/?guardian=1';
@@ -508,7 +537,7 @@ function firstLoad(){
   var txt;
   if (sess.firstRun) {
     txt = 'Hello ' + st.profile.name + '. Enter your first blood pressure reading in the box below. Tap Settings to set your medicine times, and Family to add someone I can alert.';
-    sess.firstRun = false; saveSession(sess);
+    sess.firstRun = false; if (!staleTab()) saveSession(sess);
   } else {
     var first = String(a.short || '').split(/(?<=\.)\s+/)[0]; // the full story is in History; the home screen only says the headline
     txt = 'Hello ' + st.profile.name + '. ' + first + (packFinished() ? ' Your tablets have finished. After you refill, enter the new count in Settings.' : '') + (pend.length ? ' Have you taken your ' + slotName(pend[0]) + ' tablet?' : '');

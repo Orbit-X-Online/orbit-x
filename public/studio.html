@@ -36,6 +36,10 @@ button.r{background:none;border:1px solid #7f2a2a;color:#fca5a5;padding:6px 12px
 (function(){
 var SKEY = 'orbitx.session.v1', sess = null, st = null, draft = null;
 try { sess = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch(e){}
+var AKEY = 'orbitx.accounts.v1';
+function dropSession(){ var cur = sess; try { localStorage.removeItem(SKEY); } catch(e){} try { if (cur) { var a = JSON.parse(localStorage.getItem(AKEY) || '[]'); localStorage.setItem(AKEY, JSON.stringify((Array.isArray(a) ? a : []).filter(function(x){ return !(x && x.pid === cur.pid && x.token === cur.token); }))); } } catch(e){} }
+window.addEventListener('storage', function(e){ if (e.key !== SKEY && e.key !== null) return; var c = null; try { c = JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch(x){} if (sess && (!c || c.pid !== sess.pid || c.token !== sess.token)) location.replace('/'); });
+
 var app = document.getElementById('app');
 function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
 if (!sess || sess.role !== 'clinician') {
@@ -67,7 +71,7 @@ function view(){
     '<div class="small" style="margin-top:24px">Orbit-X does not diagnose or give medical advice. Rules only decide who gets told, and when.</div>';
   var tx = document.getElementById('tx'); if (draft) tx.value = draft.text || '';
   app.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick = function(){ tx.value = EX[+b.getAttribute('data-ex')]; }; });
-  document.getElementById('so').onclick = function(){ var k = sess.pid + '.' + sess.token; try { navigator.clipboard.writeText(k); } catch(e){} if (!confirm('Your recovery key (copied):\n\n' + k + '\n\nSave it. Tap "I already have an account" on the first screen to come back. Sign out now?')) return; try { localStorage.removeItem(SKEY); } catch(e){} location.href = '/'; };
+  document.getElementById('so').onclick = function(){ var k = sess.pid + '.' + sess.token; try { navigator.clipboard.writeText(k); } catch(e){} if (!confirm('Your recovery key (copied):\n\n' + k + '\n\nSave it. Tap "I already have an account" on the first screen to come back. Sign out now?')) return; dropSession(); location.href = '/'; };
   app.querySelectorAll('[data-del]').forEach(function(b){ b.onclick = function(){ flash = ''; if (confirm('Delete this rule?')) api('POST', 'ruledel', { id: b.getAttribute('data-del') }).then(function(j){ if (j.ok) { st = j; view(); } }); }; });
   var isb = document.getElementById('isb'); if (isb) isb.onclick = function(){ isb.disabled = true; api('POST', 'insight', {}).then(function(j){ isb.disabled = false; var el = document.getElementById('ist'); if (!j.insight) { el.textContent = 'Could not write it now. Try again.'; return; } el.innerHTML = '<div style="font-size:15px;color:var(--txt);line-height:1.5">' + esc(j.insight.text) + '</div><div class="small" style="margin-top:6px">' + (j.insight.source === 'meta' ? 'Written by Muse Spark from the patient\'s numbers. Checked by code.' : 'Written by Orbit from the patient\'s numbers.') + ' Not medical advice.</div>'; }); };
   app.querySelectorAll('[data-tst]').forEach(function(b){ b.onclick = function(){ b.disabled = true; api('POST', 'ruletest', { id: b.getAttribute('data-tst') }).then(function(j){ if (j.ok) { st = j; flash = 'Test alert sent to the care team\'s phones. It does not text anyone.'; view(); } else { b.disabled = false; alert('Could not send the test.'); } }); }; });
@@ -93,7 +97,7 @@ function view(){
 }
 function load(){
   api('GET', 'state').then(function(j){
-    if (j._status === 401 || j._status === 404) { try { localStorage.removeItem(SKEY); } catch(e){} location.href = '/'; return; }
+    if (j._status === 401 || j._status === 404) { dropSession(); location.href = '/'; return; }
     if (j.ok) { st = j; if (!document.getElementById('tx') || !document.activeElement || document.activeElement.id !== 'tx') { if (!draft) view(); } }
   });
 }

@@ -50,7 +50,7 @@ function drawTabs(){
 function paintBadge(ai){ var el = document.getElementById('aib'); if (!el) return; el.innerHTML = OX.aiBadge(ai); OX.bindBadge(); if (ai && ai.mode === 'live') OX.checkAI(function(){ el.innerHTML = OX.aiBadge(ai); OX.bindBadge(); }); }
 function load(){
   return OX.w('wstate', null, 'GET').then(function(j){
-    if (j._status === 401 || j._status === 404) { try { localStorage.removeItem(OX.SKEY); } catch(e){} location.href = '/'; return; }
+    if (j._status === 401 || j._status === 404) { OX.dropSession(); location.href = '/'; return; }
     if (!j.ok) { document.getElementById('view').innerHTML = '<div class="empty">Could not load. Check your connection and reload.</div>'; return; }
     S = j; document.getElementById('who').textContent = '· ' + j.patient; paintBadge(j.ai); render();
   });

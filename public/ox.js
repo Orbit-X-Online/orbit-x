@@ -3,6 +3,10 @@ window.OX = (function(){
   var SKEY = 'orbitx.session.v1';
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function session(){ try { return JSON.parse(localStorage.getItem(SKEY) || 'null'); } catch(e){ return null; } }
+  var AKEY = 'orbitx.accounts.v1';
+  function dropSession(){ var cur = session(); try { localStorage.removeItem(SKEY); } catch(e){} try { if (cur) { var a = JSON.parse(localStorage.getItem(AKEY) || '[]'); localStorage.setItem(AKEY, JSON.stringify((Array.isArray(a) ? a : []).filter(function(x){ return !(x && x.pid === cur.pid && x.token === cur.token); }))); } } catch(e){} }
+  var shown = session(); /* a tab left open on a signed-out or replaced account must not keep acting as it */
+  window.addEventListener('storage', function(e){ if (e.key !== SKEY && e.key !== null) return; var c = session(); if (shown && (!c || c.pid !== shown.pid || c.token !== shown.token)) location.replace('/'); });
   function need(role){ var s = session(); if (!s || s.role !== (role || 'patient')) { location.href = '/'; return null; } return s; }
   function api(method, path, body, headers){
     var s = session(), h = Object.assign({ 'Content-Type': 'application/json' }, headers || {});
@@ -79,5 +83,5 @@ window.OX = (function(){
     document.getElementById('bkacct').onclick = function(){ try { localStorage.setItem(SKEY, b); localStorage.removeItem(BKEY); } catch(e){} location.href = '/workspace.html'; };
   }
   try { backBar(); } catch(e){}
-  return { enterSandbox: enterSandbox, esc: esc, session: session, need: need, api: api, w: w, ago: ago, copy: copy, openSheet: openSheet, aiBadge: aiBadge, checkAI: checkAI, bindBadge: bindBadge, friendlyAiError: friendlyAiError, SKEY: SKEY };
+  return { enterSandbox: enterSandbox, esc: esc, session: session, need: need, api: api, w: w, ago: ago, copy: copy, openSheet: openSheet, aiBadge: aiBadge, checkAI: checkAI, bindBadge: bindBadge, friendlyAiError: friendlyAiError, SKEY: SKEY, dropSession: dropSession };
 })();
