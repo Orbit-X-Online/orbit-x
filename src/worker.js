@@ -1234,7 +1234,8 @@ export class AlertHub {
         break;
       }
       case 'pushoff': {
-        const gone = (h.pushSubs || []).filter((x) => x.role === who.role && (x.id || null) === (who.id || null)).map((x) => x.eh);
+        const only = typeof body.eh === 'string' && /^[a-f0-9]{64}$/.test(body.eh) ? body.eh : null; // sign-out on one phone stops alerts on that phone only
+        const gone = (h.pushSubs || []).filter((x) => x.role === who.role && (x.id || null) === (who.id || null) && (!only || x.eh === only)).map((x) => x.eh);
         h.pushSubs = (h.pushSubs || []).filter((x) => !gone.includes(x.eh));
         gone.forEach((e) => { delete (h.pushStatus || {})[e]; });
         break;
