@@ -1137,7 +1137,7 @@ function showInvite(code, name, doctor){
 function u8(b64u){ var p = '='.repeat((4 - b64u.length % 4) % 4), b = atob((b64u + p).replace(/-/g, '+').replace(/_/g, '/')), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
 function sameKey(sub, k){ try { var x = new Uint8Array(sub.options.applicationServerKey); if (x.length !== k.length) return false; for (var i = 0; i < x.length; i++) if (x[i] !== k[i]) return false; return true; } catch(e){ return false; } }
 function alertsSupported(){ return ('serviceWorker' in navigator) && ('PushManager' in window) && ('Notification' in window); }
-function enableAlerts(cb, confirm, silent){
+function enableAlerts(cb, confirm, silent, force){
   if (!alertsSupported()) { cb(false, 'This browser cannot show alerts when it is closed. Use Chrome on Android. On iPhone, tap Share, then Add to Home Screen, and open Orbit-X from there.'); return; }
   var ask = (silent && Notification.permission !== 'granted') ? Promise.resolve('skip') : Notification.requestPermission();
   ask.then(function(perm){
@@ -1148,7 +1148,7 @@ function enableAlerts(cb, confirm, silent){
         if (!k || !k.key) throw new Error('nokey');
         var key = u8(k.key);
         return reg.pushManager.getSubscription().then(function(old){
-          if (old && sameKey(old, key)) return old;
+          if (old && !force && sameKey(old, key)) return old;
           return (old ? old.unsubscribe() : Promise.resolve()).then(function(){ return reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }); });
         });
       });
@@ -1263,7 +1263,7 @@ function showSettings(){
     if (pp0 && !/^\+?[0-9][0-9\s\-()]{6,18}$/.test(pp0)) { $('phe').textContent = 'Please enter a valid phone number for the pharmacy.'; return; }
     if ((pp0 || '') !== (pOld ? pOld.phone : '') || (pn0 || '') !== (pOld ? pOld.name : '')) body0.pharmacist = pp0 ? { name: pn0, phone: pp0 } : null;
     hApi('profile', body0).then(function(j){ if (take(j)) { refreshCards(); o.classList.remove('on'); say('Saved.'); } }); };
-  $('alb').onclick = function(){ if (st.profile.alertsOn) { var t0 = Date.now(); $('ale').textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ $('ale').textContent = diagText(j); if (j && j.ok && j.diag && j.diag[0] && j.diag[0].state === 'accepted') watchDisplayed(t0, function(m){ $('ale').textContent = m; }); }); return; } enableAlerts(function(ok, m){ $('ale').textContent = ok ? 'Phone alerts are on.' : m; if (ok) $('alb').textContent = 'Phone alerts are ON. Send a test'; }, true); };
+  $('alb').onclick = function(){ if (st.profile.alertsOn) { var t0 = Date.now(); $('ale').textContent = 'Sending test...'; hApi('testpush', {}).then(function(j){ var d = j && j.diag && j.diag[0]; if (d && (d.state === 'gone' || d.state === 'rejected')) { $('ale').textContent = 'This phone\'s alert link expired. Fixing it now...'; enableAlerts(function(ok, m){ if (!ok) { st.profile.alertsOn = false; $('alb').textContent = 'Turn on phone alerts'; $('ale').textContent = m || 'Could not renew alerts. Tap Turn on phone alerts.'; return; } $('ale').textContent = 'Alerts renewed. Sending a new test...'; hApi('testpush', {}).then(function(j2){ $('ale').textContent = diagText(j2); if (j2 && j2.ok && j2.diag && j2.diag[0] && j2.diag[0].state === 'accepted') watchDisplayed(t0, function(m2){ $('ale').textContent = m2; }); }); }, true, false, true); return; } $('ale').textContent = diagText(j); if (j && j.ok && d && d.state === 'accepted') watchDisplayed(t0, function(m){ $('ale').textContent = m; }); }); return; } enableAlerts(function(ok, m){ $('ale').textContent = ok ? 'Phone alerts are on.' : m; if (ok) { st.profile.alertsOn = true; $('alb').textContent = 'Phone alerts are ON. Send a test'; } }, true, false, true); };
   $('fg').onchange = function(){ if ($('fg').checked) fallEnable(function(ok, m){ if (!ok) { $('fg').checked = false; $('fge').textContent = m; } }); else fallDisable(); };
   $('fgt').onclick = function(){ o.classList.remove('on'); askFall(); };
   OXRadio.bindSettings(function(){ startHelp('Help button pressed'); });
