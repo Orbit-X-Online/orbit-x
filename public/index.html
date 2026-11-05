@@ -372,11 +372,13 @@ function onboard(){
   app.innerHTML = '<div class="top"><b>Orbit-X</b><button class="link" id="bk">Back</button></div><div class="stage" style="height:170px;margin-bottom:0">' + faceSvg() + '</div><h2 style="font-weight:500;font-size:20px;margin:6px 0 0;text-align:center">One quick thing</h2>' +
   '<label class="l" for="nm">What should I call you?</label><input class="field" id="nm" maxlength="40" autocomplete="given-name" placeholder="Your name" enterkeyhint="go">' +
   '<div class="small" style="margin-top:12px">Next you will see your blood pressure screen, and I will show you around in under a minute. Your readings stay private to you and the family you invite. Orbit-X is not a doctor and does not give medical advice. If you feel very unwell, call 112.</div>' +
+  '<label class="check" style="margin-top:12px"><input type="checkbox" id="pc"> I have read the <a class="link" href="/privacy.html" target="_blank" rel="noopener" style="text-decoration:underline">privacy and consent notice</a> and I agree.</label>' +
   '<div id="cap"></div><div class="err" id="er"></div><button class="btn" id="st">Start</button>';
   $('bk').onclick = function(){ welcome(); }; capLoad();
   $('nm').onkeydown = function(e){ if (e.key === 'Enter') $('st').click(); };
   $('st').onclick = function(){
     var name = $('nm').value.trim(); if (!name) { $('er').textContent = 'Please tell me your name.'; return; }
+    if (!$('pc').checked) { $('er').textContent = 'Please tick the box to agree to the privacy and consent notice.'; return; }
     if (!capGate()) return;
     $('st').disabled = true; $('er').textContent = '';
     api('POST', '/api/create', { name: name, slots: [], doseQty: {}, phone: '', today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'individual', captcha: CAP.on ? CAP.token : undefined }).then(function(j){
@@ -390,10 +392,12 @@ function onboardPro(){
   '<div class="small" style="margin-top:6px">This gives you the Developer area: API keys, record import and emergency handoff. It is separate from the personal app. Use synthetic (pretend) data only while Orbit-X is a hackathon project.</div>' +
   '<label class="l" for="nm">Your name</label><input class="field" id="nm" maxlength="40" autocomplete="name" placeholder="Dr Ade">' +
   '<label class="l" for="og">Clinic or organisation</label><input class="field" id="og" maxlength="60" placeholder="City Clinic">' +
+  '<label class="check" style="margin-top:12px"><input type="checkbox" id="pc"> I have read the <a class="link" href="/privacy.html" target="_blank" rel="noopener" style="text-decoration:underline">privacy and consent notice</a> and I agree.</label>' +
   '<div id="cap"></div><div class="err" id="er"></div><button class="btn" id="st">Create organisation account</button><div class="center"><a class="link" href="/docs.html" style="text-decoration:none">Read the API docs first</a></div>';
   $('bk').onclick = function(){ welcome(); }; capLoad();
   $('st').onclick = function(){
     var name = $('nm').value.trim(), og = $('og').value.trim(); if (!name || !og) { $('er').textContent = 'Please fill in both boxes.'; return; }
+    if (!$('pc').checked) { $('er').textContent = 'Please tick the box to agree to the privacy and consent notice.'; return; }
     if (!capGate()) return;
     $('st').disabled = true; $('er').textContent = '';
     api('POST', '/api/create', { name: name, org: og, slots: [], today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'provider', captcha: CAP.on ? CAP.token : undefined }).then(function(j){
