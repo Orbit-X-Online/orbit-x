@@ -1253,8 +1253,20 @@ function keepAwake(){ try { if (navigator.wakeLock) navigator.wakeLock.request('
 document.addEventListener('visibilitychange', function(){ if (!document.hidden && armed) keepAwake(); if (!document.hidden) qFlush(); if (!document.hidden && sess && sess.pid && sess.role === 'patient' && document.getElementById('c2')) { hApi('state').then(function(j){ if (take(j)) { refreshCards(); renderEmergency(); } }); } });
 function caregiverApp(){
   stopTimer();
-  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + ' <button class="link" id="swc">Switch</button> <a class="link" href="/guide.html#caregiver" style="text-decoration:none;margin-left:8px">Help</a></span></div><div id="cgv" style="position:relative;flex:1"></div>' + langPicker('cl') + '<audio id="rtcaudio" autoplay playsinline></audio>';
-  bindLangPicker('cl'); $('swc').onclick = showSwitch; cgRender(); cgPoll(); quietResync();
+  app.innerHTML = '<div class="top"><b style="font-size:16px">Orbit-X</b><span class="small">' + esc(sess.name || 'Caregiver') + ' <button class="link" id="swc">Switch</button> <a class="link" href="/guide.html#caregiver" style="text-decoration:none;margin-left:8px">Help</a></span></div><div id="cgv" style="position:relative;flex:1"></div>' + langPicker('cl') + '<div class="center" style="margin:6px 0"><button class="link" id="rsk">Help ' + esc(sess.patientName || 'them') + ' get back in (new recovery key)</button></div><audio id="rtcaudio" autoplay playsinline></audio>';
+  bindLangPicker('cl'); $('swc').onclick = showSwitch; $('rsk').onclick = resetPatientKey; cgRender(); cgPoll(); quietResync();
+}
+function resetPatientKey(){
+  var nm = (st && st.profile && st.profile.name) || sess.patientName || 'this person';
+  if (!confirm('Only do this if ' + nm + ' has lost their recovery key and you have checked it is really them (call them).\n\nThis makes a NEW key. Their old key and any phone signed in as them stop working. The other caregivers will be told. Continue?')) return;
+  hApi('resetkey', { confirm: true }).then(function(j){
+    if (!j || !j.ok || !j.recoveryKey) { alert(j && j.error === 'too_many_resets' ? 'A key was already reset twice today. Please try again tomorrow.' : j && j._status === 0 ? 'No internet. Please try again.' : 'Could not reset the key. Please try again.'); return; }
+    var o = document.createElement('div'); o.className = 'overlay on';
+    o.innerHTML = '<h2>New recovery key for ' + esc(nm) + '</h2><div class="small" style="margin-bottom:8px">Give this key to ' + esc(nm) + ' now (read it over the phone or send it in a message). It is shown only once. They open Orbit-X, tap the green button "I already have an account" and paste it.</div><div class="code" style="display:block;font-size:13px;user-select:all;word-break:break-all">' + esc(j.recoveryKey) + '</div><button class="btn" id="nkc">Copy the key</button><div class="small center" id="nkm" role="status"></div><button class="btn ghost" id="nkx">I have given it to them</button>';
+    document.body.appendChild(o);
+    $('nkc').onclick = function(){ try { navigator.clipboard.writeText(j.recoveryKey).then(function(){ $('nkm').textContent = 'Copied.'; }, function(){ $('nkm').textContent = 'Press and hold the key to copy it.'; }); } catch(e){ $('nkm').textContent = 'Press and hold the key to copy it.'; } };
+    $('nkx').onclick = function(){ o.remove(); };
+  });
 }
 function cgPoll(){
   hApi('state').then(function(j){
