@@ -368,6 +368,22 @@ r = await call('POST', IN + 'insight', {}, ins.token); const kk = (await call('P
   seq([B({ tablets: 5, side: 'back', issues: ['foil_back', 'glare'] }), B({ tablets: 5, issues: ['foil_back'] }), B({ tablets: 5 })]);
   q = await call('POST', PF + 'packread', { img: IMG }, pf.token); assert.equal(q.seen, 5); assert.deepEqual(q.issues, ['foil_back']); // advice only appears when two reads notice it
   ok('photo count: torn pockets give a range and no confident number, and photo problems come back as plain advice');
+  // sharper photos (up to ~880 KB of text) must get through the router; anything bigger is refused
+  clock += 3700000; // the pack reader allows 12 looks an hour
+  seq([B({ tablets: 9 }), B({ tablets: 9 }), B({ tablets: 9 })]);
+  q = await call('POST', PF + 'packread', { img: 'data:image/jpeg;base64,' + 'A'.repeat(800000) }, pf.token); assert.equal(q.seen, 9);
+  q = await call('POST', PF + 'packread', { img: 'data:image/jpeg;base64,' + 'A'.repeat(1000000) }, pf.token); assert.ok(q._s === 413 || q._s === 400);
+  ok('photo count: a sharper 800 KB photo is accepted, a 1 MB one is refused');
+  // caregiver-assisted recovery: a joined caregiver gives a person who lost their key a new one; the old key dies
+  q = await call('POST', PF + 'resetkey', { confirm: true }, pf.token); assert.equal(q._s, 403); // the person themself cannot use it
+  q = await call('POST', PF + 'resetkey', {}, cg.token); assert.equal(q._s, 400); assert.equal(q.error, 'confirm_required');
+  q = await call('POST', PF + 'resetkey', { confirm: true }, cg.token); assert.ok(q.ok); assert.ok(q.recoveryKey.startsWith(pf.pid + '.')); const nk = q.recoveryKey.split('.')[1]; assert.notEqual(nk, pf.token);
+  q = await call('GET', PF + 'state', null, pf.token); assert.equal(q._s, 401); // the old key no longer works
+  q = await call('GET', PF + 'state', null, nk); assert.ok(q.ok); assert.equal(q.role, 'patient'); assert.ok(q.notices.some((n) => n.kind === 'key_reset')); // the new key does, and the reset is on record
+  q = await call('GET', PF + 'state', null, cg.token); assert.ok(q.ok); // the caregiver keeps their own access
+  q = await call('POST', PF + 'resetkey', { confirm: true }, cg.token); assert.ok(q.ok); pf.token = q.recoveryKey.split('.')[1]; // the second reset replaces the first key
+  q = await call('POST', PF + 'resetkey', { confirm: true }, cg.token); assert.equal(q._s, 429); assert.equal(q.error, 'too_many_resets');
+  ok('caregiver-assisted recovery: only a caregiver, only with confirmation, old key dies, new key works, caregiver keeps access, two resets a day at most');
   pushHandler = async () => new Response('', { status: 201 });
   delete env.MODEL_API_KEY; delete env.MODEL_BASE_URL; delete env.MODEL_TEXT;
   q = await call('POST', PF + 'proofsend', { id: rid, img: IMG, count: 13 }, pf.token); assert.equal(q.ok, true); assert.equal(q.proof.status, 'sent'); assert.equal(q.proof.result.seen, 13); assert.equal(q.proof.result.expected, 20);
