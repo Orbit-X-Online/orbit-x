@@ -7,16 +7,42 @@ import { validateExtraction, validateExplanation, extractRules } from './intel.j
 export function aiMode(env) { return env.AI_MODE === 'mock' ? 'mock' : env.MODEL_API_KEY ? 'live' : 'off'; }
 export function providerName(env) { const b = String(env.MODEL_BASE_URL || ''); return /baseten/i.test(b) ? 'Baseten (Meta Muse Spark Open)' : /meta\.ai/i.test(b) ? 'Meta Model API' : 'OpenAI-compatible endpoint'; }
 
-function parseJson(text) {
-  let t = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
-  const a = t.indexOf('{'); if (a < 0) return null;
-  let depth = 0, inStr = false, esc = false;
+// Tolerant JSON reader for model output: strips code fences, skips prose/braces before the real object, fixes smart quotes,
+// comments and trailing commas, and repairs output that was cut off mid-way (closes open strings/brackets).
+function tryParse(str) {
+  const attempts = [str, str.replace(/,\s*([}\]])/g, '$1')];
+  for (const a of attempts) { try { return JSON.parse(a); } catch { /* next */ } }
+  return null;
+}
+function scanObject(t, a) {
+  const stack = []; let inStr = false, esc = false;
   for (let i = a; i < t.length; i++) {
     const c = t[i];
     if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
-    if (c === '"') inStr = true; else if (c === '{') depth++; else if (c === '}') { depth--; if (depth === 0) { try { return JSON.parse(t.slice(a, i + 1)); } catch { return null; } } }
+    if (c === '"') inStr = true;
+    else if (c === '{') stack.push('}');
+    else if (c === '[') stack.push(']');
+    else if (c === '}' || c === ']') { stack.pop(); if (!stack.length) return { text: t.slice(a, i + 1), closed: true }; }
   }
-  return null;
+  // cut off: close what is open, dropping a dangling key/comma
+  let tail = t.slice(a);
+  if (inStr) tail += '"';
+  tail = tail.replace(/,\s*$/, '').replace(/,\s*"[^"]*"\s*:?\s*$/, '').replace(/:\s*$/, ': null');
+  return { text: tail + stack.reverse().join(''), closed: false };
+}
+function parseJson(text) {
+  let t = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '').replace(/^[\s\S]*<\/think>/i, '').trim();
+  t = t.replace(/```(?:json)?/gi, '').replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'").replace(/^\s*\/\/.*$/gm, '');
+  let fallback = null;
+  for (let a = t.indexOf('{'); a >= 0; a = t.indexOf('{', a + 1)) {
+    const r = scanObject(t, a);
+    const obj = tryParse(r.text);
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      if ('facts' in obj || 'document' in obj || 'sections' in obj || 'kind' in obj || 'tablets' in obj) return obj;
+      if (!fallback && Object.keys(obj).length) fallback = obj;
+    }
+  }
+  return fallback;
 }
 function reason(e) { if (!(e instanceof MetaError)) return 'unexpected_error'; if (e.status === 504) return 'timeout'; if (e.status === 402) return 'no_credits'; if (e.status === 429) return 'rate_limited'; if (e.status === 404) return 'model_not_found'; if (e.status === 500) return 'not_configured'; if (e.status === 403) return 'key_rejected'; return 'provider_unavailable'; }
 
@@ -24,10 +50,15 @@ async function callJson(env, system, user, opts = {}) {
   const t0 = Date.now();
   try {
     const model = await resolveModel(env);
-    const out = await metaChat(env, { model, temperature: 0.1, maxTokens: opts.maxTokens || 4000, timeoutMs: opts.timeoutMs || 60000, messages: [{ role: 'system', content: system }, { role: 'user', content: user }] });
-    const data = parseJson(out);
-    if (!data) return { ok: false, error: 'malformed_json', model, ms: Date.now() - t0 };
-    return { ok: true, data, model, ms: Date.now() - t0 };
+    let tokens = opts.maxTokens || 4000;
+    for (let attempt = 0; attempt < 2; attempt++) { // one retry: a bad or cut-off answer is often fixed by asking again with more room
+      const sys = attempt ? system + '\nIMPORTANT: your previous answer was not valid JSON. Reply with ONE complete, valid JSON object only. No markdown fences, no commentary, no trailing commas. Keep it short: at most 25 facts.' : system;
+      const out = await metaChat(env, { model, temperature: attempt ? 0 : 0.1, maxTokens: tokens, timeoutMs: opts.timeoutMs || 60000, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] });
+      const data = parseJson(out);
+      if (data) return { ok: true, data, model, ms: Date.now() - t0 };
+      tokens = Math.min(tokens * 2, 8000);
+    }
+    return { ok: false, error: 'malformed_json', model, ms: Date.now() - t0 };
   } catch (e) { return { ok: false, error: reason(e), detail: String(e && e.message || '').slice(0, 160), ms: Date.now() - t0 }; }
 }
 
