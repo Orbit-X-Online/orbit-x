@@ -1153,6 +1153,24 @@ export class AlertHub {
         extra.code = inviteCode(h.pid, secret); extra.caregiverId = c.id;
         break;
       }
+      case 'resetkey': { // a joined caregiver helps the person back in after they lost their recovery key: the old key stops working and a new one is shown ONCE to the caregiver
+        if (who.role !== 'caregiver') { fail(403, 'caregiver_only'); break; }
+        if (body.confirm !== true) { fail(400, 'confirm_required'); break; }
+        h.keyResets = (h.keyResets || []).filter((t) => now - t < 86400000);
+        if (h.keyResets.length >= 2) { fail(429, 'too_many_resets'); break; }
+        const by = cleanName((h.caregivers.find((c) => c.id === who.id) || {}).name, 40) || 'A caregiver';
+        const pe = this.subsFor(h, (x) => x.role === 'patient'), oe = this.subsFor(h, (x) => x.role === 'caregiver' && x.id !== who.id);
+        const nt = rand(40); h.tokenHash = await sha(nt); // every phone signed in as the person is signed out on its next request
+        h.keyResets.push(now);
+        const nm0 = h.name || 'The person';
+        h.notices = h.notices || []; h.notices.push({ id: 'k' + now, t: now, kind: 'key_reset', text: by + ' reset ' + nm0 + '\'s recovery key because it was lost. If that was not asked for, tell your caregivers.' }); if (h.notices.length > 30) h.notices = h.notices.slice(-30);
+        this.ev(h, now, 'key', 'reset', 'caregiver:' + who.id);
+        await this.deliver(h, pe, { title: 'Orbit-X: recovery key reset', body: by + ' reset your recovery key. If you did not ask for this, tell your family.', tag: 'orbit-keyreset' }, now, 'key_reset', 'patient');
+        await this.deliver(h, oe, { title: 'Orbit-X: recovery key reset', body: by + ' reset ' + nm0 + '\'s recovery key.', tag: 'orbit-keyreset' }, now, 'key_reset', 'caregivers');
+        h.pushSubs = (h.pushSubs || []).filter((x) => x.role !== 'patient'); // the old phone no longer belongs to the person
+        extra.recoveryKey = h.pid + '.' + nt; extra.patientName = nm0;
+        break;
+      }
       case 'reinvite': {
         if (!isPatient) { fail(403, 'patient_only'); break; }
         const c = h.caregivers.find((x) => x.id === body.id);
@@ -1631,10 +1649,10 @@ async function handleHousehold(req, env, url, cors) {
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
-    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'docphone', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc', 'xlate', 'packread', 'proofreq', 'proofsend', 'proofget', 'proofdel'].includes(m[2]);
+    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'docphone', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc', 'xlate', 'packread', 'proofreq', 'proofsend', 'proofget', 'proofdel', 'resetkey'].includes(m[2]);
     if (!get && !post) return json({ error: 'Not found' }, 404, cors);
     const text = post ? await req.text() : undefined;
-    if (text && text.length > (m[2] === 'rtc' ? 14000 : (m[2] === 'packread' || m[2] === 'proofsend') ? 480000 : 4000)) return json({ error: 'too_large' }, 413, cors);
+    if (text && text.length > (m[2] === 'rtc' ? 14000 : m[2] === 'packread' ? 960000 : m[2] === 'proofsend' ? 480000 : 4000)) return json({ error: 'too_large' }, 413, cors);
     return relay(await forward(hub(env, 'h:' + m[1]), '/h/' + m[2], req, text), cors);
   }
   return json({ error: 'Not found' }, 404, cors);
