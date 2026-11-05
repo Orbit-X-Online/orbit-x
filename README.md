@@ -80,7 +80,7 @@ Push (VAPID) keys are generated automatically per household and kept inside that
 ## Run the tests
 
 ```
-npm test          # smoke + household + notifications/security + end-to-end + static front-end + safety (no network, no cost)
+npm test          # smoke + household + notifications/security + end-to-end + static front-end + safety + captcha + recovery (no network, no cost)
 npm run check     # syntax check of every source file and front-end script
 python3 test/ui-smoke.py   # optional: real headless browser, needs `pip install playwright && playwright install chromium`
 ```
@@ -149,7 +149,7 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 
 **Ready for a pilot:**
 - Patient, caregiver and clinician journeys: sign-up, invites, daily blood pressure and tablet logging, caregiver alerts, doctor-written rules (Rule Studio), tablet counting with pharmacist refill requests, and the Health Workspace.
-- Account access: every account has a recovery key shown at sign-up. People can sign back in with it from the welcome screen (patient, caregiver, doctor or organisation). A person who lost their key can be helped back in by a joined caregiver (new key, shown once to the caregiver). One phone can switch between a person's own account and a caregiver account.
+- Account access: every account has a recovery key shown at sign-up. People can sign back in with it from the welcome screen (patient, caregiver, doctor or organisation). For accounts created after the recovery-key split, the recovery key is a separate secret from the phone's login: signing in with it gives that phone its own session (`POST /api/h/{id}/restore`, 10 tries per 10 minutes), and signing out revokes that phone's session on the server (`signout`), stops that phone's alerts and wipes its cached health data. Older accounts keep the old behaviour (their key is the login itself, so sign-out cannot be revoked on the server). A person who lost their key can be helped back in by a joined caregiver (new key, shown once to the caregiver; every existing session ends). One phone can switch between a person's own account and a caregiver account.
 - Safety: emergencies are decided by fixed code, never by the AI. The AI only rewords facts and its output is filtered. Free-text AI chat is off by default.
 - Languages: the whole app can be switched to another language (needs the model key).
 - Engineering: deployed on Cloudflare Workers with Durable Objects, rate limits, security headers, and automated tests across smoke, household, notifications/security, end-to-end, static front-end, safety and sign-up CAPTCHA suites.
@@ -173,7 +173,7 @@ The Family screen's activity list (patient only) records kind, state and HTTP co
 ## Security: what is in place, and what is not
 
 **In place (tested with fakes, not a formal audit):**
-- Tokens are stored hashed on the server; invite codes are single-use and expire; wrong invite codes are rate-limited (10 per 10 minutes).
+- Tokens and recovery keys are stored hashed on the server, and a recovery key cannot be used as a login token; tabs left open on a signed-out account reload instead of acting as it; sign-up needs an explicit tick on the privacy and consent notice; invite codes are single-use and expire; wrong invite codes are rate-limited (10 per 10 minutes).
 - Account creation, translation and sign-in attempts are rate-limited; caregivers cannot do patient-only actions; inputs are validated; CORS uses an allowlist.
 - Security headers: `Strict-Transport-Security`, `nosniff`, `no-referrer`, `X-Frame-Options: DENY`, `Permissions-Policy`, and a Content-Security-Policy (inline scripts only by SHA-256 fingerprint, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`).
 - Model output goes through a safety filter; emergency decisions are made by fixed code, not by the model. A test scans front-end files for secret-looking strings.
@@ -212,6 +212,8 @@ Use synthetic (pretend) data for demos. For a pilot, use real information only w
 | "Expired / removed" | Turn phone alerts on again on that phone. |
 | "Refused" | Turn alerts off and on; confirm the site is HTTPS; check `VAPID_SUBJECT`. |
 | "Session expired" | Sign out, then rejoin with a new invite link. |
+| Signed out, then the recovery key shows a different account | Update to this version (stale-tab fix), close old tabs, then restore again. |
+| Sign-up shows a "quick check" box | The CAPTCHA is on. Remove `TURNSTILE_SITE_KEY` from `wrangler.toml` `[vars]` or run `npx wrangler secret delete TURNSTILE_SECRET`, then redeploy. |
 | Invite says expired | Invites last 7 days. Tap **New invite**. |
 | AI says "not configured" | Set `MODEL_API_KEY` (optional feature). |
 | "Could not load the file reader" when choosing a PDF, Word file or photo | `public/vendor/` is missing from the deploy. Run `npm run vendor` with internet, then deploy again. Pasting text and the AI photo option still work meanwhile. |
