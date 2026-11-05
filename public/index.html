@@ -201,6 +201,8 @@ function saveSession(s){ try { localStorage.setItem(SKEY, JSON.stringify(s)); } 
 function staleTab(){ var c = loadSession(); if (!sess) return !!c; if (c) return !accSame(c, sess); return storedOnce; }
 function reloadIfStale(){ if (!authTrial && !holdReload && staleTab()) { try { location.replace('/'); } catch(e){ location.reload(); } return true; } return false; }
 window.addEventListener('storage', function(e){ if (e.key === SKEY || e.key === null) reloadIfStale(); });
+function rkOf(j){ var p = String(j && j.recoveryKey || '').split('.'); return p.length === 2 ? p[1] : undefined; }
+function keyOf(x){ return x.pid + '.' + (x.rk || x.token); }
 function hex2(buf){ return Array.prototype.map.call(new Uint8Array(buf), function(b){ return ('0' + b.toString(16)).slice(-2); }).join(''); }
 /* Sign-out must really end it on this phone: stop this phone getting that account's alerts, and wipe its cached health data. */
 function pushOffDevice(cur, keepBrowserSub){
@@ -221,7 +223,7 @@ function clearSession(){
   var cur = loadSession(); try { localStorage.removeItem(SKEY); } catch(e){}
   var rest = cur ? accList().filter(function(x){ return !accSame(x, cur); }) : accList();
   if (cur) accWrite(rest);
-  if (cur) { wipeCache(cur.pid); pushOffDevice(cur, rest.length > 0); }
+  if (cur) { wipeCache(cur.pid); pushOffDevice(cur, rest.length > 0); if (cur.role === 'patient' && cur.rk && cur.token) { try { fetch('/api/h/' + cur.pid + '/signout', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cur.token }, body: '{}', keepalive: true, cache: 'no-store' }).catch(function(){}); } catch(e){} } }
   storedOnce = false;
 }
 function accLabel(x){ return x.role === 'caregiver' ? 'Caregiver for ' + (x.patientName || 'someone') : x.role === 'clinician' ? 'Doctor for ' + (x.patientName || 'a patient') : x.accountType === 'provider' ? 'Organisation: ' + (x.name || 'account') : 'My own account' + (x.name ? ' (' + x.name + ')' : ''); }
@@ -340,7 +342,7 @@ function slotRows(sel, usual){ return SLOT_ROWS.map(function(r){ return '<div cl
 function readSlots(){ var slots = [], dq = {}; SLOT_ROWS.forEach(function(r){ if ($(r[2]).checked) { slots.push(r[0]); dq[r[0]] = getQty('q_' + r[0]); } }); return { slots: slots, doseQty: dq }; }
 function parseQty(t){ var W = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 }; var m = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:tablets?|pills?|capsules?)\b/i.exec(String(t || '')); if (!m) return 0; var n = isNaN(m[1]) ? W[m[1].toLowerCase()] : +m[1]; return n >= 1 && n <= 10 ? n : 0; }
 function keyScreen(next){
-  var k = sess.pid + '.' + sess.token;
+  var k = keyOf(sess);
   app.innerHTML = '<div class="top"><b>Orbit-X</b></div><h2 style="font-weight:500;font-size:20px;margin:18px 0 0">Save your recovery key</h2>' +
   '<div class="small" style="margin-top:6px;font-size:14px">This key is the only way to get back into YOUR account if you sign out or change phone. Without it, signing in again would start an empty new account. Save it now: take a screenshot, copy it into your notes, or send it to yourself.</div>' +
   '<div class="code" id="kk" style="display:block;font-size:13px;margin-top:12px;user-select:all;word-break:break-all">' + esc(k) + '</div>' +
@@ -379,7 +381,7 @@ function onboard(){
     $('st').disabled = true; $('er').textContent = '';
     api('POST', '/api/create', { name: name, slots: [], doseQty: {}, phone: '', today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'individual', captcha: CAP.on ? CAP.token : undefined }).then(function(j){
       if (!j.ok) { $('st').disabled = false; $('er').textContent = createErr(j); return; }
-      sess = { role: 'patient', pid: j.pid, token: j.token, firstRun: true, accountType: 'individual' }; saveSession(sess); keyScreen(function(){ location.href = '/?guardian=1'; });
+      sess = { role: 'patient', pid: j.pid, token: j.token, rk: rkOf(j), firstRun: true, accountType: 'individual' }; saveSession(sess); keyScreen(function(){ location.href = '/?guardian=1'; });
     });
   };
 }
@@ -396,7 +398,7 @@ function onboardPro(){
     $('st').disabled = true; $('er').textContent = '';
     api('POST', '/api/create', { name: name, org: og, slots: [], today: todayStr(), tz: tzNow(), tzName: tzName(), lang: langName() || 'English', accountType: 'provider', captcha: CAP.on ? CAP.token : undefined }).then(function(j){
       if (!j.ok) { $('st').disabled = false; $('er').textContent = createErr(j); return; }
-      sess = { role: 'patient', pid: j.pid, token: j.token, name: name, accountType: 'provider' }; saveSession(sess); keyScreen(function(){ location.href = '/developer.html'; });
+      sess = { role: 'patient', pid: j.pid, token: j.token, rk: rkOf(j), name: name, accountType: 'provider' }; saveSession(sess); keyScreen(function(){ location.href = '/developer.html'; });
     });
   };
 }
@@ -412,16 +414,28 @@ function codeScreen(kind){
     if (join) doJoin(v, function(m){ $('ok').disabled = false; $('er').textContent = m; });
     else {
       v = v.replace(/[\s"'`]+/g, ''); var p = v.split('.'); if (p.length !== 2 || !p[0] || !p[1]) { $('ok').disabled = false; $('er').textContent = 'That key does not look right. It has two parts joined by a dot. Paste it exactly as shown.'; return; }
-      var prevSess = sess; authTrial = true; sess = { role: 'patient', pid: p[0].toLowerCase(), token: p[1] };
-      hApi('state').then(function(j){
-        if (!j || !j.ok || !j.profile) { sess = prevSess; authTrial = false; $('ok').disabled = false; $('er').textContent = j && j._status === 0 ? 'No internet connection. Please try again.' : 'I could not find that account. Check the key and try again.'; return; }
-        var r = j.role, me = j.me || {};
-        if (r === 'caregiver' || r === 'clinician') sess = { role: r, pid: sess.pid, token: sess.token, id: me.id, name: me.name, patientName: j.profile.name };
-        else sess = { role: 'patient', pid: sess.pid, token: sess.token, name: j.profile.name, accountType: j.profile.accountType === 'provider' ? 'provider' : 'individual' };
-        saveSession(sess); authTrial = false; wipeCache(); /* never show another account's saved data */
-        if (r === 'clinician') { location.href = '/studio.html'; return; }
-        if (r === 'caregiver') { caregiverApp(); return; }
-        location.href = sess.accountType === 'provider' ? '/developer.html' : '/?guardian=1';
+      var prevSess = sess; authTrial = true; var secret = p[1];
+      var fail = function(j){ sess = prevSess; authTrial = false; $('ok').disabled = false; $('er').textContent = j && j._status === 0 ? 'No internet connection. Please try again.' : j && j._status === 429 ? 'Too many tries. Please wait a few minutes and try again.' : 'I could not find that account. Check the key and try again.'; };
+      var pid0 = p[0].toLowerCase();
+      var enter = function(rk, token){
+        sess = { role: 'patient', pid: pid0, token: token, rk: rk };
+        hApi('state').then(function(j){
+          if (!j || !j.ok || !j.profile) { fail(j); return; }
+          var r = j.role, me = j.me || {};
+          if (r === 'caregiver' || r === 'clinician') sess = { role: r, pid: sess.pid, token: sess.token, id: me.id, name: me.name, patientName: j.profile.name };
+          else sess = { role: 'patient', pid: sess.pid, token: sess.token, rk: rk, name: j.profile.name, accountType: j.profile.accountType === 'provider' ? 'provider' : 'individual' };
+          saveSession(sess); authTrial = false; wipeCache(); /* never show another account's saved data */
+          if (r === 'clinician') { location.href = '/studio.html'; return; }
+          if (r === 'caregiver') { caregiverApp(); return; }
+          location.href = sess.accountType === 'provider' ? '/developer.html' : '/?guardian=1';
+        });
+      };
+      /* new-style key: the server gives THIS phone its own session. Older keys (and caregiver/doctor keys) are the login token itself. */
+      sess = { role: 'patient', pid: pid0, token: '' };
+      api('POST', '/api/h/' + pid0 + '/restore', { secret: secret }).then(function(rj){
+        if (rj && rj.ok && rj.token) enter(secret, rj.token);
+        else if (rj && rj._status === 429) fail(rj);
+        else enter(undefined, secret);
       });
     }
   };
@@ -1265,9 +1279,9 @@ function showSettings(){
   };
   if ($('kn')) $('kn').onclick = function(){ hApi('apikey', { label: 'My app' }).then(function(j){ if (take(j) && j.key) { var v = $('kv'); v.style.display = 'block'; v.textContent = j.key; $('kn').style.display = 'none'; } else say('You can have up to 3 keys.'); }); };
   o.querySelectorAll('[data-kd]').forEach(function(b){ b.onclick = function(){ hApi('apikeydel', { id: b.getAttribute('data-kd') }).then(function(j){ if (take(j)) showSettings(); }); }; });
-  $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
+  $('rk').onclick = function(){ var v = $('rkv'); v.style.display = 'block'; v.textContent = keyOf(sess); };
   $('sw').onclick = showSwitch;
-  $('so').onclick = function(){ var k = sess.pid + '.' + sess.token, v = $('rkv'); v.style.display = 'block'; v.textContent = k; try { navigator.clipboard.writeText(k); } catch(e){} if (confirm('Your recovery key is shown above (and copied). Save it somewhere safe: you need it to sign back in to THIS account. Sign out now?')) { clearSession(); sess = null; st = null; welcome('Signed out. To get back in, tap the green button and enter your recovery key.'); } };
+  $('so').onclick = function(){ var k = keyOf(sess), v = $('rkv'); v.style.display = 'block'; v.textContent = k; try { navigator.clipboard.writeText(k); } catch(e){} if (confirm('Your recovery key is shown above (and copied). Save it somewhere safe: you need it to sign back in to THIS account. Sign out now?')) { clearSession(); sess = null; st = null; welcome('Signed out. To get back in, tap the green button and enter your recovery key.'); } };
   $('dl').onclick = function(){ if (confirm('Delete your account and all your data? This cannot be undone.')) hApi('delete').then(function(j){ if (j && j.ok) { clearSession(); sess = null; st = null; welcome('Your account and data were deleted.'); } }); };
 }
 
@@ -1315,7 +1329,7 @@ function cgRender(){
   var who = (st && st.profile.name) || sess.patientName || 'them';
   if (!armed && !(st && st.profile && st.profile.alertsOn)) {
     el.innerHTML = '<div class="idle"><b>You are a caregiver for ' + esc(who) + '</b><br>Step 1: tap the blue button below.<br>Step 2: tap Allow when your phone asks about notifications.<br>Then this phone gets an alert even when Orbit-X is closed.</div><button class="btn" id="arm">Arm this phone</button><div class="center"><button class="link" id="rkc">Show my recovery key</button> <button class="link" id="lv">Sign out / stop being a caregiver</button></div><div class="code" id="rkcv" style="display:none;font-size:13px"></div>';
-    $('rkc').onclick = function(){ var v = $('rkcv'); v.style.display = 'block'; v.textContent = sess.pid + '.' + sess.token; };
+    $('rkc').onclick = function(){ var v = $('rkcv'); v.style.display = 'block'; v.textContent = keyOf(sess); };
     $('arm').onclick = function(){ armed = true; beep(); keepAwake(); cgRender(); enableAlerts(function(ok, m){ alertMsg = ok ? '' : m; cgRender(); }, true); };
     $('lv').onclick = function(){ if (confirm('Sign out? You will stop getting alerts. To come back as this caregiver, use your recovery key (tap Show my recovery key first and save it).')) { clearSession(); sess = null; st = null; welcome('Signed out. To get back in, tap the green button and enter your recovery key.'); } };
     return;
