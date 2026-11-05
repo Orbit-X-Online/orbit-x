@@ -620,7 +620,7 @@ export class AlertHub {
     const m = /^Bearer ([a-z0-9]{20,64})$/.exec(hdr);
     if (!m) return null;
     const hash = await sha(m[1]);
-    if (hash === h.tokenHash) return { role: 'patient' };
+    if ((h.tokenHash && hash === h.tokenHash) || (h.sessions || []).some((x) => x.hash === hash)) return { role: 'patient', sh: hash };
     const c = h.caregivers.find((x) => x.tokenHash && x.tokenHash === hash);
     return c ? { role: c.role || 'caregiver', id: c.id } : null;
   }
@@ -972,14 +972,14 @@ export class AlertHub {
       const name = cleanName(body.name);
       if (!name) return bad(400, 'name_required');
       const slots = Array.isArray(body.slots) ? cleanSlots(body.slots) : [];
-      const token = rand(40);
-      h = { v: 1, pid: String(body.pid || ''), name, slots, doseQty: cleanDoseQty(body.doseQty), phone: cleanPhone(body.phone), createdAt: now, createdDate: validDate(body.today, now) ? body.today : new Date(now).toISOString().slice(0, 10),
+      const token = rand(40), recovery = rand(40); // the session token lives on the phone; the recovery key is a separate secret that signs in a new phone
+      h = { v: 1, pid: String(body.pid || ''), recoveryHash: await sha(recovery), sessions: [], name, slots, doseQty: cleanDoseQty(body.doseQty), phone: cleanPhone(body.phone), createdAt: now, createdDate: validDate(body.today, now) ? body.today : new Date(now).toISOString().slice(0, 10),
         tokenHash: await sha(token), caregivers: [], readings: [], doses: [], alert: null, nextCid: 1,
         accountType: body.accountType === 'provider' ? 'provider' : 'individual', org: cleanName(body.org, 60), tz: Number.isInteger(body.tz) && Math.abs(body.tz) <= 840 ? body.tz : 0, tzName: validTzName(body.tzName), tabletAlerts: true, events: [], pushStatus: {}, lang: cleanLang(body.lang) || undefined };
       await this.state.storage.put('h', h);
       await this.afterChange(h, now); // sets the first reminder alarm right away when tablet times were chosen
       await this.state.storage.put('h', h);
-      return json({ ok: true, pid: h.pid, token, accountType: h.accountType, remindersScheduled: !!h.alarmAt });
+      return json({ ok: true, pid: h.pid, token, recoveryKey: h.pid + '.' + recovery, accountType: h.accountType, remindersScheduled: !!h.alarmAt });
     }
     if (!h) return bad(404, 'not_found');
     h.rules = h.rules || []; h.rulesFired = h.rulesFired || {}; h.symptoms = h.symptoms || []; h.notices = h.notices || [];
@@ -1010,6 +1010,18 @@ export class AlertHub {
     if (action === 'briefpublic') return handleConnect({ h, storage: this.state.storage, env: this.env, who: { role: 'link' }, body, now, req, action });
     if (action === 'v1token') {
       return oauthToken({ storage: this.state.storage }, h, body, this.env, now);
+    }
+
+    if (action === 'restore') { // recovery key -> a fresh session for THIS phone. Brute-force limited.
+      this.rf = (this.rf || []).filter((t) => now - t < 600000);
+      if (this.rf.length >= 10) return json({ ok: false, error: 'too_many_attempts', retryAfterSeconds: Math.ceil((600000 - (this.rf[0] ? now - this.rf[0] : 0)) / 1000) }, 429);
+      const rh = await sha(String(body.secret || ''));
+      if (!h.recoveryHash || rh !== h.recoveryHash) { this.rf.push(now); return bad(401, 'unauthorized'); }
+      const token = rand(40);
+      h.sessions = (h.sessions || []).concat([{ hash: await sha(token), t: now }]).slice(-8);
+      this.ev(h, now, 'key', 'restored', 'patient');
+      await this.state.storage.put('h', h);
+      return json({ ok: true, pid: h.pid, token, name: h.name, accountType: h.accountType });
     }
 
     if (action === 'join') {
@@ -1160,7 +1172,8 @@ export class AlertHub {
         if (h.keyResets.length >= 2) { fail(429, 'too_many_resets'); break; }
         const by = cleanName((h.caregivers.find((c) => c.id === who.id) || {}).name, 40) || 'A caregiver';
         const pe = this.subsFor(h, (x) => x.role === 'patient'), oe = this.subsFor(h, (x) => x.role === 'caregiver' && x.id !== who.id);
-        const nt = rand(40); h.tokenHash = await sha(nt); // every phone signed in as the person is signed out on its next request
+        const nt = rand(40); // every phone signed in as the person is signed out on its next request
+        if (h.recoveryHash) { h.recoveryHash = await sha(nt); h.sessions = []; h.tokenHash = ''; } else h.tokenHash = await sha(nt);
         h.keyResets.push(now);
         const nm0 = h.name || 'The person';
         h.notices = h.notices || []; h.notices.push({ id: 'k' + now, t: now, kind: 'key_reset', text: by + ' reset ' + nm0 + '\'s recovery key because it was lost. If that was not asked for, tell your caregivers.' }); if (h.notices.length > 30) h.notices = h.notices.slice(-30);
@@ -1231,6 +1244,14 @@ export class AlertHub {
         h.pushQ[eh] = { title: 'Orbit-X', body: 'Alerts are on for this phone.', tag: 'orbit-ready', t: now };
         if (body.confirm === true) { extra.diag = (await this.deliver(h, [eh], h.pushQ[eh], now, 'ready', who.role)).map(diagView); }
         extra.eh = eh;
+        break;
+      }
+      case 'signout': { // this phone's session ends for real; the recovery key still works
+        if (!isPatient) { fail(403, 'patient_only'); break; }
+        if (h.recoveryHash && who.sh) {
+          h.sessions = (h.sessions || []).filter((x) => x.hash !== who.sh);
+          if (h.tokenHash === who.sh) h.tokenHash = '';
+        }
         break;
       }
       case 'pushoff': {
@@ -1650,7 +1671,7 @@ async function handleHousehold(req, env, url, cors) {
   const m = /^\/api\/h\/([a-z0-9]{8})\/([a-z]{2,10})$/.exec(p);
   if (m) {
     const get = req.method === 'GET' && m[2] === 'state';
-    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'docphone', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc', 'xlate', 'packread', 'proofreq', 'proofsend', 'proofget', 'proofdel', 'resetkey'].includes(m[2]);
+    const post = req.method === 'POST' && ['bp', 'dose', 'sos', 'cancel', 'answer', 'decline', 'handled', 'invite', 'reinvite', 'remove', 'profile', 'delete', 'symptom', 'draft', 'rulesave', 'ruledel', 'ruletest', 'docphone', 'insight', 'share', 'apikey', 'apikeydel', 'signal', 'pushkey', 'pushsub', 'pushoff', 'testpush', 'undose', 'ice', 'rtc', 'xlate', 'packread', 'proofreq', 'proofsend', 'proofget', 'proofdel', 'resetkey', 'restore', 'signout'].includes(m[2]);
     if (!get && !post) return json({ error: 'Not found' }, 404, cors);
     const text = post ? await req.text() : undefined;
     if (text && text.length > (m[2] === 'rtc' ? 14000 : m[2] === 'packread' ? 960000 : m[2] === 'proofsend' ? 480000 : 4000)) return json({ error: 'too_large' }, 413, cors);
